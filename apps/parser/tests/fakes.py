@@ -12,7 +12,7 @@ from finchie_parser.model import Reconciliation, Statement
 from finchie_parser.ocr import Ocr, OcrLine
 from finchie_parser.parsers import Parsed, StatementParser
 from finchie_parser.passwords import Identity
-from finchie_parser.pdf import Document, TextLine
+from finchie_parser.pdf import Document, TextLine, Word
 
 ROW_HEIGHT = 12.0
 
@@ -21,6 +21,8 @@ ROW_HEIGHT = 12.0
 class FakeDocument:
     pages: list[str]
     filename: str = "fake.pdf"
+    # Positioned words by page, for parsers that read tables by position.
+    words: dict[int, list[Word]] = field(default_factory=dict)
 
     def page_texts(self, limit: int | None = None) -> list[str]:
         return self.pages[:limit]
@@ -30,6 +32,9 @@ class FakeDocument:
         return [
             TextLine(text, baseline(n) - 1, baseline(n)) for n, text in enumerate(self.pages[page_index].splitlines())
         ]
+
+    def page_words(self, page_index: int) -> list[Word]:
+        return self.words.get(page_index, [])
 
     def render(self, page_index: int, scale: float) -> Image:
         raise AssertionError("fakes are never rendered")

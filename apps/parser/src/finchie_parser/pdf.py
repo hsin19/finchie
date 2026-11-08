@@ -31,6 +31,16 @@ class TextLine:
     bottom: float
 
 
+@dataclass(frozen=True)
+class Word:
+    """A word and where it is: tables whose columns can be empty are read by position."""
+
+    text: str
+    x0: float
+    x1: float
+    top: float
+
+
 class Document(Protocol):
     """What a bank parser may read. Tests provide fakes with synthetic text."""
 
@@ -41,6 +51,8 @@ class Document(Protocol):
         ...
 
     def page_lines(self, page_index: int) -> list[TextLine]: ...
+
+    def page_words(self, page_index: int) -> list[Word]: ...
 
     def render(self, page_index: int, scale: float) -> Image: ...
 
@@ -63,6 +75,10 @@ class PdfDocument:
     def page_lines(self, page_index: int) -> list[TextLine]:
         lines = self._plumber.pages[page_index].extract_text_lines(return_chars=False)
         return [TextLine(line["text"], line["top"], line["bottom"]) for line in lines]
+
+    def page_words(self, page_index: int) -> list[Word]:
+        words = self._plumber.pages[page_index].extract_words()
+        return [Word(w["text"], w["x0"], w["x1"], w["top"]) for w in words]
 
     def render(self, page_index: int, scale: float) -> Image:
         with _PDFIUM:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from finchie_parser.model import Kind
+from finchie_parser.model import DepositStatement, Kind, Statement
 from finchie_parser.ocr import RapidOcr
 from finchie_parser.pipeline import parse_document
 from finchie_parser.settings import Settings
@@ -26,15 +26,35 @@ pytestmark = pytest.mark.skipif(not _DIR, reason="FINCHIE_REAL_STATEMENTS_DIR is
 def test_real_statement_reconciles(path: Path) -> None:
     result = parse_document(path.read_bytes(), passwords=Settings().passwords(), ocr=_OCR)
     statement = result.statement
-    reconciliation = statement.reconciliation
+    if isinstance(statement, DepositStatement):
+        _check_deposit(path, result.parser, statement)
+    else:
+        _check_bill(path, result.parser, statement)
+    assert not result.warnings
 
+
+def _check_bill(path: Path, parser: str, statement: Statement) -> None:
+    reconciliation = statement.reconciliation
     purchases = [tx for tx in statement.transactions if tx.kind is Kind.PURCHASE]
     print(
-        f"\n{path.name}: {result.parser} closing={statement.closing_date} due={statement.due_date} "
+        f"\n{path.name}: {parser} closing={statement.closing_date} due={statement.due_date} "
         f"transactions={len(statement.transactions)} computed={reconciliation.computed} "
-        f"stated={reconciliation.stated} total_due={statement.total_due} warnings={len(result.warnings)}"
+        f"stated={reconciliation.stated} total_due={statement.total_due}"
     )
     assert reconciliation.balanced, f"{reconciliation.computed} != {reconciliation.stated}"
     assert purchases, "a statement with no purchases is suspicious"
     assert all(tx.description for tx in statement.transactions), "every transaction needs a description"
-    assert not result.warnings
+
+
+def _check_deposit(path: Path, parser: str, statement: DepositStatement) -> None:
+    # No amounts printed: deposit balances say more about the owner than a bill's totals.
+    lines = [line for account in statement.accounts for line in account.lines]
+    print(
+        f"\n{path.name}: {parser} {statement.period_start}..{statement.period_end} "
+        f"accounts={len(statement.accounts)} lines={len(lines)}"
+    )
+    for account in statement.accounts:
+        reconciliation = account.reconciliation
+        assert reconciliation is None or reconciliation.balanced, f"{account.name}: {reconciliation}"
+    assert statement.accounts, "a statement with no accounts is suspicious"
+    assert all(line.description for line in lines), "every line needs a description"

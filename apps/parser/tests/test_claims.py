@@ -19,7 +19,7 @@ IDENTITY = Identity(national_id="a123456789", birth_date=date(2000, 1, 2))
     ("sender", "subject", "parser"),
     [
         ("estatement@esunbank.com", "玉山銀行2026年09月信用卡電子帳單", "esun.credit_card"),
-        ("estatement@esunbank.com", "玉山銀行2026年09月綜合對帳單", None),
+        ("estatement@esunbank.com", "玉山銀行2026年09月綜合對帳單", "esun.deposit"),
         ("webmaster@bhurecv.taishinbank.com.tw", "台新信用卡電子帳單 2026年10月", "taishin.credit_card"),
         ("webmaster@bhurecv.taishinbank.com.tw", "台新銀行綜合對帳單 2026年9月份", None),
         ("service@pxbillrc01.cathaybk.com.tw", "國泰世華銀行信用卡2026年11月電子帳單", "cathay.credit_card"),
@@ -41,6 +41,7 @@ def by_name(name: str) -> StatementParser:
     ("parser", "passwords"),
     [
         ("esun.credit_card", []),
+        ("esun.deposit", ["A123456789"]),
         ("taishin.credit_card", ["890102", "A123456789"]),
         ("cathay.credit_card", ["A123456789"]),
         ("hsbc.credit_card", ["A123456789"]),
