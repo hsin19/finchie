@@ -19,7 +19,7 @@ export const load = (async ({ fetch, url, parent }) => {
     const { latestMonth } = await parent();
     const filters = readFilters(url.searchParams);
     const period = searchPeriod(filters, latestMonth);
-    const { kinds, institution, card, q, overseas, sort, closing } = filters;
+    const { kinds, institution, card, account, q, overseas, hideTransfers, sort, closing } = filters;
 
     const query: TransactionQuery = {
         ...(period === "all" ? {} : monthRange(period)),
@@ -27,8 +27,10 @@ export const load = (async ({ fetch, url, parent }) => {
         kind: kinds.length > 0 ? kinds : undefined,
         institution: institution || undefined,
         card: card || undefined,
+        account: account ? Number(account) : undefined,
         q: q || undefined,
         overseas: overseas || undefined,
+        hideTransfers: hideTransfers || undefined,
         sort: sort === "newest" ? undefined : sort,
         limit: PAGE_SIZE,
         offset: (filters.page - 1) * PAGE_SIZE,

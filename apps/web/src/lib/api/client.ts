@@ -7,19 +7,28 @@ import type {
 
 // Generated from apps/backend/api/openapi.yaml by `task web:generate`.
 type Schemas = components["schemas"];
+export type Account = Schemas["Account"];
+export type AccountDetail = Schemas["AccountDetail"];
+export type AccountKind = Schemas["AccountKind"];
+export type AccountLine = Schemas["AccountLine"];
+export type Balance = Schemas["Balance"];
+export type BalanceGap = Schemas["BalanceGap"];
 export type CardTotal = Schemas["CardTotal"];
 export type Document = Schemas["Document"];
 export type DocumentPreview = Schemas["DocumentPreview"];
 export type DocumentStatus = Schemas["DocumentStatus"];
 export type KindTotal = Schemas["KindTotal"];
+export type LineCounterpart = Schemas["LineCounterpart"];
 export type PreviewFile = Schemas["PreviewFile"];
 export type Statement = Schemas["Statement"];
+export type Trade = Schemas["Trade"];
 export type Transaction = Schemas["Transaction"];
 export type TransactionFamily = Schemas["TransactionFamily"];
 export type TransactionKind = Schemas["TransactionKind"];
 export type TransactionLink = Schemas["TransactionLink"];
 export type TransactionSearch = Schemas["TransactionSearch"];
 export type TransactionSort = Schemas["TransactionSort"];
+export type UnitFlow = Schemas["UnitFlow"];
 export type TransactionQuery = NonNullable<paths["/api/transactions"]["get"]["parameters"]["query"]>;
 
 /** Dependency of the layout load: invalidate it after an upload or re-parse. */
@@ -79,3 +88,6 @@ export function previewFileUrl(id: number, index: number): string {
 export function previewBodyUrl(id: number): string {
     return `/api/documents/${id}/preview/body`;
 }
+
+/** The Gmail filter that forwards statement e-mails to the mailbox, generated from the parsers (ADR 0014). */
+export const MAIL_FILTERS_URL = "/api/mail-filters.xml";

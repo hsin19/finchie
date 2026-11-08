@@ -11,6 +11,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cardBills = `-- name: CardBills :many
+SELECT id, institution, closing_date, due_date, currency, total_due
+FROM statements
+WHERE kind = 'credit_card'
+ORDER BY institution, closing_date
+`
+
+type CardBillsRow struct {
+	ID          int64
+	Institution string
+	ClosingDate pgtype.Date
+	DueDate     pgtype.Date
+	Currency    *string
+	TotalDue    pgtype.Numeric
+}
+
+func (q *Queries) CardBills(ctx context.Context) ([]CardBillsRow, error) {
+	rows, err := q.db.Query(ctx, cardBills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CardBillsRow
+	for rows.Next() {
+		var i CardBillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Institution,
+			&i.ClosingDate,
+			&i.DueDate,
+			&i.Currency,
+			&i.TotalDue,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const clearPaid = `-- name: ClearPaid :exec
+UPDATE statements SET paid_on = NULL, paid_by = NULL WHERE paid_on IS NOT NULL OR paid_by IS NOT NULL
+`
+
+func (q *Queries) ClearPaid(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearPaid)
+	return err
+}
+
 const clearParents = `-- name: ClearParents :exec
 UPDATE transactions SET parent_id = NULL WHERE parent_id IS NOT NULL
 `
@@ -20,39 +72,59 @@ func (q *Queries) ClearParents(ctx context.Context) error {
 	return err
 }
 
+const clearTransfers = `-- name: ClearTransfers :exec
+UPDATE transactions SET counterpart_id = NULL WHERE counterpart_id IS NOT NULL
+`
+
+func (q *Queries) ClearTransfers(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearTransfers)
+	return err
+}
+
 const kindTotals = `-- name: KindTotals :many
 SELECT t.kind,
        count(*)::integer AS row_count,
-       sum(t.amount)::numeric AS amount
+       sum(t.amount)::numeric AS amount,
+       sum(CASE WHEN a.kind = 'credit_card' THEN -t.amount ELSE t.amount END)::numeric AS flow
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
 WHERE ($1::date IS NULL OR t.transaction_date >= $1::date)
   AND ($2::date IS NULL OR t.transaction_date <= $2::date)
   AND ($3::date IS NULL OR s.closing_date >= $3::date)
   AND ($4::date IS NULL OR s.closing_date <= $4::date)
   AND ($5::text IS NULL OR s.institution = $5::text)
   AND ($6::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $6::text)
-  AND (NOT $7::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND ($8::text IS NULL OR strpos(lower(t.description), lower($8::text)) > 0)
+  AND ($7::bigint IS NULL OR t.account_id = $7::bigint)
+  AND (NOT $8::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
+  AND ($9::text IS NULL OR a.kind = $9::text)
+  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
+  AND (NOT $10::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+  AND ($11::text IS NULL
+       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($11::text)) > 0)
 GROUP BY t.kind
 ORDER BY t.kind
 `
 
 type KindTotalsParams struct {
-	FromDate    pgtype.Date
-	ToDate      pgtype.Date
-	ClosingFrom pgtype.Date
-	ClosingTo   pgtype.Date
-	Institution *string
-	CardLast4   *string
-	Overseas    bool
-	Query       *string
+	FromDate      pgtype.Date
+	ToDate        pgtype.Date
+	ClosingFrom   pgtype.Date
+	ClosingTo     pgtype.Date
+	Institution   *string
+	CardLast4     *string
+	AccountID     *int64
+	Overseas      bool
+	AccountKind   *string
+	HideTransfers bool
+	Query         *string
 }
 
 type KindTotalsRow struct {
 	Kind     string
 	RowCount int32
 	Amount   pgtype.Numeric
+	Flow     pgtype.Numeric
 }
 
 // The kind facet: lines as printed, whether or not they have a parent; every filter but the kind one
@@ -65,7 +137,10 @@ func (q *Queries) KindTotals(ctx context.Context, arg KindTotalsParams) ([]KindT
 		arg.ClosingTo,
 		arg.Institution,
 		arg.CardLast4,
+		arg.AccountID,
 		arg.Overseas,
+		arg.AccountKind,
+		arg.HideTransfers,
 		arg.Query,
 	)
 	if err != nil {
@@ -75,7 +150,12 @@ func (q *Queries) KindTotals(ctx context.Context, arg KindTotalsParams) ([]KindT
 	var items []KindTotalsRow
 	for rows.Next() {
 		var i KindTotalsRow
-		if err := rows.Scan(&i.Kind, &i.RowCount, &i.Amount); err != nil {
+		if err := rows.Scan(
+			&i.Kind,
+			&i.RowCount,
+			&i.Amount,
+			&i.Flow,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -154,10 +234,49 @@ func (q *Queries) LockLinks(ctx context.Context) error {
 
 const searchTransactions = `-- name: SearchTransactions :many
 
+WITH matched AS (
+    SELECT t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow
+    FROM transactions t
+    JOIN statements s ON s.id = t.statement_id
+    JOIN accounts a ON a.id = t.account_id
+    WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
+      AND ($5::date IS NULL OR t.transaction_date >= $5::date)
+      AND ($6::date IS NULL OR t.transaction_date <= $6::date)
+      AND ($7::date IS NULL OR s.closing_date >= $7::date)
+      AND ($8::date IS NULL OR s.closing_date <= $8::date)
+      AND ($9::text[] IS NULL OR t.kind = ANY ($9::text[]))
+      AND ($10::text IS NULL OR s.institution = $10::text)
+      AND ($11::text IS NULL OR t.card_last4 = $11::text)
+      AND ($12::bigint IS NULL OR t.account_id = $12::bigint)
+      AND (NOT $13::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
+      AND ($14::text IS NULL OR a.kind = $14::text)
+      -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
+      AND (NOT $15::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+      AND ($16::text IS NULL
+           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($16::text)) > 0)
+)
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
-FROM transactions t
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- A trade's money (ADR 0017).
+       tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
+       tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
+FROM matched m
+JOIN transactions t ON t.id = m.id
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN trades tr ON tr.transaction_id = t.id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
@@ -170,65 +289,90 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE $1::boolean AND c.parent_id = t.id) kids ON true
-WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
-  AND ($2::date IS NULL OR t.transaction_date >= $2::date)
-  AND ($3::date IS NULL OR t.transaction_date <= $3::date)
-  AND ($4::date IS NULL OR s.closing_date >= $4::date)
-  AND ($5::date IS NULL OR s.closing_date <= $5::date)
-  AND ($6::text[] IS NULL OR t.kind = ANY ($6::text[]))
-  AND ($7::text IS NULL OR s.institution = $7::text)
-  AND ($8::text IS NULL OR t.card_last4 = $8::text)
-  AND (NOT $9::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND ($10::text IS NULL OR strpos(lower(t.description), lower($10::text)) > 0)
-ORDER BY CASE WHEN $11::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
-         CASE WHEN $11::text = 'smallest' THEN abs(t.amount + coalesce(kids.amount, 0)) END ASC NULLS LAST,
-         CASE WHEN $11::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
+WHERE NOT (m.counterpart_id IS NOT NULL AND NOT m.outflow AND m.counterpart_id IN (SELECT id FROM matched))
+ORDER BY CASE WHEN $2::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
+         CASE WHEN $2::text = 'smallest' THEN abs(t.amount + coalesce(kids.amount, 0)) END ASC NULLS LAST,
+         CASE WHEN $2::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
          t.transaction_date DESC, t.statement_id DESC, t.line_no
-LIMIT $13 OFFSET $12
+LIMIT $4 OFFSET $3
 `
 
 type SearchTransactionsParams struct {
-	Fold        bool
-	FromDate    pgtype.Date
-	ToDate      pgtype.Date
-	ClosingFrom pgtype.Date
-	ClosingTo   pgtype.Date
-	Kinds       []string
-	Institution *string
-	CardLast4   *string
-	Overseas    bool
-	Query       *string
-	Sort        string
-	RowOffset   int32
-	RowLimit    int32
+	Fold          bool
+	Sort          string
+	RowOffset     int32
+	RowLimit      int32
+	FromDate      pgtype.Date
+	ToDate        pgtype.Date
+	ClosingFrom   pgtype.Date
+	ClosingTo     pgtype.Date
+	Kinds         []string
+	Institution   *string
+	CardLast4     *string
+	AccountID     *int64
+	Overseas      bool
+	AccountKind   *string
+	HideTransfers bool
+	Query         *string
 }
 
 type SearchTransactionsRow struct {
-	ID               int64
-	StatementID      int64
-	Institution      string
-	TransactionDate  pgtype.Date
-	PostingDate      pgtype.Date
-	Description      string
-	Kind             string
-	Amount           pgtype.Numeric
-	OriginalAmount   pgtype.Numeric
-	OriginalCurrency *string
-	Country          *string
-	CardLast4        *string
-	ParentID         *int64
-	Parent           []byte
-	Children         []byte
+	ID                       int64
+	StatementID              int64
+	Institution              string
+	TransactionDate          pgtype.Date
+	PostingDate              pgtype.Date
+	Description              string
+	Kind                     string
+	Amount                   pgtype.Numeric
+	OriginalAmount           pgtype.Numeric
+	OriginalCurrency         *string
+	Country                  *string
+	CardLast4                *string
+	ParentID                 *int64
+	Parent                   []byte
+	Children                 []byte
+	AccountKind              string
+	AccountID                int64
+	AccountName              *string
+	AccountNumber            string
+	Unit                     string
+	Memo                     *string
+	Counterparty             *string
+	Balance                  pgtype.Numeric
+	Flow                     pgtype.Numeric
+	TradeCategory            *string
+	TradePrice               pgtype.Numeric
+	TradeAmount              pgtype.Numeric
+	TradeFee                 pgtype.Numeric
+	TradeTax                 pgtype.Numeric
+	TradeNet                 pgtype.Numeric
+	TradePrepaid             pgtype.Numeric
+	CounterpartID            *int64
+	CounterpartStatementID   *int64
+	CounterpartDate          pgtype.Date
+	CounterpartAccountID     *int64
+	CounterpartAccountKind   *string
+	CounterpartInstitution   *string
+	CounterpartAccountName   *string
+	CounterpartAccountNumber *string
+	CounterpartFullNumber    *string
 }
 
 // Search filters: a NULL argument means "no filter". SearchTransactions and TransactionTotals must
 // apply the same ones. With @fold, a line with a parent (a linked fee or refund) is not a row of its
 // own: it is one of its parent's children, and the parent's amounts count it (ADR 0009).
+// A link (ADR 0016) is one row too: the line its money went to (another account's inflow, a card bill's
+// payment line) is listed under the outflow it came from whenever that outflow matches as well. A view
+// without the outflow, such as another account or the month before, lists the line itself.
 // Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
 // big payment counts as large. Ties go newest first, then in statement line order.
 func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactionsParams) ([]SearchTransactionsRow, error) {
 	rows, err := q.db.Query(ctx, searchTransactions,
 		arg.Fold,
+		arg.Sort,
+		arg.RowOffset,
+		arg.RowLimit,
 		arg.FromDate,
 		arg.ToDate,
 		arg.ClosingFrom,
@@ -236,11 +380,11 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 		arg.Kinds,
 		arg.Institution,
 		arg.CardLast4,
+		arg.AccountID,
 		arg.Overseas,
+		arg.AccountKind,
+		arg.HideTransfers,
 		arg.Query,
-		arg.Sort,
-		arg.RowOffset,
-		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -265,6 +409,31 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 			&i.ParentID,
 			&i.Parent,
 			&i.Children,
+			&i.AccountKind,
+			&i.AccountID,
+			&i.AccountName,
+			&i.AccountNumber,
+			&i.Unit,
+			&i.Memo,
+			&i.Counterparty,
+			&i.Balance,
+			&i.Flow,
+			&i.TradeCategory,
+			&i.TradePrice,
+			&i.TradeAmount,
+			&i.TradeFee,
+			&i.TradeTax,
+			&i.TradeNet,
+			&i.TradePrepaid,
+			&i.CounterpartID,
+			&i.CounterpartStatementID,
+			&i.CounterpartDate,
+			&i.CounterpartAccountID,
+			&i.CounterpartAccountKind,
+			&i.CounterpartInstitution,
+			&i.CounterpartAccountName,
+			&i.CounterpartAccountNumber,
+			&i.CounterpartFullNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -274,6 +443,41 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 		return nil, err
 	}
 	return items, nil
+}
+
+const setCounterparts = `-- name: SetCounterparts :exec
+UPDATE transactions t SET counterpart_id = l.counterpart_id
+FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS counterpart_id) l
+WHERE t.id = l.id
+`
+
+type SetCounterpartsParams struct {
+	Ids            []int64
+	CounterpartIds []int64
+}
+
+func (q *Queries) SetCounterparts(ctx context.Context, arg SetCounterpartsParams) error {
+	_, err := q.db.Exec(ctx, setCounterparts, arg.Ids, arg.CounterpartIds)
+	return err
+}
+
+const setPaid = `-- name: SetPaid :exec
+UPDATE statements s SET paid_on = p.paid_on, paid_by = NULLIF(p.paid_by, 0)
+FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::date[]) AS paid_on,
+             unnest($3::bigint[]) AS paid_by) p
+WHERE s.id = p.id
+`
+
+type SetPaidParams struct {
+	Ids    []int64
+	PaidOn []pgtype.Date
+	PaidBy []int64
+}
+
+// paid_by 0 is none: a bill that owes nothing is paid by no line.
+func (q *Queries) SetPaid(ctx context.Context, arg SetPaidParams) error {
+	_, err := q.db.Exec(ctx, setPaid, arg.Ids, arg.PaidOn, arg.PaidBy)
+	return err
 }
 
 const setParents = `-- name: SetParents :exec
@@ -294,15 +498,33 @@ func (q *Queries) SetParents(ctx context.Context, arg SetParentsParams) error {
 
 const transactionFamily = `-- name: TransactionFamily :many
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- A trade's money (ADR 0017).
+       tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
+       tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN trades tr ON tr.transaction_id = t.id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
+LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
+                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
                                                        'transactionDate', c.transaction_date, 'amount', c.amount::text,
                                              'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
@@ -315,21 +537,46 @@ ORDER BY t.transaction_date, t.id
 `
 
 type TransactionFamilyRow struct {
-	ID               int64
-	StatementID      int64
-	Institution      string
-	TransactionDate  pgtype.Date
-	PostingDate      pgtype.Date
-	Description      string
-	Kind             string
-	Amount           pgtype.Numeric
-	OriginalAmount   pgtype.Numeric
-	OriginalCurrency *string
-	Country          *string
-	CardLast4        *string
-	ParentID         *int64
-	Parent           []byte
-	Children         []byte
+	ID                       int64
+	StatementID              int64
+	Institution              string
+	TransactionDate          pgtype.Date
+	PostingDate              pgtype.Date
+	Description              string
+	Kind                     string
+	Amount                   pgtype.Numeric
+	OriginalAmount           pgtype.Numeric
+	OriginalCurrency         *string
+	Country                  *string
+	CardLast4                *string
+	ParentID                 *int64
+	Parent                   []byte
+	Children                 []byte
+	AccountKind              string
+	AccountID                int64
+	AccountName              *string
+	AccountNumber            string
+	Unit                     string
+	Memo                     *string
+	Counterparty             *string
+	Balance                  pgtype.Numeric
+	Flow                     pgtype.Numeric
+	TradeCategory            *string
+	TradePrice               pgtype.Numeric
+	TradeAmount              pgtype.Numeric
+	TradeFee                 pgtype.Numeric
+	TradeTax                 pgtype.Numeric
+	TradeNet                 pgtype.Numeric
+	TradePrepaid             pgtype.Numeric
+	CounterpartID            *int64
+	CounterpartStatementID   *int64
+	CounterpartDate          pgtype.Date
+	CounterpartAccountID     *int64
+	CounterpartAccountKind   *string
+	CounterpartInstitution   *string
+	CounterpartAccountName   *string
+	CounterpartAccountNumber *string
+	CounterpartFullNumber    *string
 }
 
 // A line with its parent and its children, whichever statements they are on; the same columns as
@@ -359,6 +606,31 @@ func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]Transactio
 			&i.ParentID,
 			&i.Parent,
 			&i.Children,
+			&i.AccountKind,
+			&i.AccountID,
+			&i.AccountName,
+			&i.AccountNumber,
+			&i.Unit,
+			&i.Memo,
+			&i.Counterparty,
+			&i.Balance,
+			&i.Flow,
+			&i.TradeCategory,
+			&i.TradePrice,
+			&i.TradeAmount,
+			&i.TradeFee,
+			&i.TradeTax,
+			&i.TradeNet,
+			&i.TradePrepaid,
+			&i.CounterpartID,
+			&i.CounterpartStatementID,
+			&i.CounterpartDate,
+			&i.CounterpartAccountID,
+			&i.CounterpartAccountKind,
+			&i.CounterpartInstitution,
+			&i.CounterpartAccountName,
+			&i.CounterpartAccountNumber,
+			&i.CounterpartFullNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -371,68 +643,112 @@ func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]Transactio
 }
 
 const transactionTotals = `-- name: TransactionTotals :many
-SELECT t.kind,
-       s.institution,
-       t.card_last4,
-       ($1::text[] IS NULL OR t.kind = ANY ($1::text[]))::boolean AS kind_match,
-       (($2::text IS NULL OR s.institution = $2::text)
-           -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
-           AND ($3::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $3::text))::boolean AS card_match,
+WITH lines AS (
+    SELECT t.kind, a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+           coalesce(a.full_number, a.number) AS account_number, s.institution, t.card_last4, t.unit,
+           t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow,
+           ($1::text[] IS NULL OR t.kind = ANY ($1::text[])) AS kind_match,
+           (($2::text IS NULL OR s.institution = $2::text)
+               -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
+               AND ($3::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $3::text)
+               AND ($4::bigint IS NULL OR t.account_id = $4::bigint)) AS pick_match,
+           t.amount + coalesce(kids.amount, 0) AS amount,
+           CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS flow,
+           (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer,
+           -- Shares, not money: a trade is neither spent nor received (ADR 0017).
+           a.kind = 'securities' AS shares
+    FROM transactions t
+    JOIN statements s ON s.id = t.statement_id
+    JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
+                       FROM transactions c
+                       WHERE $5::boolean AND c.parent_id = t.id) kids ON true
+    WHERE NOT ($5::boolean AND t.parent_id IS NOT NULL)
+      AND ($6::date IS NULL OR t.transaction_date >= $6::date)
+      AND ($7::date IS NULL OR t.transaction_date <= $7::date)
+      AND ($8::date IS NULL OR s.closing_date >= $8::date)
+      AND ($9::date IS NULL OR s.closing_date <= $9::date)
+      AND (NOT $10::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
+      AND ($11::text IS NULL OR a.kind = $11::text)
+      AND (NOT $12::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+      AND ($13::text IS NULL
+           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($13::text)) > 0)
+),
+marked AS (
+    SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
+           l.kind_match, l.pick_match, l.amount, l.flow, l.transfer, l.shares,
+           (l.counterpart_id IS NOT NULL AND NOT l.outflow
+               AND EXISTS (SELECT 1 FROM lines o WHERE o.id = l.counterpart_id AND o.kind_match AND o.pick_match)) AS folded
+    FROM lines l
+)
+SELECT kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit,
+       kind_match::boolean AS kind_match, pick_match::boolean AS pick_match, folded::boolean AS folded,
        count(*)::integer AS row_count,
-       sum(t.amount + coalesce(kids.amount, 0))::numeric AS amount
-FROM transactions t
-JOIN statements s ON s.id = t.statement_id
-LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
-                   FROM transactions c
-                   WHERE $4::boolean AND c.parent_id = t.id) kids ON true
-WHERE NOT ($4::boolean AND t.parent_id IS NOT NULL)
-  AND ($5::date IS NULL OR t.transaction_date >= $5::date)
-  AND ($6::date IS NULL OR t.transaction_date <= $6::date)
-  AND ($7::date IS NULL OR s.closing_date >= $7::date)
-  AND ($8::date IS NULL OR s.closing_date <= $8::date)
-  AND (NOT $9::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND ($10::text IS NULL OR strpos(lower(t.description), lower($10::text)) > 0)
-GROUP BY t.kind, s.institution, t.card_last4
-ORDER BY t.kind, s.institution, t.card_last4
+       sum(amount)::numeric AS amount,
+       coalesce(sum(flow) FILTER (WHERE flow < 0 AND NOT transfer AND NOT shares), 0)::numeric AS spent,
+       coalesce(sum(flow) FILTER (WHERE flow > 0 AND NOT transfer AND NOT shares), 0)::numeric AS received,
+       count(*) FILTER (WHERE transfer AND NOT shares)::integer AS moved_count,
+       coalesce(sum(abs(flow)) FILTER (WHERE transfer AND NOT shares), 0)::numeric AS moved
+FROM marked
+GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, kind_match, pick_match, folded
+ORDER BY kind, institution, card_last4, account_id, unit
 `
 
 type TransactionTotalsParams struct {
-	Kinds       []string
-	Institution *string
-	CardLast4   *string
-	Fold        bool
-	FromDate    pgtype.Date
-	ToDate      pgtype.Date
-	ClosingFrom pgtype.Date
-	ClosingTo   pgtype.Date
-	Overseas    bool
-	Query       *string
+	Kinds         []string
+	Institution   *string
+	CardLast4     *string
+	AccountID     *int64
+	Fold          bool
+	FromDate      pgtype.Date
+	ToDate        pgtype.Date
+	ClosingFrom   pgtype.Date
+	ClosingTo     pgtype.Date
+	Overseas      bool
+	AccountKind   *string
+	HideTransfers bool
+	Query         *string
 }
 
 type TransactionTotalsRow struct {
-	Kind        string
-	Institution string
-	CardLast4   *string
-	KindMatch   bool
-	CardMatch   bool
-	RowCount    int32
-	Amount      pgtype.Numeric
+	Kind          string
+	AccountKind   string
+	AccountID     int64
+	AccountName   *string
+	AccountNumber string
+	Institution   string
+	CardLast4     *string
+	Unit          string
+	KindMatch     bool
+	PickMatch     bool
+	Folded        bool
+	RowCount      int32
+	Amount        pgtype.Numeric
+	Spent         pgtype.Numeric
+	Received      pgtype.Numeric
+	MovedCount    int32
+	Moved         pgtype.Numeric
 }
 
-// The rows SearchTransactions lists, one group per (kind, card) with flags for whether the group
-// passes the kind and card filters, so the caller can build the full total and the card facet from a
-// single scan. Amounts are net of children.
+// The rows SearchTransactions lists, one group per kind, account, card, and unit, with flags for whether
+// the group passes the kind filter and the account picker's (bank, card, account), and whether its
+// lines are folded under the outflows they came from; so the caller can build the totals and the
+// account facets from a single scan. Amounts are net of children; spent and received are seen from the
+// owner and leave out transfers and card payments, whose money only moved (ADR 0016).
 func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsParams) ([]TransactionTotalsRow, error) {
 	rows, err := q.db.Query(ctx, transactionTotals,
 		arg.Kinds,
 		arg.Institution,
 		arg.CardLast4,
+		arg.AccountID,
 		arg.Fold,
 		arg.FromDate,
 		arg.ToDate,
 		arg.ClosingFrom,
 		arg.ClosingTo,
 		arg.Overseas,
+		arg.AccountKind,
+		arg.HideTransfers,
 		arg.Query,
 	)
 	if err != nil {
@@ -444,12 +760,82 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 		var i TransactionTotalsRow
 		if err := rows.Scan(
 			&i.Kind,
+			&i.AccountKind,
+			&i.AccountID,
+			&i.AccountName,
+			&i.AccountNumber,
 			&i.Institution,
 			&i.CardLast4,
+			&i.Unit,
 			&i.KindMatch,
-			&i.CardMatch,
+			&i.PickMatch,
+			&i.Folded,
 			&i.RowCount,
 			&i.Amount,
+			&i.Spent,
+			&i.Received,
+			&i.MovedCount,
+			&i.Moved,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const transferLines = `-- name: TransferLines :many
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
+       t.transaction_date, t.kind, t.amount, t.unit, t.memo, t.counterparty
+FROM transactions t
+JOIN accounts a ON a.id = t.account_id
+WHERE a.kind = 'deposit' OR t.kind = 'payment'
+ORDER BY t.id
+`
+
+type TransferLinesRow struct {
+	ID              int64
+	AccountID       int64
+	AccountKind     string
+	Institution     string
+	Number          string
+	FullNumber      *string
+	StatementID     int64
+	TransactionDate pgtype.Date
+	Kind            string
+	Amount          pgtype.Numeric
+	Unit            string
+	Memo            *string
+	Counterparty    *string
+}
+
+// The lines a transfer link can join (ADR 0016): every deposit account's lines, and card payment lines.
+func (q *Queries) TransferLines(ctx context.Context) ([]TransferLinesRow, error) {
+	rows, err := q.db.Query(ctx, transferLines)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TransferLinesRow
+	for rows.Next() {
+		var i TransferLinesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.AccountKind,
+			&i.Institution,
+			&i.Number,
+			&i.FullNumber,
+			&i.StatementID,
+			&i.TransactionDate,
+			&i.Kind,
+			&i.Amount,
+			&i.Unit,
+			&i.Memo,
+			&i.Counterparty,
 		); err != nil {
 			return nil, err
 		}

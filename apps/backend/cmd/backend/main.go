@@ -29,6 +29,8 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/db"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/quotes"
+	"github.com/hsin19/finchie/apps/backend/internal/rates"
 	"github.com/hsin19/finchie/apps/backend/internal/telemetry"
 	"github.com/hsin19/finchie/apps/backend/internal/web"
 )
@@ -98,6 +100,9 @@ func run() error {
 	if err := telemetry.ObserveDocuments(pool, otel.Meter(telemetry.Scope)); err != nil {
 		return err
 	}
+	if err := telemetry.ObserveAccountGaps(pool, otel.Meter(telemetry.Scope)); err != nil {
+		return err
+	}
 
 	// The parser is internal and stateless (ADR 0002): plaintext on the private network. A request
 	// carries a whole document; an opened one comes back no larger (ADR 0012).
@@ -117,10 +122,13 @@ func run() error {
 	workers := river.NewWorkers()
 	parser := parserv1.NewParserServiceClient(conn)
 	river.AddWorker(workers, ingest.NewWorker(pool, parser, cfg.ParseTimeout))
+	river.AddWorker(workers, rates.NewWorker(pool, &http.Client{Timeout: 30 * time.Second}, rates.Feeds))
+	river.AddWorker(workers, quotes.NewWorker(pool, &http.Client{Timeout: 2 * time.Minute}, quotes.Feeds))
 	jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
-		Workers: workers,
-		Logger:  logger,
+		Queues:       map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
+		Workers:      workers,
+		PeriodicJobs: []*river.PeriodicJob{rates.Periodic(), quotes.Periodic()},
+		Logger:       logger,
 		// Without it, the signal that cancels the context passed to Start cancels running jobs too.
 		SoftStopTimeout: jobStopTimeout,
 		// The parse job's span links back to the upload that enqueued it, and is named after the job.
@@ -152,7 +160,7 @@ func run() error {
 		}
 		return c.String(http.StatusOK, "ok")
 	})
-	api.Register(e, api.NewServer(pool, jobs, parser, cfg.MaxUploadBytes()))
+	api.Register(e, api.NewServer(pool, jobs, parser, cfg.MaxUploadBytes(), cfg.MailboxAddress))
 	web.Register(e)
 
 	slog.Info("listening", "addr", cfg.HTTPAddr, "parser", cfg.ParserAddr)

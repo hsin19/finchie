@@ -98,7 +98,7 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
     />
     <button type="button" class="control" disabled={!newer} onclick={() => openMonth(newer)}><span class="text-accent">[n]</span> next</button>
     <span class="text-[12px] text-mute">這個月結帳的帳單</span>
-    <a href={resolve("/statements?all")} class="ml-auto text-[12px] text-dim hover:text-ink"><span class="text-accent">[a]</span> 全部帳單 →</a>
+    <a href={resolve("/statements?all")} class="ml-auto text-[12px] text-dim hover:text-ink"><span class="text-accent">[l]</span> 全部帳單 →</a>
 </div>
 
 <div class="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
@@ -185,7 +185,7 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
                     {institution(statement.institution).name} <span class="text-mute">{shortDate(statement.closingDate).replace("-", "/")} 結帳</span>
                 </span>
                 <span class="text-[12px] text-mute">
-                    {statement.transactionCount} 筆 · {reconciliation(statement)} · {shortDate(statement.dueDate).replace("-", "/")} 到期 {formatAmount(statement.totalDue)}
+                    {statement.transactionCount} 筆 · {reconciliation(statement)} · {shortDate(statement.dueDate).replace("-", "/")} 到期 {formatAmount(statement.totalDue)}{statement.paidOn ? ` · 已繳 ${shortDate(statement.paidOn).replace("-", "/")}` : ""}
                 </span>
             </a>
         {:else}

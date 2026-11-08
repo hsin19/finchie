@@ -4,10 +4,18 @@ from email.message import EmailMessage
 
 import pikepdf
 import pytest
-from pdfs import PNG, blank_pdf, email_with, statement_email, text_pdf
+from fakes import FakeParser
+from pdfs import PNG, blank_pdf, email_with, gmail_forward, statement_email, text_pdf
 
-from finchie_parser.errors import InvalidDocumentError, UnsupportedDocumentError
-from finchie_parser.reading import File, open_document
+from finchie_parser.errors import InvalidDocumentError
+from finchie_parser.passwords import Passwords
+from finchie_parser.reading import File, OpenedDocument, open_document
+
+
+def opened(content: bytes, rule: list[str] | None = None) -> OpenedDocument:
+    """Opened as FakeParser, which claims bank.example's e-mails, would with `rule` as its passwords."""
+    parser = FakeParser(lambda _: rule or [])
+    return open_document(content, passwords=Passwords(), parsers=[parser])
 
 
 def opens_without_password(data: bytes) -> bool:
@@ -19,10 +27,9 @@ def opens_without_password(data: bytes) -> bool:
 
 
 def test_email_shows_headers_html_body_with_inline_images_and_its_attachments() -> None:
-    opened = open_document("mail.eml", "message/rfc822", statement_email(blank_pdf("secret")), passwords=["secret"])
+    document = opened(statement_email(blank_pdf("secret")), ["secret"])
 
-    mail = opened.email
-    assert mail is not None
+    mail = document.email
     assert mail.sender == "範例銀行 <statements@bank.example>"
     assert mail.recipient == "someone@example.com"
     assert mail.subject == "範例銀行 2026年11月 信用卡電子帳單"
@@ -32,19 +39,34 @@ def test_email_shows_headers_html_body_with_inline_images_and_its_attachments() 
     assert "data:image/png;base64," in mail.html
     assert mail.text == ""
 
-    assert [(f.filename, f.content_type, f.locked) for f in opened.files] == [
+    assert [(f.filename, f.content_type, f.locked) for f in document.files] == [
         ("帳單_11511.pdf", "application/pdf", False),
         ("slip.html", "text/html", False),
     ]
-    assert opens_without_password(opened.files[0].data)
-    assert opened.files[1].data == b"<html>slip</html>"
+    assert opens_without_password(document.files[0].data)
+    assert document.files[1].data == b"<html>slip</html>"
 
 
-def test_pdf_no_configured_password_opens_comes_back_locked_as_received() -> None:
+def test_a_pdf_none_of_the_claiming_parsers_passwords_opens_comes_back_locked_as_received() -> None:
     pdf = blank_pdf("secret")
-    opened = open_document("mail.eml", "message/rfc822", statement_email(pdf), passwords=["wrong"])
-    assert opened.files[0].locked
-    assert opened.files[0].data == pdf
+    document = opened(statement_email(pdf), ["wrong"])
+    assert document.files[0].locked
+    assert document.files[0].data == pdf
+
+
+def test_a_pdf_in_an_email_no_parser_claims_is_opened_only_without_a_password() -> None:
+    content = statement_email(blank_pdf("secret"), sender="statements@elsewhere.example")
+    assert opened(content, ["secret"]).files[0].locked
+    assert not opened(statement_email(blank_pdf(), sender="statements@elsewhere.example")).files[0].locked
+
+
+def test_a_forwarded_email_shows_the_banks_headers_and_opens_with_its_parsers_passwords() -> None:
+    document = opened(gmail_forward(statement_email(blank_pdf("secret"))), ["secret"])
+    assert document.email.sender == "範例銀行 <statements@bank.example>"
+    assert document.email.subject == "範例銀行 2026年11月 信用卡電子帳單"
+    assert [(f.filename, f.locked) for f in document.files if f.content_type == "application/pdf"] == [
+        ("帳單_11511.pdf", False)
+    ]
 
 
 def test_plain_text_email_has_a_text_body() -> None:
@@ -52,74 +74,56 @@ def test_plain_text_email_has_a_text_body() -> None:
     message["From"] = "statements@bank.example"
     message["Subject"] = "Statement"
     message.set_content("Your statement is attached.")
-    opened = open_document("mail.eml", "message/rfc822", message.as_bytes(), passwords=[])
-    assert opened.email is not None
-    assert opened.email.text.strip() == "Your statement is attached."
-    assert opened.email.html == ""
-    assert opened.email.date is None
-    assert opened.files == []
-
-
-def test_bare_pdf_is_its_one_file_decrypted() -> None:
-    opened = open_document("statement.pdf", "application/pdf", blank_pdf("secret"), passwords=["secret"])
-    assert opened.email is None
-    assert [(f.filename, f.content_type, f.locked) for f in opened.files] == [
-        ("statement.pdf", "application/pdf", False)
-    ]
-    assert opens_without_password(opened.files[0].data)
+    document = opened(message.as_bytes())
+    assert document.email.text.strip() == "Your statement is attached."
+    assert document.email.html == ""
+    assert document.email.date is None
+    assert document.files == []
 
 
 def test_corrupt_pdf_is_shown_as_it_arrived() -> None:
-    opened = open_document("broken.pdf", "application/pdf", b"%PDF-1.7 truncated", passwords=[])
-    assert opened.files[0].data == b"%PDF-1.7 truncated"
-    assert not opened.files[0].locked
+    document = opened(email_with(("broken.pdf", "application/pdf", b"%PDF-1.7 truncated")))
+    assert document.files[0].data == b"%PDF-1.7 truncated"
+    assert not document.files[0].locked
 
 
-def test_empty_document_is_invalid() -> None:
+@pytest.mark.parametrize("content", [b"", blank_pdf(), PNG], ids=["empty", "bare-pdf", "other-bytes"])
+def test_anything_but_an_email_is_invalid(content: bytes) -> None:
     with pytest.raises(InvalidDocumentError):
-        open_document("a.eml", "message/rfc822", b"", passwords=[])
-
-
-def test_other_files_are_unsupported() -> None:
-    with pytest.raises(UnsupportedDocumentError):
-        open_document("a.png", "image/png", PNG, passwords=[])
+        opened(content)
 
 
 def primary(files: list[File]) -> list[str]:
     return [f.filename for f in files if f.primary]
 
 
-# HSBC's marker is ASCII, so its statements can be drawn with a standard PDF font.
-HSBC_STATEMENT = text_pdf("HSBC Credit Card")
-HSBC_SLIP = text_pdf("HSBC payment slip")
+STATEMENT = text_pdf("FAKE BANK credit card statement")
+SLIP = text_pdf("FAKE BANK payment slip")
 
 
 def mail(*attachments: tuple[str, bytes]) -> list[File]:
-    content = email_with(*((name, "application/pdf", data) for name, data in attachments))
-    return open_document("mail.eml", "message/rfc822", content, passwords=[]).files
+    return opened(email_with(*((name, "application/pdf", data) for name, data in attachments))).files
 
 
 def test_the_statement_a_parser_knows_by_name_is_primary_even_after_other_pdfs() -> None:
-    assert primary(mail(("PaymentSlip.pdf", HSBC_SLIP), ("eStatement_202610.pdf", HSBC_STATEMENT))) == [
-        "eStatement_202610.pdf"
-    ]
+    assert primary(mail(("PaymentSlip.pdf", SLIP), ("FAKE_202610.pdf", STATEMENT))) == ["FAKE_202610.pdf"]
 
 
 def test_a_pdf_named_like_a_statement_without_its_bank_in_the_text_is_not_primary() -> None:
-    assert primary(mail(("other.pdf", HSBC_STATEMENT), ("eStatement_202610.pdf", blank_pdf()))) == ["other.pdf"]
+    assert primary(mail(("other.pdf", STATEMENT), ("FAKE_202610.pdf", blank_pdf()))) == ["other.pdf"]
 
 
 def test_a_statement_recognized_by_its_text_is_primary() -> None:
-    assert primary(mail(("notice.pdf", blank_pdf()), ("statement.pdf", HSBC_STATEMENT))) == ["statement.pdf"]
+    assert primary(mail(("notice.pdf", blank_pdf()), ("statement.pdf", STATEMENT))) == ["statement.pdf"]
 
 
 def test_a_locked_pdf_does_not_hide_the_statement_after_it() -> None:
-    assert primary(mail(("notice.pdf", blank_pdf("secret")), ("statement.pdf", HSBC_STATEMENT))) == ["statement.pdf"]
+    assert primary(mail(("notice.pdf", blank_pdf("secret")), ("statement.pdf", STATEMENT))) == ["statement.pdf"]
 
 
 def test_a_locked_statement_by_name_is_primary_so_the_viewer_asks_for_its_password() -> None:
-    files = mail(("PaymentSlip.pdf", HSBC_SLIP), ("eStatement_202610.pdf", text_pdf("HSBC", user_password="secret")))
-    assert [(f.filename, f.locked) for f in files if f.primary] == [("eStatement_202610.pdf", True)]
+    files = mail(("PaymentSlip.pdf", SLIP), ("FAKE_202610.pdf", text_pdf("FAKE BANK", user_password="secret")))
+    assert [(f.filename, f.locked) for f in files if f.primary] == [("FAKE_202610.pdf", True)]
 
 
 def test_without_a_known_name_the_first_pdf_is_primary() -> None:
@@ -127,20 +131,18 @@ def test_without_a_known_name_the_first_pdf_is_primary() -> None:
     content = email_with(
         ("notice.html", "text/html", b"<p>hi</p>"), ("a.pdf", "application/pdf", pdf), ("b.pdf", "application/pdf", pdf)
     )
-    assert primary(open_document("mail.eml", "message/rfc822", content, passwords=[]).files) == ["a.pdf"]
-    assert primary(open_document("x.pdf", "application/pdf", pdf, passwords=[]).files) == ["x.pdf"]
+    assert primary(opened(content).files) == ["a.pdf"]
 
 
 def test_an_email_without_pdfs_has_no_primary() -> None:
-    content = email_with(("notice.html", "text/html", b"<p>hi</p>"))
-    assert primary(open_document("mail.eml", "message/rfc822", content, passwords=[]).files) == []
+    assert primary(opened(email_with(("notice.html", "text/html", b"<p>hi</p>"))).files) == []
 
 
 def test_bytes_declared_as_pdf_that_are_not_one_are_neither_called_pdf_nor_primary() -> None:
     content = email_with(
         ("statement.pdf", "application/pdf", b"<html>not a pdf</html>"), ("b.pdf", "application/pdf", blank_pdf())
     )
-    files = open_document("mail.eml", "message/rfc822", content, passwords=[]).files
+    files = opened(content).files
     assert [(f.filename, f.content_type, f.primary) for f in files] == [
         ("statement.pdf", "application/octet-stream", False),
         ("b.pdf", "application/pdf", True),
@@ -154,11 +156,10 @@ def test_a_text_part_with_a_file_name_is_an_attachment_even_marked_inline() -> N
     message.add_attachment(
         b"<p>statement</p>", maintype="text", subtype="html", filename="statement.html", disposition="inline"
     )
-    opened = open_document("mail.eml", "message/rfc822", message.as_bytes(), passwords=[])
-    assert opened.email is not None
-    assert opened.email.text.strip() == "Your statement is attached."
-    assert opened.email.html == ""
-    assert [(f.filename, f.content_type, f.data) for f in opened.files] == [
+    document = opened(message.as_bytes())
+    assert document.email.text.strip() == "Your statement is attached."
+    assert document.email.html == ""
+    assert [(f.filename, f.content_type, f.data) for f in document.files] == [
         ("statement.html", "text/html", b"<p>statement</p>")
     ]
 
@@ -177,11 +178,10 @@ def test_only_images_are_inlined_and_a_pdf_the_html_links_by_content_id_stays_a_
         blank_pdf(), maintype="application", subtype="pdf", cid="<statement@bank.example>", filename="statement.pdf"
     )
 
-    opened = open_document("mail.eml", "message/rfc822", message.as_bytes(), passwords=[])
+    document = opened(message.as_bytes())
 
-    assert opened.email is not None
-    assert "data:image/png;base64," in opened.email.html
-    assert "data:application/pdf" not in opened.email.html
-    assert [(f.filename, f.content_type, f.primary) for f in opened.files] == [
+    assert "data:image/png;base64," in document.email.html
+    assert "data:application/pdf" not in document.email.html
+    assert [(f.filename, f.content_type, f.primary) for f in document.files] == [
         ("statement.pdf", "application/pdf", True)
     ]

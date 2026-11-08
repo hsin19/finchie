@@ -75,11 +75,11 @@ describe("bills", () => {
 
     it("takes the fee share of overseas purchases as printed, refunds or not", () => {
         // kind=purchase searches: `sum` is net of the folded fee and refund, byKind counts lines as printed.
-        const search = (sum: string, byKind: KindTotal[]): TransactionSearch => ({ items: [], total: 1, sum, byKind, byCard: [] });
-        const fee: KindTotal = { kind: "foreign_transaction_fee", count: 1, amount: "63" };
-        const booking: KindTotal = { kind: "purchase", count: 1, amount: "4200" };
-        const refund: KindTotal = { kind: "refund", count: 1, amount: "-4200" };
-        const all = search("1063", [{ kind: "purchase", count: 2, amount: "5200" }, fee, refund]);
+        const search = (sum: string, byKind: KindTotal[]): TransactionSearch => ({ items: [], total: 1, sum, flows: [], byKind, byCard: [], byAccount: [] });
+        const fee: KindTotal = { kind: "foreign_transaction_fee", count: 1, amount: "63", flow: "-63" };
+        const booking: KindTotal = { kind: "purchase", count: 1, amount: "4200", flow: "-4200" };
+        const refund: KindTotal = { kind: "refund", count: 1, amount: "-4200", flow: "4200" };
+        const all = search("1063", [{ kind: "purchase", count: 2, amount: "5200", flow: "-5200" }, fee, refund]);
         expect(fxFeeShare(all, search("63", [booking, refund]))).toEqual({ percent: 1.5, of: "4200" });
         expect(fxFeeShare(all, search("0", []))).toBeUndefined();
     });

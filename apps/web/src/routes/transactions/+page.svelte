@@ -8,6 +8,7 @@ import {
     TRANSACTIONS_PAGE_SIZE as PAGE_SIZE,
     type TransactionSort,
 } from "#lib/api/client.js";
+import Counterpart from "#lib/components/Counterpart.svelte";
 import Dialog from "#lib/components/Dialog.svelte";
 import FileLink from "#lib/components/FileLink.svelte";
 import MonthSelect from "#lib/components/MonthSelect.svelte";
@@ -19,7 +20,6 @@ import {
 } from "#lib/dates.js";
 import {
     breakdown,
-    net,
     refundedInFull,
 } from "#lib/family.js";
 import {
@@ -28,6 +28,12 @@ import {
     readFilters,
     searchPeriod,
 } from "#lib/filters.js";
+import {
+    flowOf,
+    isTrade,
+    isTransfer,
+    netByUnit,
+} from "#lib/flows.js";
 import { composing } from "#lib/keys.js";
 import { onKeys } from "#lib/keys.svelte.js";
 import {
@@ -35,11 +41,14 @@ import {
     institution,
     kindOrder,
     kinds,
+    lineAccount,
     tone,
 } from "#lib/labels.js";
 import {
     approx,
     formatAmount,
+    negate,
+    sign,
     sum,
 } from "#lib/money.js";
 import { QueryRequests } from "#lib/requests.svelte.js";
@@ -123,19 +132,31 @@ function toggleKind(kind: TransactionKind) {
 }
 const kindCounts = $derived(new Map(data.result.byKind.map(k => [k.kind, k])));
 
-// Card picker: each bank, then each of its cards. Counts come from the byCard facet, which
-// ignores the card filter, so every option shows what picking it would give.
-const cardOptions = $derived.by(() => {
+// Account picker: each bank, then its cards and its deposit accounts. Counts come from the byCard and
+// byAccount facets, which ignore the picker, so every option shows what picking it would give.
+const accountOptions = $derived.by(() => {
+    const { byCard, byAccount } = data.result;
     const options: { value: string; label: string; }[] = [];
-    const banks = [...new Set(data.result.byCard.map(c => c.institution))];
+    const banks = [...new Set([...byCard, ...byAccount].map(c => c.institution))].sort();
     for (const bank of banks) {
-        const cards = data.result.byCard.filter(c => c.institution === bank);
-        options.push({ value: bank, label: `${institution(bank).code} (all) · ${cards.reduce((n, c) => n + c.count, 0)}` });
+        const cards = byCard.filter(c => c.institution === bank);
+        const accounts = byAccount.filter(a => a.institution === bank);
+        options.push({ value: bank, label: `${institution(bank).code} (all) · ${[...cards, ...accounts].reduce((n, c) => n + c.count, 0)}` });
         for (const c of cards) if (c.cardLast4) options.push({ value: `${bank}:${c.cardLast4}`, label: `${cardLabel(bank, c.cardLast4)} · ${c.count}` });
+        for (const a of accounts) {
+            const name = lineAccount({ institution: bank, accountKind: "deposit", accountName: a.accountName });
+            options.push({ value: `account:${a.accountId}`, label: `${name} ${a.accountNumber ?? ""} · ${a.count}` });
+        }
     }
     return options;
 });
-const cardValue = $derived(filters.institution ? `${filters.institution}${filters.card ? `:${filters.card}` : ""}` : "");
+const pickValue = $derived(
+    filters.account ? `account:${filters.account}` : filters.institution ? `${filters.institution}${filters.card ? `:${filters.card}` : ""}` : "",
+);
+function pick(value: string) {
+    const account = value.startsWith("account:") ? value.slice("account:".length) : null;
+    void navigate({ account, card: account ? null : value || null });
+}
 
 // ---- Selection and detail
 
@@ -206,9 +227,27 @@ const days = $derived.by(() => {
     return groups;
 });
 
+// Amounts as the owner sees them: money out negative, whichever account (ADR 0013). Money that only
+// moved between the owner's own lines is muted.
 function amountTone(t: Transaction) {
-    if (refundedInFull(t)) return "text-mute";
-    return t.kind === "purchase" ? "text-ink" : tone[kinds[t.kind].tone];
+    if (refundedInFull(t) || isTransfer(t)) return "text-mute";
+    // Shares, not money (ADR 0017).
+    if (isTrade(t)) return "text-ink";
+    if (sign(flowOf(t)) > 0) return "text-pos";
+    return t.kind === "purchase" || t.kind === "other" ? "text-ink" : tone[kinds[t.kind].tone];
+}
+
+function amount(t: Transaction) {
+    return formatAmount(flowOf(t), { signed: true });
+}
+
+/** The unit after an amount, unless it is NT$. */
+function unitOf(t: Pick<Transaction, "unit">) {
+    return t.unit && t.unit !== "TWD" ? t.unit : "";
+}
+
+function dayTotal(lines: Transaction[]) {
+    return netByUnit(lines).map(n => `${n.unit === "TWD" ? "" : `${n.unit} `}${formatAmount(n.amount, { signed: true })}`).join(" · ");
 }
 
 function original(t: Transaction) {
@@ -258,8 +297,10 @@ onKeys({
     <div class="flex flex-col gap-3">
         <div class="text-[16px] font-bold break-words">{t.description}</div>
         <div class="flex flex-col gap-0.5">
-            <div class="text-[24px] font-bold {amountTone(t)}">{formatAmount(net(t))} <span class="text-[13px] font-normal text-mute">{statement?.currency ?? "TWD"}</span></div>
-            {#if breakdown(t)}<div class="text-[12px] text-dim">{breakdown(t)}{refundedInFull(t) ? " · 已全額刷退" : ""}</div>{/if}
+            <div class="text-[24px] font-bold {amountTone(t)}">{amount(t)} <span class="text-[13px] font-normal text-mute">{t.unit ?? statement?.currency ?? "TWD"}</span></div>
+            {#if breakdown(t)}<div class="text-[12px] text-dim">帳單上 {breakdown(t)}{refundedInFull(t) ? " · 已全額刷退" : ""}</div>{/if}
+            {#if isTransfer(t)}<div class="text-[12px] text-mute">在自己的帳戶之間移動：不算支出或收入</div>{/if}
+            {#if isTrade(t)}<div class="text-[12px] text-mute">股數：買賣不算支出或收入，手續費和稅算進成本</div>{/if}
         </div>
         <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
             <dt class="text-mute">date</dt>
@@ -276,8 +317,40 @@ onKeys({
                 <dt class="text-mute">country</dt>
                 <dd class="m-0">{t.country}</dd>
             {/if}
-            <dt class="text-mute">card</dt>
-            <dd class="m-0">{institution(t.institution).name} {cardLabel(t.institution, t.cardLast4)}</dd>
+            {#if t.trade}
+                <dt class="text-mute">trade</dt>
+                <dd class="m-0">{t.trade.category} @ {formatAmount(t.trade.price)}</dd>
+                <dt class="text-mute">amount</dt>
+                <dd class="m-0">{formatAmount(t.trade.amount)} <span class="text-mute">手續費 {formatAmount(t.trade.fee)} · 稅 {formatAmount(t.trade.tax)}</span></dd>
+                <dt class="text-mute">{t.trade.prepaid ? "prepaid" : sign(t.trade.net) < 0 ? "paid" : "received"}</dt>
+                <dd class="m-0">{formatAmount(t.trade.prepaid ?? (sign(t.trade.net) < 0 ? negate(t.trade.net) : t.trade.net))} <span class="text-mute">TWD</span></dd>
+            {/if}
+            {#if t.accountKind !== undefined && t.accountKind !== "credit_card" && t.accountId !== undefined}
+                <dt class="text-mute">account</dt>
+                <dd class="m-0">
+                    <a href={resolve("/accounts/[id]", { id: String(t.accountId) })}>{institution(t.institution).name} {t.accountName ?? ""}</a>
+                    <span class="text-mute">{t.accountNumber ?? ""}</span>
+                </dd>
+            {:else}
+                <dt class="text-mute">card</dt>
+                <dd class="m-0">{institution(t.institution).name} {cardLabel(t.institution, t.cardLast4)}</dd>
+            {/if}
+            {#if t.memo}
+                <dt class="text-mute">memo</dt>
+                <dd class="m-0 break-words">{t.memo}</dd>
+            {/if}
+            {#if t.counterparty}
+                <dt class="text-mute">counterparty</dt>
+                <dd class="m-0 break-words text-dim">{t.counterparty}</dd>
+            {/if}
+            {#if t.counterpart}
+                <dt class="text-mute">{t.accountKind === "deposit" && t.counterpart.accountKind === "credit_card" ? "paid" : "transfer"}</dt>
+                <dd class="m-0"><Counterpart other={t.counterpart} out={sign(flowOf(t)) < 0} /></dd>
+            {/if}
+            {#if t.balance}
+                <dt class="text-mute">balance</dt>
+                <dd class="m-0 text-dim">{formatAmount(t.balance)} <span class="text-mute">{t.unit ?? ""}</span></dd>
+            {/if}
             {#if statement}
                 <dt class="text-mute">statement</dt>
                 <dd class="m-0">
@@ -314,7 +387,7 @@ onKeys({
             id="q"
             type="search"
             autocomplete="off"
-            placeholder="商店名稱，例如 uber"
+            placeholder="說明或備註，例如 uber、房租"
             class="min-h-10 min-w-0 grow border-none bg-transparent text-ink outline-none"
             bind:value={search}
             oninput={onSearchInput}
@@ -329,12 +402,12 @@ onKeys({
                 {filters.closing} 結帳的帳單 <span class="text-mute">×</span>
             </button>
         {/if}
-        <select class="control" aria-label="卡片" value={cardValue} onchange={event => void navigate({ card: event.currentTarget.value || null })}>
-            <option value="">all cards</option>
-            {#each cardOptions as option (option.value)}
+        <select class="control" aria-label="帳戶或卡片" value={pickValue} onchange={event => pick(event.currentTarget.value)}>
+            <option value="">all accounts</option>
+            {#each accountOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
             {/each}
-            {#if cardValue && !cardOptions.some(o => o.value === cardValue)}<option value={cardValue}>{cardValue}</option>{/if}
+            {#if pickValue && !accountOptions.some(o => o.value === pickValue)}<option value={pickValue}>{pickValue}</option>{/if}
         </select>
         <div role="group" aria-label="交易種類" class="flex gap-1.5 overflow-x-auto whitespace-nowrap">
             {#each kindOrder as kind (kind)}
@@ -348,14 +421,33 @@ onKeys({
             <input type="checkbox" class="accent-accent" checked={filters.overseas} onchange={event => void navigate({ overseas: event.currentTarget.checked ? "1" : null })} />
             只看海外
         </label>
+        <label class="flex min-h-9 items-center gap-1.5 text-dim" title="自己帳戶之間的轉帳、繳卡費">
+            <input
+                type="checkbox"
+                class="accent-accent"
+                checked={filters.hideTransfers}
+                onchange={event => void navigate({ hide: event.currentTarget.checked ? "transfers" : null })}
+            />
+            隱藏轉帳與卡費
+        </label>
     </div>
 </section>
 
 <div class="flex flex-wrap gap-x-5 gap-y-1 border-b border-dashed border-line px-0.5 pb-2 text-dim">
     <span>rows <span class="text-ink">{data.result.total}</span></span>
-    <span>sum <span class="text-ink">{formatAmount(data.result.sum)}</span></span>
-    {#each kindOrder.filter(k => k !== "purchase" && activeKinds.has(k) && kindCounts.has(k)) as kind (kind)}
-        <span>{kinds[kind].short} <span class={tone[kinds[kind].tone]}>{formatAmount(kindCounts.get(kind)!.amount)}</span></span>
+    <!-- Seen from the owner; money between their own lines is neither (ADR 0016). -->
+    {#each data.result.flows as flow (flow.unit)}
+        {@const unit = flow.unit === "TWD" ? "" : `${flow.unit} `}
+        {@const total = sum([flow.spent, flow.received])}
+        <!-- Another unit's zero is noise: most have money only one way. -->
+        {#if unit === "" || sign(flow.spent) !== 0}<span>{unit}支出 <span class="text-ink">{formatAmount(flow.spent)}</span></span>{/if}
+        {#if unit === "" || sign(flow.received) !== 0}<span>{unit}收入 <span class="text-pos">{formatAmount(flow.received, { signed: true })}</span></span>{/if}
+        <span>{unit}淨額 <span class={sign(total) < 0 ? "text-neg" : "text-ink"}>{formatAmount(total, { signed: true })}</span></span>
+        {#if flow.movedCount > 0}
+            <span title="自己帳戶之間的轉帳、繳卡費：每筆只列一次，不算支出或收入">
+                {unit}轉帳 <span class="text-mute">{formatAmount(flow.moved)}（{flow.movedCount} 筆）</span>
+            </span>
+        {/if}
     {/each}
     <span role="group" aria-label="排序" class="ml-auto flex items-center gap-2 text-mute">
         sort
@@ -389,12 +481,12 @@ onKeys({
                     <tr class="text-left text-mute">
                         <th class="w-4 py-2 pr-1 font-medium"><span class="sr-only">選取</span></th>
                         <th class="px-2 py-2 font-medium">DATE</th>
-                        <th class="px-2 py-2 font-medium">MERCHANT</th>
+                        <th class="px-2 py-2 font-medium">DESCRIPTION</th>
                         <th class="px-2 py-2 font-medium">KIND</th>
-                        <th class="px-2 py-2 font-medium">CARD</th>
+                        <th class="px-2 py-2 font-medium">ACCOUNT</th>
                         <th class="px-2 py-2 font-medium">CTRY</th>
                         <th class="px-2 py-2 text-right font-medium">ORIG</th>
-                        <th class="py-2 pl-2 text-right font-medium">TWD</th>
+                        <th class="py-2 pl-2 text-right font-medium">AMOUNT</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -407,14 +499,17 @@ onKeys({
                             <td class="py-2 pr-1 text-accent">{t.id === selectedId ? "▶" : ""}</td>
                             <td class="px-2 py-2 whitespace-nowrap">{shortDate(t.transactionDate)}</td>
                             <td class="max-w-[320px] px-2 py-2">
-                                <span class="block truncate">{t.description}</span>
-                                {#if breakdown(t)}<span class="block truncate text-[11px] text-mute">{breakdown(t)}</span>{/if}
+                                <span class="block truncate">{t.description}{#if t.memo}<span class="text-dim"> · {t.memo}</span>{/if}</span>
+                                {#if breakdown(t)}<span class="block truncate text-[11px] text-mute">帳單上 {breakdown(t)}</span>{/if}
+                                {#if t.counterpart}<Counterpart other={t.counterpart} out={sign(flowOf(t)) < 0} class="block truncate text-[11px] text-mute hover:text-ink" />{/if}
                             </td>
                             <td class="px-2 py-2 {tone[kinds[t.kind].tone]}">{kinds[t.kind].short}</td>
-                            <td class="px-2 py-2 whitespace-nowrap text-dim">{cardLabel(t.institution, t.cardLast4)}</td>
+                            <td class="px-2 py-2 whitespace-nowrap text-dim">{lineAccount(t)}</td>
                             <td class="px-2 py-2 text-dim">{t.country ?? "—"}</td>
                             <td class="px-2 py-2 text-right whitespace-nowrap text-dim">{original(t)}</td>
-                            <td class="py-2 pl-2 text-right whitespace-nowrap {amountTone(t)}">{formatAmount(net(t))}</td>
+                            <td class="py-2 pl-2 text-right whitespace-nowrap {amountTone(t)}">
+                                {amount(t)}{#if unitOf(t)} <span class="text-mute">{unitOf(t)}</span>{/if}
+                            </td>
                         </tr>
                     {:else}
                         <tr class="border-t border-rule"><td colspan="8" class="py-3 text-mute">沒有符合的交易。</td></tr>
@@ -427,11 +522,11 @@ onKeys({
         {#snippet mobileRow(t: Transaction, withDate: boolean)}
             <button type="button" class="flex min-h-11 w-full flex-col gap-0.5 border-t border-rule py-2.5 text-left text-ink" onclick={() => select(t, { open: true })}>
                 <span class="flex w-full justify-between gap-2.5">
-                    <span class="truncate">{t.description}</span>
-                    <span class="shrink-0 {amountTone(t)}">{formatAmount(net(t))}</span>
+                    <span class="truncate">{t.description}{t.memo ? ` · ${t.memo}` : ""}</span>
+                    <span class="shrink-0 {amountTone(t)}">{amount(t)}{unitOf(t) ? ` ${unitOf(t)}` : ""}</span>
                 </span>
                 <span class="text-[12px] text-mute">
-                    {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{cardLabel(t.institution, t.cardLast4)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · ${breakdown(t)}` : ""}
+                    {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{lineAccount(t)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · ${breakdown(t)}` : ""}{t.counterpart ? ` · ${sign(flowOf(t)) < 0 ? "→" : "←"} 自己的帳戶` : ""}
                 </span>
             </button>
         {/snippet}
@@ -440,7 +535,7 @@ onKeys({
                 {#each days as day (day.date)}
                     <div class="flex justify-between pt-3 pb-1.5 text-[12px] tracking-[0.06em] text-mute">
                         <span>{shortDate(day.date)} {weekday(day.date)}</span>
-                        <span>{formatAmount(sum(day.items.map(net)))}</span>
+                        <span>{dayTotal(day.items)}</span>
                     </div>
                     {#each day.items as t (t.id)}
                         {@render mobileRow(t, false)}

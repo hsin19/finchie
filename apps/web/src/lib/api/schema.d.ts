@@ -14,7 +14,11 @@ export interface paths {
         /** Uploaded documents, newest first */
         get: operations["listDocuments"];
         put?: never;
-        /** Upload an e-mail (.eml) or PDF statement and queue it for parsing */
+        /**
+         * Upload a statement e-mail (.eml) and queue it for parsing
+         * @description Statements are taken as e-mails only, as the bank sent them or forwarded (ADR 0014); anything
+         *     else, a bare PDF included, is refused before it is stored.
+         */
         post: operations["uploadDocument"];
         delete?: never;
         options?: never;
@@ -86,8 +90,8 @@ export interface paths {
         };
         /**
          * The document opened for reading
-         * @description An e-mail's headers and attachments, or a bare PDF as its one file. The parser opens the stored
-         *     original on every request and PDFs come back decrypted; nothing decrypted is stored (ADR 0012),
+         * @description The bank's e-mail, unwrapped from a forward (ADR 0014): its headers and attachments. The parser
+         *     opens the stored original on every request and PDFs come back decrypted; nothing decrypted is stored (ADR 0012),
          *     so the PDF, body, and file responses carry `Cache-Control: no-store`.
          */
         get: operations["getDocumentPreview"];
@@ -156,6 +160,95 @@ export interface paths {
          *     downloads (attachment) as application/octet-stream.
          */
         get: operations["getDocumentPreviewFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every account, with its newest balance in each unit and where its balances do not join up
+         * @description Accounts are discovered from what their sources report (ADR 0013). A deposit account's
+         *     balances are checked for continuity: two consecutive ones join when the lines dated between
+         *     them account for the difference. A card bill's cannot be checked yet, nor a deposit account's
+         *     whose balance moved in a unit no statement has listed a line of, as when its statements print
+         *     only its balance.
+         */
+        get: operations["listAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One account with every balance its sources reported */
+        get: operations["getAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * The owner's details of an account, its own name and its full number
+         * @description Both optional (ADR 0016): a field left out stays as it is, an empty string clears it. A full
+         *     number must fit the masked number the bank prints, digit for digit; links are worked out
+         *     again, since it fits counterparties too.
+         */
+        patch: operations["updateAccount"];
+        trace?: never;
+    };
+    "/api/accounts/{id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's lines, newest first
+         * @description Amounts as the source reports them: on a deposit account money in is positive, on a card bill
+         *     a purchase is.
+         */
+        get: operations["listAccountLines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mail-filters.xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Gmail filter that forwards statement e-mails to the mailbox
+         * @description Generated from the parsers' sender domains (ADR 0014), in the format Gmail imports (Settings,
+         *     Filters, Import filters), forwarding to BACKEND_MAILBOX_ADDRESS. 404 while that is not set.
+         */
+        get: operations["getMailFilters"];
         put?: never;
         post?: never;
         delete?: never;
@@ -240,8 +333,11 @@ export interface paths {
         /**
          * Transactions across every statement, newest first, with totals for the whole match
          * @description Filters combine with AND. `total` and `sum` cover every matching row, not just this page.
-         *     `byKind` and `byCard` are facets: each ignores its own filter (byKind ignores `kind`, byCard
-         *     ignores `institution` and `card`), so a picker can show the options it would switch to.
+         *     `byKind`, `byCard`, and `byAccount` are facets: each ignores its own filter (byKind ignores
+         *     `kind`; byCard and byAccount, the account picker's, ignore `institution`, `card`, and
+         *     `account`), so a picker can show the options it would switch to. Card and deposit lines come
+         *     together unless `accountKind` picks one (ADR 0013); `sum` adds amounts as printed and only means
+         *     something within one kind, `flows` add them as the owner sees them.
          *
          *     While `kind` includes purchases (or is not given), a line with a parent (a fee or refund
          *     linked to its purchase) is not a row of its own but one of the parent's `children`, and rows,
@@ -290,6 +386,12 @@ export interface components {
             warnings: string[];
             /** Format: date-time */
             parsedAt?: string;
+            /** @description The kind of statement it produced, if any; card bills only are listed by /api/statements */
+            statementKind?: components["schemas"]["AccountKind"];
+            /** @description Lines its statement holds, 0 without one */
+            lineCount: number;
+            /** @description Accounts its statement reported, 0 without one */
+            accountCount: number;
         };
         DocumentPreview: {
             email?: components["schemas"]["EmailPreview"];
@@ -311,7 +413,7 @@ export interface components {
             /** @description "application/pdf" when the bytes are a PDF, else as the e-mail declares it */
             contentType: string;
             sizeBytes: number;
-            /** @description A PDF none of the parser's passwords opens */
+            /** @description A PDF none of the parser's passwords opens, served as received */
             locked: boolean;
             /** @description The one file /preview/pdf serves */
             primary: boolean;
@@ -332,6 +434,176 @@ export interface components {
             totalDue: components["schemas"]["Decimal"];
             reconciliation: components["schemas"]["Reconciliation"];
             transactionCount: number;
+            /**
+             * Format: date
+             * @description When a deposit account or a later bill showed it paid (ADR 0016); absent while that is not known
+             */
+            paidOn?: string;
+        };
+        /** @enum {string} */
+        AccountKind: "credit_card" | "deposit" | "securities";
+        /**
+         * @description Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
+         * @enum {string}
+         */
+        AccountContinuity: "checked" | "unknown";
+        Account: {
+            /** Format: int64 */
+            id: number;
+            /** @example esun */
+            institution: string;
+            kind: components["schemas"]["AccountKind"];
+            /**
+             * @description As printed, usually masked; empty for a card bill
+             * @example 1234567***890
+             */
+            number: string;
+            /**
+             * @description The source's name for it
+             * @example 臺幣活存
+             */
+            label?: string | null;
+            /** @description The owner's name for it */
+            name?: string | null;
+            /** @description Its full number, where the owner gave one (ADR 0016) */
+            fullNumber?: string;
+            /** @description The newest balance in each unit */
+            balances: components["schemas"]["Balance"][];
+            continuity: components["schemas"]["AccountContinuity"];
+            /** @description Its newest balances' worth in NT$ added up; absent if any of them has none */
+            worth?: components["schemas"]["Decimal"];
+            gaps: components["schemas"]["BalanceGap"][];
+        };
+        AccountDetail: components["schemas"]["Account"] & {
+            /** @description Every balance, newest first */
+            history: components["schemas"]["Balance"][];
+            /** @description A securities account's: every security it holds or has traded, by name (ADR 0017) */
+            positions?: components["schemas"]["Position"][];
+        };
+        /** @description A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017). */
+        Position: {
+            /** @description The security's name */
+            unit: string;
+            code?: string;
+            /** @description The newest holding; 0 once sold out */
+            shares: components["schemas"]["Decimal"];
+            /** @description The shares at the newest close */
+            worth?: components["schemas"]["Decimal"];
+            /** @description What the shares held cost; absent when not known */
+            cost?: components["schemas"]["Decimal"];
+            /** @description Worth less cost */
+            gain?: components["schemas"]["Decimal"];
+            /** @description What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known */
+            realized?: components["schemas"]["Decimal"];
+            /**
+             * Format: date
+             * @description The day it was last held at none
+             */
+            since?: string;
+        };
+        Balance: {
+            /**
+             * @description ISO 4217, or a points program's code
+             * @example TWD
+             */
+            unit: string;
+            /**
+             * Format: date
+             * @description The end of the day it was held
+             */
+            asOf: string;
+            amount: components["schemas"]["Decimal"];
+            /**
+             * Format: int64
+             * @description The statement that reported it
+             */
+            statementId: number;
+            /** @description In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points */
+            worth?: components["schemas"]["Decimal"];
+            /**
+             * Format: date
+             * @description The day of the rate or close its worth used; absent for NT$
+             */
+            rateDay?: string;
+            /**
+             * @description A security's code, from the exchanges' lists (ADR 0017)
+             * @example 00878
+             */
+            code?: string;
+            /** @description A security's newest close in NT$, which its worth used */
+            price?: components["schemas"]["Decimal"];
+        };
+        /** @description Two consecutive balances in one unit that the lines between them do not join */
+        BalanceGap: {
+            unit: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** @description Money that moved between them that no line shows */
+            unseen: components["schemas"]["Decimal"];
+        };
+        AccountUpdate: {
+            /** @description The owner's name for the account; empty clears it */
+            name?: string;
+            /** @description Digits, spaces and dashes allowed; empty clears it */
+            fullNumber?: string;
+        };
+        /** @description The other line of a transfer or card payment (ADR 0016) */
+        LineCounterpart: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            statementId: number;
+            /** Format: date */
+            date: string;
+            accountKind: components["schemas"]["AccountKind"];
+            /**
+             * Format: int64
+             * @description A deposit account; absent for a card bill
+             */
+            accountId?: number;
+            institution: string;
+            /** @description The owner's name for the account, else the bank's */
+            accountName?: string;
+            /** @description Its full number where given, else as printed */
+            accountNumber?: string;
+        };
+        AccountLine: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            statementId: number;
+            /** Format: date */
+            date: string;
+            description: string;
+            memo?: string | null;
+            counterparty?: string | null;
+            /** @description A card line's kind, or interest, fee, or other on a deposit account */
+            kind: string;
+            unit: string;
+            amount: components["schemas"]["Decimal"];
+            /** @description The running balance, when printed */
+            balance?: components["schemas"]["Decimal"] | null;
+            counterpart?: components["schemas"]["LineCounterpart"];
+            trade?: components["schemas"]["Trade"];
+        };
+        /** @description A trade's money; its line's amount is the shares, its unit the security (ADR 0017) */
+        Trade: {
+            /**
+             * @description The broker's category as printed
+             * @example 集買
+             */
+            category: string;
+            price: components["schemas"]["Decimal"];
+            /** @description 價金: the shares at the price */
+            amount: components["schemas"]["Decimal"];
+            fee: components["schemas"]["Decimal"];
+            tax: components["schemas"]["Decimal"];
+            /** @description 應收付: received positive, paid negative; zero for a buy paid in advance */
+            net: components["schemas"]["Decimal"];
+            /** @description 預繳金, for a buy paid in advance */
+            prepaid?: components["schemas"]["Decimal"];
         };
         Reconciliation: {
             balanced: boolean;
@@ -344,8 +616,11 @@ export interface components {
          * @enum {string}
          */
         TransactionSort: "newest" | "oldest" | "largest" | "smallest";
-        /** @enum {string} */
-        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment";
+        /**
+         * @description A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+         * @enum {string}
+         */
+        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment" | "interest" | "fee" | "other" | "buy" | "sell";
         Transaction: {
             /** Format: int64 */
             id: number;
@@ -363,6 +638,25 @@ export interface components {
             originalCurrency?: string;
             country?: string;
             cardLast4?: string;
+            accountKind?: components["schemas"]["AccountKind"];
+            /**
+             * Format: int64
+             * @description A deposit account; absent for a card line
+             */
+            accountId?: number;
+            /** @description The owner's name for a deposit account, else the bank's */
+            accountName?: string;
+            /** @description A deposit account's full number where given, else as printed */
+            accountNumber?: string;
+            /** @description ISO 4217, or a points program's code */
+            unit?: string;
+            memo?: string;
+            counterparty?: string;
+            balance?: components["schemas"]["Decimal"];
+            /** @description Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it */
+            flow?: components["schemas"]["Decimal"];
+            counterpart?: components["schemas"]["LineCounterpart"];
+            trade?: components["schemas"]["Trade"];
             /** @description The line this one adjusts, such as the purchase a fee or refund belongs to */
             parent?: components["schemas"]["TransactionLink"];
             /** @description Lines that adjust this one, possibly on other statements; absent without any */
@@ -390,14 +684,39 @@ export interface components {
             items: components["schemas"]["Transaction"][];
             /** @description Rows matching every filter */
             total: number;
+            /** @description Amounts as printed, which only adds up within one kind of account: use with accountKind */
             sum: components["schemas"]["Decimal"];
+            /** @description Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016) */
+            flows: components["schemas"]["UnitFlow"][];
             byKind: components["schemas"]["KindTotal"][];
             byCard: components["schemas"]["CardTotal"][];
+            /** @description Deposit accounts, a facet like byCard */
+            byAccount: components["schemas"]["AccountTotal"][];
+        };
+        UnitFlow: {
+            unit: string;
+            /** @description Negative or zero */
+            spent: components["schemas"]["Decimal"];
+            received: components["schemas"]["Decimal"];
+            /** @description What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received */
+            moved: components["schemas"]["Decimal"];
+            /** @description Rows listed for it */
+            movedCount: number;
+        };
+        AccountTotal: {
+            /** Format: int64 */
+            accountId: number;
+            institution: string;
+            accountName?: string;
+            accountNumber?: string;
+            count: number;
         };
         KindTotal: {
             kind: components["schemas"]["TransactionKind"];
             count: number;
             amount: components["schemas"]["Decimal"];
+            /** @description Seen from the owner */
+            flow: components["schemas"]["Decimal"];
         };
         CardTotal: {
             institution: string;
@@ -489,6 +808,7 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
         };
     };
     getDocument: {
@@ -673,6 +993,123 @@ export interface operations {
             503: components["responses"]["Problem"];
         };
     };
+    listAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accounts by institution */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"][];
+                };
+            };
+        };
+    };
+    getAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDetail"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listAccountLines: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lines */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLine"][];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    getMailFilters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The filter */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
     listStatements: {
         parameters: {
             query?: {
@@ -781,7 +1218,13 @@ export interface operations {
                 card?: string;
                 /** @description Only rows charged in a foreign currency or in another country */
                 overseas?: boolean;
-                /** @description Case-insensitive substring of the description */
+                /** @description Only card lines, or only deposit lines */
+                accountKind?: components["schemas"]["AccountKind"];
+                /** @description One deposit account */
+                account?: number;
+                /** @description Leave out transfers between the owner's lines and card payments (ADR 0016) */
+                hideTransfers?: boolean;
+                /** @description Case-insensitive substring of the description or the memo */
                 q?: string;
                 /** @description Row order; largest and smallest compare amounts by size, ignoring the sign */
                 sort?: components["schemas"]["TransactionSort"];

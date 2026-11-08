@@ -47,7 +47,8 @@ const last = $derived(billOf(lastMonth));
 const lastChange = $derived(percentChange(totalDue(last), totalDue(billOf(shiftMonth(now, -2)))));
 
 const due = $derived.by(() => {
-    const upcoming = data.statements.filter(s => s.dueDate >= today());
+    // A bill autopaid before its due date is not still due (ADR 0016).
+    const upcoming = data.statements.filter(s => s.dueDate >= today() && !s.paidOn);
     const next = upcoming.map(s => s.dueDate).sort()[0];
     return { amount: sum(upcoming.map(s => s.totalDue)), next, count: upcoming.length };
 });

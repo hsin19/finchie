@@ -4,6 +4,7 @@ from decimal import Decimal
 from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser, find, sum_new_charges
+from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import amount, clean, roc_date
 
@@ -27,10 +28,20 @@ _ROW = re.compile(
 
 class TaishinParser(StatementParser):
     name = "taishin.credit_card"
-    version = "3"
+    version = "4"
     institution = "taishin"
+    # 台新信用卡電子帳單 2026年10月; the combined (deposit) statement, 台新銀行綜合對帳單 2026年9月份,
+    # comes from the same address.
+    sender_domains = ("taishinbank.com.tw",)
+    subject_terms = ("信用卡電子帳單",)
     filename_pattern = re.compile(r"^TSB_Creditcard_Estatement_\d+\.pdf$", re.IGNORECASE)
     text_marker = "台新"
+
+    def passwords(self, identity: Identity) -> list[str]:
+        # The e-mail: since the 113/12 bill, 身分證字號後2碼 + 生日之月日4碼 (6 characters); bills up to
+        # 113/11 open with the national ID, capital letter. The payment slip beside it takes the same.
+        national_id = identity.require_national_id().upper()
+        return [national_id[-2:] + identity.require_birth_date().strftime("%m%d"), national_id]
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         texts = document.page_texts()
@@ -91,7 +102,8 @@ def _kind(description: str, value: Decimal) -> Kind:
         return Kind.FOREIGN_TRANSACTION_FEE
     if "年費" in description:
         return Kind.ANNUAL_FEE
-    if value < 0 and ("扣繳" in description or "繳款" in description):
+    # Older bills word it 台新自動扣款, and before that 您的付款已收到,謝謝您!.
+    if value < 0 and any(word in description for word in ("扣繳", "繳款", "自動扣款", "付款已收到")):
         return Kind.PAYMENT
     if "折抵" in description:
         return Kind.REBATE

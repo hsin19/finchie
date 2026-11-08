@@ -3,6 +3,7 @@ import {
     api,
     type Document,
     LEDGER,
+    MAIL_FILTERS_URL,
     unwrap,
 } from "#lib/api/client.js";
 import Bar from "#lib/components/Bar.svelte";
@@ -118,14 +119,14 @@ function refuseDrop(event: DragEvent) {
 
 // What to do about a failure, by the gRPC code the worker recorded ("FailedPrecondition: ...").
 function hint(error: string): string {
-    if (error.startsWith("Unimplemented")) return "只收滙豐、台新、國泰、玉山的 .eml 或 .pdf 帳單";
-    if (error.startsWith("FailedPrecondition")) return "多半是 PDF 密碼沒設或不對：設定 parser 的密碼後按「重新解析」";
-    if (error.startsWith("InvalidArgument")) return "檔案讀不出來：確認是銀行寄來的原始檔";
+    if (error.startsWith("Unimplemented")) return "沒有 parser 認領這封信：寄件者網域或主旨對不上";
+    if (error.startsWith("FailedPrecondition")) return "PDF 打不開：訊息會寫要設哪個 parser 變數，設好後按「重新解析」";
+    if (error.startsWith("InvalidArgument")) return "不是 e-mail 或讀不出來：上傳銀行寄來的原始信（.eml）";
     if (error.startsWith("Internal")) return "版面跟 parser 認得的不一樣：修好 parser 後按「重新解析」";
     return "按「重新解析」再試一次";
 }
 
-type Row = { tag: keyof typeof statuses; stage: string; detail: string; tone: "ink" | "dim" | "neg"; hint: string; link?: { statementId: number; text: string; }; percent: number; };
+type Row = { tag: keyof typeof statuses; stage: string; detail: string; tone: "ink" | "dim" | "neg"; hint: string; link?: { href: string; text: string; }; percent: number; };
 
 function describe(doc: Document | undefined, upload?: Entry): Row {
     if (upload?.error) return { tag: "failed", stage: "upload → failed", detail: upload.error, tone: "neg", hint: "", percent: 100 };
@@ -134,10 +135,14 @@ function describe(doc: Document | undefined, upload?: Entry): Row {
         return { tag: "uploading", stage: `uploading ${sent}%`, detail: "上傳中…", tone: "ink", hint: "", percent: sent };
     }
     const statement = statementOf.get(doc.id);
-    const link = statement && {
-        statementId: statement.id,
-        text: `→ 查看帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}`,
-    };
+    // A card bill has a page of its own; a deposit or securities statement's lines are on its accounts' pages.
+    const deposit = doc.statementKind === "deposit" || doc.statementKind === "securities";
+    const link = statement
+        ? { href: resolve("/statements/[id]", { id: String(statement.id) }), text: `→ 查看帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}` }
+        : deposit
+        ? { href: resolve("/accounts"), text: `→ 查看帳戶` }
+        : undefined;
+    const accounts = deposit ? ` · ${doc.accountCount} 個帳戶` : "";
     const sameNote = upload?.same ? `上傳過了，沿用 #${doc.id} · ` : "";
     switch (doc.status) {
         case "pending":
@@ -146,14 +151,19 @@ function describe(doc: Document | undefined, upload?: Entry): Row {
             return {
                 tag: upload?.same ? "same" : "parsed",
                 stage: "parsed",
-                detail: `${sameNote}${doc.parser} v${doc.parserVersion} · ${statement?.transactionCount ?? "?"} 筆 · balanced`,
+                detail: `${sameNote}${doc.parser} v${doc.parserVersion} · ${doc.lineCount} 筆${accounts} · balanced`,
                 tone: upload?.same ? "dim" : "ink",
                 hint: "",
                 link,
                 percent: 100,
             };
         case "needs_review": {
-            const delta = statement ? formatAmount(subtract(statement.reconciliation.stated, statement.reconciliation.computed), { signed: true }) : "?";
+            if (!statement) {
+                // A deposit statement names each account whose lines do not add up in the document's warnings.
+                const detail = doc.warnings.join("；") || "有帳戶的明細加總對不上";
+                return { tag: "needs_review", stage: "parsed → needs_review", detail: `${sameNote}${detail}`, tone: "neg", hint: "打開帳戶看是哪一列沒抓到", link, percent: 100 };
+            }
+            const delta = formatAmount(subtract(statement.reconciliation.stated, statement.reconciliation.computed), { signed: true });
             return { tag: "needs_review", stage: "parsed → needs_review", detail: `${sameNote}明細加總跟帳單差 ${delta}`, tone: "neg", hint: "打開帳單看是哪一列沒抓到", link, percent: 100 };
         }
         case "duplicate":
@@ -197,7 +207,8 @@ onKeys({ Enter: () => input?.click() });
         <td class="py-2.5 pl-2">
             <div class={r.tone === "neg" ? "text-neg" : r.tone === "dim" ? "text-dim" : "text-ink"}>{r.detail}</div>
             {#if r.link}
-                <a class="text-[12px]" href={resolve("/statements/[id]", { id: String(r.link.statementId) })}>{r.link.text}</a>
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved where the row is described -->
+                <a class="text-[12px]" href={r.link.href}>{r.link.text}</a>
             {:else if r.hint}
                 <div class="mt-0.5 text-[12px] text-mute">{r.hint}</div>
             {/if}
@@ -224,14 +235,14 @@ onKeys({ Enter: () => input?.click() });
         <path d="M7 9l5-5 5 5" />
         <path d="M4 15v5h16v-5" />
     </svg>
-    <div class="text-[16px] font-bold">把 .eml 或 .pdf 拖到這裡</div>
-    <div class="text-dim">一次可以多個檔案 · 單檔上限 32 MB · 同一個檔案重複上傳不會重複入帳</div>
+    <div class="text-[16px] font-bold">把帳單 e-mail（.eml）拖到這裡</div>
+    <div class="text-dim">只收 e-mail，手動轉寄的也行 · 一次可以多個檔案 · 單檔上限 32 MB · 同一個檔案重複上傳不會重複入帳</div>
     <button type="button" class="control min-h-11 border-accent px-4.5" onclick={() => input?.click()}><span class="text-accent">[enter]</span> 選擇檔案</button>
     <input
         bind:this={input}
         type="file"
         multiple
-        accept=".eml, .pdf, message/rfc822, application/pdf"
+        accept=".eml, message/rfc822"
         class="hidden"
         onchange={event => {
             const files = event.currentTarget.files;
@@ -240,6 +251,13 @@ onKeys({ Enter: () => input?.click() });
         }}
     />
 </section>
+
+<p class="text-dim">
+    要自動收帳單：
+    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
+    <a href={MAIL_FILTERS_URL} download data-sveltekit-reload>下載 Gmail 篩選器 ↓</a>
+    ，在 Gmail 設定 → 篩選器和封鎖的地址 → 匯入篩選器。之前自己設的轉寄篩選器要關掉轉寄，不然每封會收到兩次。
+</p>
 
 {#if entries.length > 0}
     <section class="panel px-3.5 pt-1 pb-2.5">

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
+	"google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -105,6 +106,54 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 	if value, _ := rows[0].OriginalAmount.Value(); value != "780.00" {
 		t.Fatalf("original amount = %v, want the exact decimal back", value)
+	}
+}
+
+func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
+	pool := testdb.Pool(t)
+	store := func(name string, statement *parserv1.Statement) {
+		t.Helper()
+		if err := NewWorker(pool, parsed(statement), time.Minute).Work(t.Context(), job(addDocument(t, pool, name), 1, 6)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store("october.eml", sampleStatement(true))
+
+	var account int64
+	var kind, number string
+	if err := pool.QueryRow(t.Context(), "SELECT id, kind, number FROM accounts WHERE institution = 'hsbc'").Scan(&account, &kind, &number); err != nil {
+		t.Fatal(err)
+	}
+	if kind != KindCreditCard || number != "" {
+		t.Fatalf("account = %s %q", kind, number)
+	}
+	var lines int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions WHERE account_id = $1 AND unit = 'TWD' AND status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
+		t.Fatalf("lines in the account = %d (%v)", lines, err)
+	}
+
+	november := sampleStatement(true)
+	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
+	store("november.eml", november)
+	other := sampleStatement(true)
+	other.Institution = "taishin"
+	store("taishin.eml", other)
+	// One account per bank, and no balance: what a bill says is owed stays on the bill (ADR 0013).
+	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 0 {
+		t.Fatalf("accounts = %d, balances = %d", countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
+	}
+}
+
+func TestReparsingKeepsTheAccount(t *testing.T) {
+	pool := testdb.Pool(t)
+	id := addDocument(t, pool, "again.eml")
+	for range 2 {
+		if err := NewWorker(pool, parsed(sampleStatement(true)), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if countRows(t, pool, "accounts") != 1 || countRows(t, pool, "transactions") != 2 {
+		t.Fatalf("accounts = %d, lines = %d", countRows(t, pool, "accounts"), countRows(t, pool, "transactions"))
 	}
 }
 

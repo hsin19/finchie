@@ -4,16 +4,17 @@ import base64
 import dataclasses
 import mimetypes
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
 
-from finchie_parser.documents import PDF, Attachment, classify, read_email
+from finchie_parser.documents import PDF, Attachment, Mail, find_body, is_attachment, read_mail, text_of
 from finchie_parser.errors import InvalidDocumentError, ParserError, PasswordRequiredError
 from finchie_parser.parsers import PARSERS, StatementParser
+from finchie_parser.passwords import Passwords
 from finchie_parser.pdf import PdfSet
-from finchie_parser.pipeline import select_statement
+from finchie_parser.pipeline import claimants, select_statement
 
 # They sign the message; there is nothing in them to read.
 _SIGNATURES = frozenset({"application/pkcs7-signature", "application/x-pkcs7-signature", "application/pgp-signature"})
@@ -41,23 +42,20 @@ class Email:
 
 @dataclass(frozen=True)
 class OpenedDocument:
-    email: Email | None
+    email: Email
     files: list[File]
 
 
 def open_document(
-    filename: str,
-    content_type: str,
     content: bytes,
     *,
-    passwords: Sequence[str],
+    passwords: Passwords,
     parsers: Sequence[StatementParser] = PARSERS,
 ) -> OpenedDocument:
-    if classify(filename, content_type, content) == PDF:
-        return OpenedDocument(None, _open_pdfs([File(filename or "document.pdf", PDF, content)], passwords, parsers))
-
-    message = read_email(content)
-    body = _body(message)
+    """The bank's e-mail, unwrapped from a forward: the bank's headers, and the body and files that came."""
+    mail = read_mail(content)
+    message = mail.content
+    body = find_body(message)
     inline = {
         str(part["Content-ID"]).strip("<> "): part
         for part in message.walk()
@@ -66,9 +64,9 @@ def open_document(
     html = text = ""
     embedded: set[str] = set()
     if body is not None and body.get_content_subtype() == "html":
-        html = _CID.sub(lambda m: _data_uri(m, inline, embedded), _text_of(body))
+        html = _CID.sub(lambda m: _data_uri(m, inline, embedded), text_of(body))
     elif body is not None:
-        text = _text_of(body)
+        text = text_of(body)
 
     files = []
     for part in message.walk():
@@ -77,65 +75,31 @@ def open_document(
         if str(part["Content-ID"] or "").strip("<> ") in embedded:
             continue
         # The plain-text twin of an HTML body, or the body of a forwarded message inside this one.
-        if part.get_content_maintype() == "text" and not _is_attachment(part):
+        if part.get_content_maintype() == "text" and not is_attachment(part):
             continue
         files.append(_file(part))
 
-    date_header = message["Date"]
     return OpenedDocument(
-        Email(
-            sender=str(message["From"] or ""),
-            recipient=str(message["To"] or ""),
-            subject=str(message["Subject"] or ""),
-            date=getattr(date_header, "datetime", None),
-            html=html,
-            text=text,
-        ),
-        _open_pdfs(files, passwords, parsers),
+        Email(sender=mail.sender, recipient=mail.recipient, subject=mail.subject, date=mail.date, html=html, text=text),
+        _open_pdfs(mail, files, passwords, parsers),
     )
 
 
-def _is_attachment(part: EmailMessage) -> bool:
-    # Python's is_attachment() counts only "Content-Disposition: attachment"; a named part marked inline is a file too.
-    return part.is_attachment() or bool(part.get_filename())
-
-
-def _body(message: EmailMessage) -> EmailMessage | None:
-    """HTML, else plain text, searched for as `EmailMessage.get_body` does, but never a file."""
-    candidates = list(_body_candidates(message))
-    for subtype in ("html", "plain"):
-        if body := next((part for part in candidates if part.get_content_subtype() == subtype), None):
-            return body
-    return None
-
-
-def _body_candidates(part: EmailMessage) -> Iterator[EmailMessage]:
-    if _is_attachment(part):
-        return
-    if part.get_content_maintype() == "text":
-        yield part
-    elif part.get_content_maintype() == "multipart":
-        subparts = list(part.iter_parts())
-        if part.get_content_subtype() == "related" and subparts:
-            # Only its root is shown, the part `start` names or else the first; the rest are its images.
-            start = part.get_param("start")
-            subparts = [next((p for p in subparts if start and p["Content-ID"] == start), subparts[0])]
-        for subpart in subparts:
-            yield from _body_candidates(subpart)
-
-
-def _open_pdfs(files: list[File], passwords: Sequence[str], parsers: Sequence[StatementParser]) -> list[File]:
-    """PDFs decrypted when a password opens them, and primary the one parsing would take as the statement."""
+def _open_pdfs(mail: Mail, files: list[File], passwords: Passwords, parsers: Sequence[StatementParser]) -> list[File]:
+    """PDFs decrypted with the passwords of the parser that claims the e-mail, and primary the one parsing
+    would take as the statement."""
     indexes = [i for i, f in enumerate(files) if f.content_type == PDF]
     opened = list(files)
+    claimed = claimants(mail, parsers)
+    parser = claimed[0] if claimed else None
     with PdfSet([Attachment(files[i].filename, files[i].data) for i in indexes], passwords) as pdfs:
         try:
-            primary, _ = select_statement(pdfs, parsers)
+            primary, parser = select_statement(mail, pdfs, parsers)
         except ParserError:
             primary = 0  # none is a statement: the first PDF stands for the document
         for n, i in enumerate(indexes):
             try:
-                opened[i] = dataclasses.replace(files[i], data=pdfs.decrypted(n), primary=n == primary)
+                opened[i] = dataclasses.replace(files[i], data=pdfs.decrypted(n, parser), primary=n == primary)
             except PasswordRequiredError:
                 opened[i] = dataclasses.replace(files[i], locked=True, primary=n == primary)
             except InvalidDocumentError:
@@ -156,15 +120,6 @@ def _file(part: EmailMessage) -> File:
     if content_type == PDF:
         content_type = "application/octet-stream"
     return File(name or f"attachment{mimetypes.guess_extension(content_type) or ''}", content_type, data)
-
-
-def _text_of(part: EmailMessage) -> str:
-    try:
-        return part.get_content()
-    except LookupError:
-        # A charset Python does not know: most of the text is still readable as UTF-8.
-        payload = part.get_payload(decode=True)
-        return payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else ""
 
 
 def _data_uri(match: re.Match[str], inline: dict[str, EmailMessage], embedded: set[str]) -> str:

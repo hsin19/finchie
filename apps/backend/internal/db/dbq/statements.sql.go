@@ -24,11 +24,16 @@ func (q *Queries) DeleteStatementsForDocument(ctx context.Context, documentID in
 const findStatementByKey = `-- name: FindStatementByKey :one
 SELECT id, document_id
 FROM statements
-WHERE institution = $1 AND closing_date = $2
+WHERE institution = $1
+  AND kind = $2
+  AND period_start IS NOT DISTINCT FROM $3
+  AND closing_date = $4
 `
 
 type FindStatementByKeyParams struct {
 	Institution string
+	Kind        string
+	PeriodStart pgtype.Date
 	ClosingDate pgtype.Date
 }
 
@@ -38,7 +43,12 @@ type FindStatementByKeyRow struct {
 }
 
 func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKeyParams) (FindStatementByKeyRow, error) {
-	row := q.db.QueryRow(ctx, findStatementByKey, arg.Institution, arg.ClosingDate)
+	row := q.db.QueryRow(ctx, findStatementByKey,
+		arg.Institution,
+		arg.Kind,
+		arg.PeriodStart,
+		arg.ClosingDate,
+	)
 	var i FindStatementByKeyRow
 	err := row.Scan(&i.ID, &i.DocumentID)
 	return i, err
@@ -46,10 +56,10 @@ func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKey
 
 const getStatement = `-- name: GetStatement :one
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
+       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
-WHERE s.id = $1
+WHERE s.id = $1 AND s.kind = 'credit_card'
 `
 
 type GetStatementRow struct {
@@ -58,12 +68,13 @@ type GetStatementRow struct {
 	Institution        string
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
+	PaidOn             pgtype.Date
 	TransactionCount   int32
 }
 
@@ -82,36 +93,42 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 		&i.StatedNewCharges,
 		&i.StatedLabel,
 		&i.Balanced,
+		&i.PaidOn,
 		&i.TransactionCount,
 	)
 	return i, err
 }
 
 const insertStatement = `-- name: InsertStatement :one
-INSERT INTO statements (document_id, institution, closing_date, due_date, currency, total_due,
+INSERT INTO statements (document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
                         computed_new_charges, stated_new_charges, stated_label, balanced)
-VALUES ($1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12)
 RETURNING id
 `
 
 type InsertStatementParams struct {
 	DocumentID         int64
 	Institution        string
+	Kind               string
+	PeriodStart        pgtype.Date
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
 }
 
+// The bill's columns are null for a deposit statement (ADR 0013).
 func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertStatement,
 		arg.DocumentID,
 		arg.Institution,
+		arg.Kind,
+		arg.PeriodStart,
 		arg.ClosingDate,
 		arg.DueDate,
 		arg.Currency,
@@ -128,6 +145,8 @@ func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams
 
 type InsertTransactionsParams struct {
 	StatementID      int64
+	AccountID        int64
+	Unit             string
 	LineNo           int32
 	TransactionDate  pgtype.Date
 	PostingDate      pgtype.Date
@@ -138,13 +157,17 @@ type InsertTransactionsParams struct {
 	OriginalCurrency *string
 	Country          *string
 	CardLast4        *string
+	Memo             *string
+	Counterparty     *string
+	Balance          pgtype.Numeric
 }
 
 const listStatements = `-- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
+       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
+WHERE s.kind = 'credit_card'
 ORDER BY s.closing_date DESC, s.id DESC
 LIMIT $1
 `
@@ -155,15 +178,17 @@ type ListStatementsRow struct {
 	Institution        string
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
+	PaidOn             pgtype.Date
 	TransactionCount   int32
 }
 
+// Card bills only, until deposit statements get views of their own (ADR 0013).
 func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListStatementsRow, error) {
 	rows, err := q.db.Query(ctx, listStatements, rowLimit)
 	if err != nil {
@@ -185,6 +210,7 @@ func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListSta
 			&i.StatedNewCharges,
 			&i.StatedLabel,
 			&i.Balanced,
+			&i.PaidOn,
 			&i.TransactionCount,
 		); err != nil {
 			return nil, err
@@ -199,15 +225,33 @@ func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListSta
 
 const listTransactions = `-- name: ListTransactions :many
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- A trade's money (ADR 0017).
+       tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
+       tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN trades tr ON tr.transaction_id = t.id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
+LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
+                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
                                                        'transactionDate', c.transaction_date, 'amount', c.amount::text,
                                              'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
@@ -218,21 +262,46 @@ ORDER BY t.line_no
 `
 
 type ListTransactionsRow struct {
-	ID               int64
-	StatementID      int64
-	Institution      string
-	TransactionDate  pgtype.Date
-	PostingDate      pgtype.Date
-	Description      string
-	Kind             string
-	Amount           pgtype.Numeric
-	OriginalAmount   pgtype.Numeric
-	OriginalCurrency *string
-	Country          *string
-	CardLast4        *string
-	ParentID         *int64
-	Parent           []byte
-	Children         []byte
+	ID                       int64
+	StatementID              int64
+	Institution              string
+	TransactionDate          pgtype.Date
+	PostingDate              pgtype.Date
+	Description              string
+	Kind                     string
+	Amount                   pgtype.Numeric
+	OriginalAmount           pgtype.Numeric
+	OriginalCurrency         *string
+	Country                  *string
+	CardLast4                *string
+	ParentID                 *int64
+	Parent                   []byte
+	Children                 []byte
+	AccountKind              string
+	AccountID                int64
+	AccountName              *string
+	AccountNumber            string
+	Unit                     string
+	Memo                     *string
+	Counterparty             *string
+	Balance                  pgtype.Numeric
+	Flow                     pgtype.Numeric
+	TradeCategory            *string
+	TradePrice               pgtype.Numeric
+	TradeAmount              pgtype.Numeric
+	TradeFee                 pgtype.Numeric
+	TradeTax                 pgtype.Numeric
+	TradeNet                 pgtype.Numeric
+	TradePrepaid             pgtype.Numeric
+	CounterpartID            *int64
+	CounterpartStatementID   *int64
+	CounterpartDate          pgtype.Date
+	CounterpartAccountID     *int64
+	CounterpartAccountKind   *string
+	CounterpartInstitution   *string
+	CounterpartAccountName   *string
+	CounterpartAccountNumber *string
+	CounterpartFullNumber    *string
 }
 
 // The lines as printed, each with its parent (parent_id) and its children, which may be on other
@@ -262,6 +331,84 @@ func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]Li
 			&i.ParentID,
 			&i.Parent,
 			&i.Children,
+			&i.AccountKind,
+			&i.AccountID,
+			&i.AccountName,
+			&i.AccountNumber,
+			&i.Unit,
+			&i.Memo,
+			&i.Counterparty,
+			&i.Balance,
+			&i.Flow,
+			&i.TradeCategory,
+			&i.TradePrice,
+			&i.TradeAmount,
+			&i.TradeFee,
+			&i.TradeTax,
+			&i.TradeNet,
+			&i.TradePrepaid,
+			&i.CounterpartID,
+			&i.CounterpartStatementID,
+			&i.CounterpartDate,
+			&i.CounterpartAccountID,
+			&i.CounterpartAccountKind,
+			&i.CounterpartInstitution,
+			&i.CounterpartAccountName,
+			&i.CounterpartAccountNumber,
+			&i.CounterpartFullNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const overlappingDepositStatements = `-- name: OverlappingDepositStatements :many
+SELECT o.id, o.document_id, o.period_start, o.closing_date
+FROM statements s
+JOIN statements o ON o.id <> s.id
+    AND o.kind = 'deposit'
+    AND o.period_start <= s.closing_date
+    AND o.closing_date >= s.period_start
+WHERE s.id = $1
+  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = $2 AND t.unit = $3)
+    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = $2 AND b.unit = $3))
+`
+
+type OverlappingDepositStatementsParams struct {
+	StatementID int64
+	AccountID   int64
+	Unit        string
+}
+
+type OverlappingDepositStatementsRow struct {
+	ID          int64
+	DocumentID  int64
+	PeriodStart pgtype.Date
+	ClosingDate pgtype.Date
+}
+
+// The other deposit statements whose periods share days with this one's and that report the account in
+// the currency: on-demand exports such as Cathay's e-passbook (ADR 0013). Statements that only adjoin,
+// as monthly ones do, share no day.
+func (q *Queries) OverlappingDepositStatements(ctx context.Context, arg OverlappingDepositStatementsParams) ([]OverlappingDepositStatementsRow, error) {
+	rows, err := q.db.Query(ctx, overlappingDepositStatements, arg.StatementID, arg.AccountID, arg.Unit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OverlappingDepositStatementsRow
+	for rows.Next() {
+		var i OverlappingDepositStatementsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentID,
+			&i.PeriodStart,
+			&i.ClosingDate,
 		); err != nil {
 			return nil, err
 		}
@@ -274,7 +421,7 @@ func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]Li
 }
 
 const statementExists = `-- name: StatementExists :one
-SELECT EXISTS (SELECT 1 FROM statements WHERE id = $1)
+SELECT EXISTS (SELECT 1 FROM statements WHERE id = $1 AND kind = 'credit_card')
 `
 
 func (q *Queries) StatementExists(ctx context.Context, id int64) (bool, error) {
@@ -282,4 +429,67 @@ func (q *Queries) StatementExists(ctx context.Context, id int64) (bool, error) {
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const trimStatementBalances = `-- name: TrimStatementBalances :exec
+DELETE FROM balances b
+WHERE b.statement_id = $1
+  AND b.account_id = $2
+  AND b.unit = $3
+  AND b.as_of <= $4
+  AND (b.as_of >= $5 OR EXISTS (
+      SELECT 1 FROM balances k
+      WHERE k.statement_id = $6 AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of))
+`
+
+type TrimStatementBalancesParams struct {
+	StatementID int64
+	AccountID   int64
+	Unit        string
+	ToDate      pgtype.Date
+	FromDate    pgtype.Date
+	KeeperID    int64
+}
+
+// A statement's balances of an account in a currency on the days another statement keeps, and on a day
+// before them that statement has a balance for too: the opening balance two exports starting the same
+// day both have.
+func (q *Queries) TrimStatementBalances(ctx context.Context, arg TrimStatementBalancesParams) error {
+	_, err := q.db.Exec(ctx, trimStatementBalances,
+		arg.StatementID,
+		arg.AccountID,
+		arg.Unit,
+		arg.ToDate,
+		arg.FromDate,
+		arg.KeeperID,
+	)
+	return err
+}
+
+const trimStatementLines = `-- name: TrimStatementLines :exec
+DELETE FROM transactions
+WHERE statement_id = $1
+  AND account_id = $2
+  AND unit = $3
+  AND transaction_date BETWEEN $4 AND $5
+`
+
+type TrimStatementLinesParams struct {
+	StatementID int64
+	AccountID   int64
+	Unit        string
+	FromDate    pgtype.Date
+	ToDate      pgtype.Date
+}
+
+// A statement's lines of an account in a currency on the days another statement keeps.
+func (q *Queries) TrimStatementLines(ctx context.Context, arg TrimStatementLinesParams) error {
+	_, err := q.db.Exec(ctx, trimStatementLines,
+		arg.StatementID,
+		arg.AccountID,
+		arg.Unit,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	return err
 }

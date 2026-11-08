@@ -18,6 +18,45 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AccountContinuity.
+const (
+	Checked AccountContinuity = "checked"
+	Unknown AccountContinuity = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AccountContinuity enum.
+func (e AccountContinuity) Valid() bool {
+	switch e {
+	case Checked:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountKind.
+const (
+	CreditCard AccountKind = "credit_card"
+	Deposit    AccountKind = "deposit"
+	Securities AccountKind = "securities"
+)
+
+// Valid indicates whether the value is a known member of the AccountKind enum.
+func (e AccountKind) Valid() bool {
+	switch e {
+	case CreditCard:
+		return true
+	case Deposit:
+		return true
+	case Securities:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DocumentStatus.
 const (
 	Duplicate   DocumentStatus = "duplicate"
@@ -48,11 +87,16 @@ func (e DocumentStatus) Valid() bool {
 // Defines values for TransactionKind.
 const (
 	AnnualFee             TransactionKind = "annual_fee"
+	Buy                   TransactionKind = "buy"
+	Fee                   TransactionKind = "fee"
 	ForeignTransactionFee TransactionKind = "foreign_transaction_fee"
+	Interest              TransactionKind = "interest"
+	Other                 TransactionKind = "other"
 	Payment               TransactionKind = "payment"
 	Purchase              TransactionKind = "purchase"
 	Rebate                TransactionKind = "rebate"
 	Refund                TransactionKind = "refund"
+	Sell                  TransactionKind = "sell"
 )
 
 // Valid indicates whether the value is a known member of the TransactionKind enum.
@@ -60,7 +104,15 @@ func (e TransactionKind) Valid() bool {
 	switch e {
 	case AnnualFee:
 		return true
+	case Buy:
+		return true
+	case Fee:
+		return true
 	case ForeignTransactionFee:
+		return true
+	case Interest:
+		return true
+	case Other:
 		return true
 	case Payment:
 		return true
@@ -69,6 +121,8 @@ func (e TransactionKind) Valid() bool {
 	case Rebate:
 		return true
 	case Refund:
+		return true
+	case Sell:
 		return true
 	default:
 		return false
@@ -99,6 +153,176 @@ func (e TransactionSort) Valid() bool {
 	}
 }
 
+// Account defines model for Account.
+type Account struct {
+	// Balances The newest balance in each unit
+	Balances []Balance `json:"balances"`
+
+	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
+	Continuity AccountContinuity `json:"continuity"`
+
+	// FullNumber Its full number, where the owner gave one (ADR 0016)
+	FullNumber *string      `json:"fullNumber,omitempty"`
+	Gaps       []BalanceGap `json:"gaps"`
+	Id         int64        `json:"id"`
+
+	// Institution Example: esun
+	Institution string      `json:"institution"`
+	Kind        AccountKind `json:"kind"`
+
+	// Label The source's name for it
+	//
+	// Example: 臺幣活存
+	Label *string `json:"label,omitempty"`
+
+	// Name The owner's name for it
+	Name *string `json:"name,omitempty"`
+
+	// Number As printed, usually masked; empty for a card bill
+	//
+	// Example: 1234567***890
+	Number string `json:"number"`
+
+	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
+	Worth *Decimal `json:"worth,omitempty"`
+}
+
+// AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
+type AccountContinuity string
+
+// AccountDetail defines model for AccountDetail.
+type AccountDetail struct {
+	// Balances The newest balance in each unit
+	Balances []Balance `json:"balances"`
+
+	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
+	Continuity AccountContinuity `json:"continuity"`
+
+	// FullNumber Its full number, where the owner gave one (ADR 0016)
+	FullNumber *string      `json:"fullNumber,omitempty"`
+	Gaps       []BalanceGap `json:"gaps"`
+
+	// History Every balance, newest first
+	History []Balance `json:"history"`
+	Id      int64     `json:"id"`
+
+	// Institution Example: esun
+	Institution string      `json:"institution"`
+	Kind        AccountKind `json:"kind"`
+
+	// Label The source's name for it
+	//
+	// Example: 臺幣活存
+	Label *string `json:"label,omitempty"`
+
+	// Name The owner's name for it
+	Name *string `json:"name,omitempty"`
+
+	// Number As printed, usually masked; empty for a card bill
+	//
+	// Example: 1234567***890
+	Number string `json:"number"`
+
+	// Positions A securities account's: every security it holds or has traded, by name (ADR 0017)
+	Positions *[]Position `json:"positions,omitempty"`
+
+	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
+	Worth *Decimal `json:"worth,omitempty"`
+}
+
+// AccountKind defines model for AccountKind.
+type AccountKind string
+
+// AccountLine defines model for AccountLine.
+type AccountLine struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal `json:"amount"`
+
+	// Balance The running balance, when printed
+	Balance *Decimal `json:"balance,omitempty"`
+
+	// Counterpart The other line of a transfer or card payment (ADR 0016)
+	Counterpart  *LineCounterpart   `json:"counterpart,omitempty"`
+	Counterparty *string            `json:"counterparty,omitempty"`
+	Date         openapi_types.Date `json:"date"`
+	Description  string             `json:"description"`
+	Id           int64              `json:"id"`
+
+	// Kind A card line's kind, or interest, fee, or other on a deposit account
+	Kind        string  `json:"kind"`
+	Memo        *string `json:"memo,omitempty"`
+	StatementId int64   `json:"statementId"`
+
+	// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
+	Trade *Trade `json:"trade,omitempty"`
+	Unit  string `json:"unit"`
+}
+
+// AccountTotal defines model for AccountTotal.
+type AccountTotal struct {
+	AccountId     int64   `json:"accountId"`
+	AccountName   *string `json:"accountName,omitempty"`
+	AccountNumber *string `json:"accountNumber,omitempty"`
+	Count         int     `json:"count"`
+	Institution   string  `json:"institution"`
+}
+
+// AccountUpdate defines model for AccountUpdate.
+type AccountUpdate struct {
+	// FullNumber Digits, spaces and dashes allowed; empty clears it
+	FullNumber *string `json:"fullNumber,omitempty"`
+
+	// Name The owner's name for the account; empty clears it
+	Name *string `json:"name,omitempty"`
+}
+
+// Balance defines model for Balance.
+type Balance struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal `json:"amount"`
+
+	// AsOf The end of the day it was held
+	AsOf openapi_types.Date `json:"asOf"`
+
+	// Code A security's code, from the exchanges' lists (ADR 0017)
+	//
+	// Example: 00878
+	Code *string `json:"code,omitempty"`
+
+	// Price A security's newest close in NT$, which its worth used
+	Price *Decimal `json:"price,omitempty"`
+
+	// RateDay The day of the rate or close its worth used; absent for NT$
+	RateDay *openapi_types.Date `json:"rateDay,omitempty"`
+
+	// StatementId The statement that reported it
+	StatementId int64 `json:"statementId"`
+
+	// Unit ISO 4217, or a points program's code
+	//
+	// Example: TWD
+	Unit string `json:"unit"`
+
+	// Worth In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points
+	Worth *Decimal `json:"worth,omitempty"`
+}
+
+// BalanceGap Two consecutive balances in one unit that the lines between them do not join
+type BalanceGap struct {
+	From openapi_types.Date `json:"from"`
+	To   openapi_types.Date `json:"to"`
+	Unit string             `json:"unit"`
+
+	// Unseen Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Unseen Decimal `json:"unseen"`
+}
+
 // CardTotal defines model for CardTotal.
 type CardTotal struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
@@ -119,10 +343,15 @@ type Decimal = string
 
 // Document defines model for Document.
 type Document struct {
-	ContentType   string     `json:"contentType"`
-	Error         *string    `json:"error,omitempty"`
-	Filename      string     `json:"filename"`
-	Id            int64      `json:"id"`
+	// AccountCount Accounts its statement reported, 0 without one
+	AccountCount int     `json:"accountCount"`
+	ContentType  string  `json:"contentType"`
+	Error        *string `json:"error,omitempty"`
+	Filename     string  `json:"filename"`
+	Id           int64   `json:"id"`
+
+	// LineCount Lines its statement holds, 0 without one
+	LineCount     int        `json:"lineCount"`
 	ParsedAt      *time.Time `json:"parsedAt,omitempty"`
 	Parser        *string    `json:"parser,omitempty"`
 	ParserVersion *string    `json:"parserVersion,omitempty"`
@@ -131,6 +360,9 @@ type Document struct {
 	// Sha256 Hex
 	Sha256    string `json:"sha256"`
 	SizeBytes int    `json:"sizeBytes"`
+
+	// StatementKind The kind of statement it produced, if any; card bills only are listed by /api/statements
+	StatementKind *AccountKind `json:"statementKind,omitempty"`
 
 	// Status pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
 	// transactions don't add up to the statement. duplicate: the same statement came from
@@ -168,9 +400,57 @@ type KindTotal struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Amount Decimal         `json:"amount"`
-	Count  int             `json:"count"`
-	Kind   TransactionKind `json:"kind"`
+	Amount Decimal `json:"amount"`
+	Count  int     `json:"count"`
+
+	// Flow Seen from the owner
+	Flow Decimal `json:"flow"`
+
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+	Kind TransactionKind `json:"kind"`
+}
+
+// LineCounterpart The other line of a transfer or card payment (ADR 0016)
+type LineCounterpart struct {
+	// AccountId A deposit account; absent for a card bill
+	AccountId   *int64      `json:"accountId,omitempty"`
+	AccountKind AccountKind `json:"accountKind"`
+
+	// AccountName The owner's name for the account, else the bank's
+	AccountName *string `json:"accountName,omitempty"`
+
+	// AccountNumber Its full number where given, else as printed
+	AccountNumber *string            `json:"accountNumber,omitempty"`
+	Date          openapi_types.Date `json:"date"`
+	Id            int64              `json:"id"`
+	Institution   string             `json:"institution"`
+	StatementId   int64              `json:"statementId"`
+}
+
+// Position A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017).
+type Position struct {
+	Code *string `json:"code,omitempty"`
+
+	// Cost What the shares held cost; absent when not known
+	Cost *Decimal `json:"cost,omitempty"`
+
+	// Gain Worth less cost
+	Gain *Decimal `json:"gain,omitempty"`
+
+	// Realized What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known
+	Realized *Decimal `json:"realized,omitempty"`
+
+	// Shares The newest holding; 0 once sold out
+	Shares Decimal `json:"shares"`
+
+	// Since The day it was last held at none
+	Since *openapi_types.Date `json:"since,omitempty"`
+
+	// Unit The security's name
+	Unit string `json:"unit"`
+
+	// Worth The shares at the newest close
+	Worth *Decimal `json:"worth,omitempty"`
 }
 
 // PreviewFile defines model for PreviewFile.
@@ -180,7 +460,7 @@ type PreviewFile struct {
 	Filename    string `json:"filename"`
 	Index       int    `json:"index"`
 
-	// Locked A PDF none of the parser's passwords opens
+	// Locked A PDF none of the parser's passwords opens, served as received
 	Locked bool `json:"locked"`
 
 	// Primary The one file /preview/pdf serves
@@ -220,8 +500,11 @@ type Statement struct {
 	Id         int64              `json:"id"`
 
 	// Institution Example: taishin
-	Institution    string         `json:"institution"`
-	Reconciliation Reconciliation `json:"reconciliation"`
+	Institution string `json:"institution"`
+
+	// PaidOn When a deposit account or a later bill showed it paid (ADR 0016); absent while that is not known
+	PaidOn         *openapi_types.Date `json:"paidOn,omitempty"`
+	Reconciliation Reconciliation      `json:"reconciliation"`
 
 	// TotalDue Decimal number as a string, e.g. "-6552.97"
 	//
@@ -230,21 +513,78 @@ type Statement struct {
 	TransactionCount int     `json:"transactionCount"`
 }
 
+// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
+type Trade struct {
+	// Amount 價金: the shares at the price
+	Amount Decimal `json:"amount"`
+
+	// Category The broker's category as printed
+	//
+	// Example: 集買
+	Category string `json:"category"`
+
+	// Fee Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Fee Decimal `json:"fee"`
+
+	// Net 應收付: received positive, paid negative; zero for a buy paid in advance
+	Net Decimal `json:"net"`
+
+	// Prepaid 預繳金, for a buy paid in advance
+	Prepaid *Decimal `json:"prepaid,omitempty"`
+
+	// Price Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Price Decimal `json:"price"`
+
+	// Tax Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Tax Decimal `json:"tax"`
+}
+
 // Transaction defines model for Transaction.
 type Transaction struct {
+	// AccountId A deposit account; absent for a card line
+	AccountId   *int64       `json:"accountId,omitempty"`
+	AccountKind *AccountKind `json:"accountKind,omitempty"`
+
+	// AccountName The owner's name for a deposit account, else the bank's
+	AccountName *string `json:"accountName,omitempty"`
+
+	// AccountNumber A deposit account's full number where given, else as printed
+	AccountNumber *string `json:"accountNumber,omitempty"`
+
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Amount    Decimal `json:"amount"`
-	CardLast4 *string `json:"cardLast4,omitempty"`
+	Amount Decimal `json:"amount"`
+
+	// Balance Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Balance   *Decimal `json:"balance,omitempty"`
+	CardLast4 *string  `json:"cardLast4,omitempty"`
 
 	// Children Lines that adjust this one, possibly on other statements; absent without any
-	Children    *[]TransactionLink `json:"children,omitempty"`
-	Country     *string            `json:"country,omitempty"`
-	Description string             `json:"description"`
-	Id          int64              `json:"id"`
-	Institution string             `json:"institution"`
-	Kind        TransactionKind    `json:"kind"`
+	Children *[]TransactionLink `json:"children,omitempty"`
+
+	// Counterpart The other line of a transfer or card payment (ADR 0016)
+	Counterpart  *LineCounterpart `json:"counterpart,omitempty"`
+	Counterparty *string          `json:"counterparty,omitempty"`
+	Country      *string          `json:"country,omitempty"`
+	Description  string           `json:"description"`
+
+	// Flow Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it
+	Flow        *Decimal `json:"flow,omitempty"`
+	Id          int64    `json:"id"`
+	Institution string   `json:"institution"`
+
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+	Kind TransactionKind `json:"kind"`
+	Memo *string         `json:"memo,omitempty"`
 
 	// OriginalAmount Decimal number as a string, e.g. "-6552.97"
 	//
@@ -253,10 +593,16 @@ type Transaction struct {
 	OriginalCurrency *string  `json:"originalCurrency,omitempty"`
 
 	// Parent Another line, in short, enough to find it and to tell a refund in full
-	Parent          *TransactionLink    `json:"parent,omitempty"`
-	PostingDate     *openapi_types.Date `json:"postingDate,omitempty"`
-	StatementId     int64               `json:"statementId"`
-	TransactionDate openapi_types.Date  `json:"transactionDate"`
+	Parent      *TransactionLink    `json:"parent,omitempty"`
+	PostingDate *openapi_types.Date `json:"postingDate,omitempty"`
+	StatementId int64               `json:"statementId"`
+
+	// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
+	Trade           *Trade             `json:"trade,omitempty"`
+	TransactionDate openapi_types.Date `json:"transactionDate"`
+
+	// Unit ISO 4217, or a points program's code
+	Unit *string `json:"unit,omitempty"`
 }
 
 // TransactionFamily defines model for TransactionFamily.
@@ -266,7 +612,7 @@ type TransactionFamily struct {
 	Transaction Transaction   `json:"transaction"`
 }
 
-// TransactionKind defines model for TransactionKind.
+// TransactionKind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
 type TransactionKind string
 
 // TransactionLink Another line, in short, enough to find it and to tell a refund in full
@@ -274,9 +620,11 @@ type TransactionLink struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Amount Decimal         `json:"amount"`
-	Id     int64           `json:"id"`
-	Kind   TransactionKind `json:"kind"`
+	Amount Decimal `json:"amount"`
+	Id     int64   `json:"id"`
+
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+	Kind TransactionKind `json:"kind"`
 
 	// OriginalAmount Decimal number as a string, e.g. "-6552.97"
 	//
@@ -289,13 +637,16 @@ type TransactionLink struct {
 
 // TransactionSearch defines model for TransactionSearch.
 type TransactionSearch struct {
-	ByCard []CardTotal   `json:"byCard"`
-	ByKind []KindTotal   `json:"byKind"`
-	Items  []Transaction `json:"items"`
+	// ByAccount Deposit accounts, a facet like byCard
+	ByAccount []AccountTotal `json:"byAccount"`
+	ByCard    []CardTotal    `json:"byCard"`
+	ByKind    []KindTotal    `json:"byKind"`
 
-	// Sum Decimal number as a string, e.g. "-6552.97"
-	//
-	// Example: 1234.50
+	// Flows Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016)
+	Flows []UnitFlow    `json:"flows"`
+	Items []Transaction `json:"items"`
+
+	// Sum Amounts as printed, which only adds up within one kind of account: use with accountKind
 	Sum Decimal `json:"sum"`
 
 	// Total Rows matching every filter
@@ -305,11 +656,35 @@ type TransactionSearch struct {
 // TransactionSort defines model for TransactionSort.
 type TransactionSort string
 
+// UnitFlow defines model for UnitFlow.
+type UnitFlow struct {
+	// Moved What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received
+	Moved Decimal `json:"moved"`
+
+	// MovedCount Rows listed for it
+	MovedCount int `json:"movedCount"`
+
+	// Received Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Received Decimal `json:"received"`
+
+	// Spent Negative or zero
+	Spent Decimal `json:"spent"`
+	Unit  string  `json:"unit"`
+}
+
 // Id defines model for Id.
 type Id = int64
 
 // Limit defines model for Limit.
 type Limit = int
+
+// ListAccountLinesParams defines parameters for ListAccountLines.
+type ListAccountLinesParams struct {
+	Limit  *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int   `form:"offset,omitempty" json:"offset,omitempty"`
+}
 
 // ListDocumentsParams defines parameters for ListDocuments.
 type ListDocumentsParams struct {
@@ -348,7 +723,16 @@ type SearchTransactionsParams struct {
 	// Overseas Only rows charged in a foreign currency or in another country
 	Overseas *bool `form:"overseas,omitempty" json:"overseas,omitempty"`
 
-	// Q Case-insensitive substring of the description
+	// AccountKind Only card lines, or only deposit lines
+	AccountKind *AccountKind `form:"accountKind,omitempty" json:"accountKind,omitempty"`
+
+	// Account One deposit account
+	Account *int64 `form:"account,omitempty" json:"account,omitempty"`
+
+	// HideTransfers Leave out transfers between the owner's lines and card payments (ADR 0016)
+	HideTransfers *bool `form:"hideTransfers,omitempty" json:"hideTransfers,omitempty"`
+
+	// Q Case-insensitive substring of the description or the memo
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Sort Row order; largest and smallest compare amounts by size, ignoring the sign
@@ -359,15 +743,30 @@ type SearchTransactionsParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// UpdateAccountJSONRequestBody defines body for UpdateAccount for application/json ContentType.
+type UpdateAccountJSONRequestBody = AccountUpdate
+
 // UploadDocumentMultipartRequestBody defines body for UploadDocument for multipart/form-data ContentType.
 type UploadDocumentMultipartRequestBody UploadDocumentMultipartBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAccounts Every account, with its newest balance in each unit and where its balances do not join up
+	// (GET /api/accounts)
+	ListAccounts(ctx *echo.Context) error
+	// GetAccount One account with every balance its sources reported
+	// (GET /api/accounts/{id})
+	GetAccount(ctx *echo.Context, id Id) error
+	// UpdateAccount The owner's details of an account, its own name and its full number
+	// (PATCH /api/accounts/{id})
+	UpdateAccount(ctx *echo.Context, id Id) error
+	// ListAccountLines An account's lines, newest first
+	// (GET /api/accounts/{id}/lines)
+	ListAccountLines(ctx *echo.Context, id Id, params ListAccountLinesParams) error
 	// ListDocuments Uploaded documents, newest first
 	// (GET /api/documents)
 	ListDocuments(ctx *echo.Context, params ListDocumentsParams) error
-	// UploadDocument Upload an e-mail (.eml) or PDF statement and queue it for parsing
+	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
 	// (POST /api/documents)
 	UploadDocument(ctx *echo.Context) error
 
@@ -391,6 +790,9 @@ type ServerInterface interface {
 	// ReparseDocument Parse the stored original again, e.g. after a parser fix
 	// (POST /api/documents/{id}/reparse)
 	ReparseDocument(ctx *echo.Context, id Id) error
+	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
+	// (GET /api/mail-filters.xml)
+	GetMailFilters(ctx *echo.Context) error
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx *echo.Context, params ListStatementsParams) error
@@ -411,6 +813,79 @@ type ServerInterface interface {
 // ServerInterfaceWrapper converts echo contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler ServerInterface
+}
+
+// ListAccounts converts echo context to params.
+func (w *ServerInterfaceWrapper) ListAccounts(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListAccounts(ctx)
+	return err
+}
+
+// GetAccount converts echo context to params.
+func (w *ServerInterfaceWrapper) GetAccount(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetAccount(ctx, id)
+	return err
+}
+
+// UpdateAccount converts echo context to params.
+func (w *ServerInterfaceWrapper) UpdateAccount(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.UpdateAccount(ctx, id)
+	return err
+}
+
+// ListAccountLines converts echo context to params.
+func (w *ServerInterfaceWrapper) ListAccountLines(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAccountLinesParams
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", ctx.QueryParams(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter limit: %s", err))
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", ctx.QueryParams(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter offset: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListAccountLines(ctx, id, params)
+	return err
 }
 
 // ListDocuments converts echo context to params.
@@ -560,6 +1035,15 @@ func (w *ServerInterfaceWrapper) ReparseDocument(ctx *echo.Context) error {
 	return err
 }
 
+// GetMailFilters converts echo context to params.
+func (w *ServerInterfaceWrapper) GetMailFilters(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetMailFilters(ctx)
+	return err
+}
+
 // ListStatements converts echo context to params.
 func (w *ServerInterfaceWrapper) ListStatements(ctx *echo.Context) error {
 	var err error
@@ -672,6 +1156,27 @@ func (w *ServerInterfaceWrapper) SearchTransactions(ctx *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter overseas: %s", err))
 	}
 
+	// ------------- Optional query parameter "accountKind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "accountKind", ctx.QueryParams(), &params.AccountKind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter accountKind: %s", err))
+	}
+
+	// ------------- Optional query parameter "account" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "account", ctx.QueryParams(), &params.Account, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter account: %s", err))
+	}
+
+	// ------------- Optional query parameter "hideTransfers" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "hideTransfers", ctx.QueryParams(), &params.HideTransfers, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter hideTransfers: %s", err))
+	}
+
 	// ------------- Optional query parameter "q" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", ctx.QueryParams(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -777,6 +1282,11 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/documents/:id/preview/pdf", wrapper.GetDocumentPreviewPdf, options.OperationMiddlewares["getDocumentPreviewPdf"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/body", wrapper.GetDocumentPreviewBody, options.OperationMiddlewares["getDocumentPreviewBody"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/files/:index", wrapper.GetDocumentPreviewFile, options.OperationMiddlewares["getDocumentPreviewFile"]...)
+	router.GET(options.BaseURL+"/api/accounts", wrapper.ListAccounts, options.OperationMiddlewares["listAccounts"]...)
+	router.GET(options.BaseURL+"/api/accounts/:id", wrapper.GetAccount, options.OperationMiddlewares["getAccount"]...)
+	router.PATCH(options.BaseURL+"/api/accounts/:id", wrapper.UpdateAccount, options.OperationMiddlewares["updateAccount"]...)
+	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
+	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
 	router.GET(options.BaseURL+"/api/statements/:id", wrapper.GetStatement, options.OperationMiddlewares["getStatement"]...)
 	router.GET(options.BaseURL+"/api/transactions/:id", wrapper.GetTransaction, options.OperationMiddlewares["getTransaction"]...)
@@ -786,6 +1296,145 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 }
 
 type ProblemJSONResponse Problem
+
+type ListAccountsRequestObject struct {
+}
+
+type ListAccountsResponseObject interface {
+	VisitListAccountsResponse(w http.ResponseWriter) error
+}
+
+type ListAccounts200JSONResponse []Account
+
+func (response ListAccounts200JSONResponse) VisitListAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAccountRequestObject struct {
+	Id Id `json:"id"`
+}
+
+type GetAccountResponseObject interface {
+	VisitGetAccountResponse(w http.ResponseWriter) error
+}
+
+type GetAccount200JSONResponse AccountDetail
+
+func (response GetAccount200JSONResponse) VisitGetAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAccount404JSONResponse struct{ ProblemJSONResponse }
+
+func (response GetAccount404JSONResponse) VisitGetAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAccountRequestObject struct {
+	Id   Id `json:"id"`
+	Body *UpdateAccountJSONRequestBody
+}
+
+type UpdateAccountResponseObject interface {
+	VisitUpdateAccountResponse(w http.ResponseWriter) error
+}
+
+type UpdateAccount204Response struct {
+}
+
+func (response UpdateAccount204Response) VisitUpdateAccountResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UpdateAccount400JSONResponse struct{ ProblemJSONResponse }
+
+func (response UpdateAccount400JSONResponse) VisitUpdateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAccount404JSONResponse Problem
+
+func (response UpdateAccount404JSONResponse) VisitUpdateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAccountLinesRequestObject struct {
+	Id     Id `json:"id"`
+	Params ListAccountLinesParams
+}
+
+type ListAccountLinesResponseObject interface {
+	VisitListAccountLinesResponse(w http.ResponseWriter) error
+}
+
+type ListAccountLines200JSONResponse []AccountLine
+
+func (response ListAccountLines200JSONResponse) VisitListAccountLinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAccountLines404JSONResponse struct{ ProblemJSONResponse }
+
+func (response ListAccountLines404JSONResponse) VisitListAccountLinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListDocumentsRequestObject struct {
 	Params ListDocumentsParams
@@ -869,6 +1518,20 @@ func (response UploadDocument413JSONResponse) VisitUploadDocumentResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadDocument415JSONResponse Problem
+
+func (response UploadDocument415JSONResponse) VisitUploadDocumentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(415)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1328,6 +1991,55 @@ func (response ReparseDocument404JSONResponse) VisitReparseDocumentResponse(w ht
 	return err
 }
 
+type GetMailFiltersRequestObject struct {
+}
+
+type GetMailFiltersResponseObject interface {
+	VisitGetMailFiltersResponse(w http.ResponseWriter) error
+}
+
+type GetMailFilters200ResponseHeaders struct {
+	ContentDisposition *string
+}
+
+type GetMailFilters200ApplicationxmlResponse struct {
+	Body          io.Reader
+	Headers       GetMailFilters200ResponseHeaders
+	ContentLength int64
+}
+
+func (response GetMailFilters200ApplicationxmlResponse) VisitGetMailFiltersResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/xml")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetMailFilters404JSONResponse struct{ ProblemJSONResponse }
+
+func (response GetMailFilters404JSONResponse) VisitGetMailFiltersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListStatementsRequestObject struct {
 	Params ListStatementsParams
 }
@@ -1482,10 +2194,22 @@ func (response GetTransaction404JSONResponse) VisitGetTransactionResponse(w http
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAccounts Every account, with its newest balance in each unit and where its balances do not join up
+	// (GET /api/accounts)
+	ListAccounts(ctx context.Context, request ListAccountsRequestObject) (ListAccountsResponseObject, error)
+	// GetAccount One account with every balance its sources reported
+	// (GET /api/accounts/{id})
+	GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error)
+	// UpdateAccount The owner's details of an account, its own name and its full number
+	// (PATCH /api/accounts/{id})
+	UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error)
+	// ListAccountLines An account's lines, newest first
+	// (GET /api/accounts/{id}/lines)
+	ListAccountLines(ctx context.Context, request ListAccountLinesRequestObject) (ListAccountLinesResponseObject, error)
 	// ListDocuments Uploaded documents, newest first
 	// (GET /api/documents)
 	ListDocuments(ctx context.Context, request ListDocumentsRequestObject) (ListDocumentsResponseObject, error)
-	// UploadDocument Upload an e-mail (.eml) or PDF statement and queue it for parsing
+	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
 	// (POST /api/documents)
 	UploadDocument(ctx context.Context, request UploadDocumentRequestObject) (UploadDocumentResponseObject, error)
 
@@ -1509,6 +2233,9 @@ type StrictServerInterface interface {
 	// ReparseDocument Parse the stored original again, e.g. after a parser fix
 	// (POST /api/documents/{id}/reparse)
 	ReparseDocument(ctx context.Context, request ReparseDocumentRequestObject) (ReparseDocumentResponseObject, error)
+	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
+	// (GET /api/mail-filters.xml)
+	GetMailFilters(ctx context.Context, request GetMailFiltersRequestObject) (GetMailFiltersResponseObject, error)
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx context.Context, request ListStatementsRequestObject) (ListStatementsResponseObject, error)
@@ -1536,6 +2263,128 @@ func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareF
 type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
+}
+
+// ListAccounts operation middleware
+func (sh *strictHandler) ListAccounts(ctx *echo.Context) error {
+	var request ListAccountsRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAccounts(ctx.Request().Context(), request.(ListAccountsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAccounts")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListAccountsResponseObject); ok {
+		return validResponse.VisitListAccountsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetAccount operation middleware
+func (sh *strictHandler) GetAccount(ctx *echo.Context, id Id) error {
+	var request GetAccountRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAccount(ctx.Request().Context(), request.(GetAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAccount")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetAccountResponseObject); ok {
+		return validResponse.VisitGetAccountResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// UpdateAccount operation middleware
+func (sh *strictHandler) UpdateAccount(ctx *echo.Context, id Id) error {
+	var request UpdateAccountRequestObject
+
+	request.Id = id
+
+	var body UpdateAccountJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAccount(ctx.Request().Context(), request.(UpdateAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAccount")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UpdateAccountResponseObject); ok {
+		return validResponse.VisitUpdateAccountResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListAccountLines operation middleware
+func (sh *strictHandler) ListAccountLines(ctx *echo.Context, id Id, params ListAccountLinesParams) error {
+	var request ListAccountLinesRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAccountLines(ctx.Request().Context(), request.(ListAccountLinesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAccountLines")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListAccountLinesResponseObject); ok {
+		return validResponse.VisitListAccountLinesResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
 }
 
 // ListDocuments operation middleware
@@ -1762,6 +2611,29 @@ func (sh *strictHandler) ReparseDocument(ctx *echo.Context, id Id) error {
 		return err
 	} else if validResponse, ok := response.(ReparseDocumentResponseObject); ok {
 		return validResponse.VisitReparseDocumentResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetMailFilters operation middleware
+func (sh *strictHandler) GetMailFilters(ctx *echo.Context) error {
+	var request GetMailFiltersRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMailFilters(ctx.Request().Context(), request.(GetMailFiltersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMailFilters")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetMailFiltersResponseObject); ok {
+		return validResponse.VisitGetMailFiltersResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

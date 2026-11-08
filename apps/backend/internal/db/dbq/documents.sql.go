@@ -78,10 +78,14 @@ func (q *Queries) FinishDocument(ctx context.Context, arg FinishDocumentParams) 
 }
 
 const getDocument = `-- name: GetDocument :one
-SELECT id, sha256, filename, content_type, octet_length(content)::integer AS size_bytes, received_at,
-       status, error, parser, parser_version, warnings, parsed_at
-FROM documents
-WHERE id = $1
+SELECT d.id, d.sha256, d.filename, d.content_type, octet_length(d.content)::integer AS size_bytes, d.received_at,
+       d.status, d.error, d.parser, d.parser_version, d.warnings, d.parsed_at,
+       s.kind AS statement_kind,
+       (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS line_count,
+       (SELECT count(DISTINCT b.account_id) FROM balances b WHERE b.statement_id = s.id)::integer AS account_count
+FROM documents d
+LEFT JOIN statements s ON s.document_id = d.id
+WHERE d.id = $1
 `
 
 type GetDocumentRow struct {
@@ -97,8 +101,12 @@ type GetDocumentRow struct {
 	ParserVersion *string
 	Warnings      []string
 	ParsedAt      pgtype.Timestamptz
+	StatementKind *string
+	LineCount     int32
+	AccountCount  int32
 }
 
+// With what it produced: its statement's kind, and how many lines and accounts it reported.
 func (q *Queries) GetDocument(ctx context.Context, id int64) (GetDocumentRow, error) {
 	row := q.db.QueryRow(ctx, getDocument, id)
 	var i GetDocumentRow
@@ -115,6 +123,9 @@ func (q *Queries) GetDocument(ctx context.Context, id int64) (GetDocumentRow, er
 		&i.ParserVersion,
 		&i.Warnings,
 		&i.ParsedAt,
+		&i.StatementKind,
+		&i.LineCount,
+		&i.AccountCount,
 	)
 	return i, err
 }
@@ -139,10 +150,14 @@ func (q *Queries) GetDocumentContent(ctx context.Context, id int64) (GetDocument
 }
 
 const listDocuments = `-- name: ListDocuments :many
-SELECT id, sha256, filename, content_type, octet_length(content)::integer AS size_bytes, received_at,
-       status, error, parser, parser_version, warnings, parsed_at
-FROM documents
-ORDER BY received_at DESC, id DESC
+SELECT d.id, d.sha256, d.filename, d.content_type, octet_length(d.content)::integer AS size_bytes, d.received_at,
+       d.status, d.error, d.parser, d.parser_version, d.warnings, d.parsed_at,
+       s.kind AS statement_kind,
+       (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS line_count,
+       (SELECT count(DISTINCT b.account_id) FROM balances b WHERE b.statement_id = s.id)::integer AS account_count
+FROM documents d
+LEFT JOIN statements s ON s.document_id = d.id
+ORDER BY d.received_at DESC, d.id DESC
 LIMIT $1
 `
 
@@ -159,8 +174,12 @@ type ListDocumentsRow struct {
 	ParserVersion *string
 	Warnings      []string
 	ParsedAt      pgtype.Timestamptz
+	StatementKind *string
+	LineCount     int32
+	AccountCount  int32
 }
 
+// The same columns as GetDocument.
 func (q *Queries) ListDocuments(ctx context.Context, rowLimit int32) ([]ListDocumentsRow, error) {
 	rows, err := q.db.Query(ctx, listDocuments, rowLimit)
 	if err != nil {
@@ -183,6 +202,9 @@ func (q *Queries) ListDocuments(ctx context.Context, rowLimit int32) ([]ListDocu
 			&i.ParserVersion,
 			&i.Warnings,
 			&i.ParsedAt,
+			&i.StatementKind,
+			&i.LineCount,
+			&i.AccountCount,
 		); err != nil {
 			return nil, err
 		}

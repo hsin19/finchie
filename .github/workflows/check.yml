@@ -80,18 +80,24 @@ jobs:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/parser/uv.lock
+
       - name: Setup Task
         uses: go-task/setup-task@v2
 
       - name: Regenerate
-        run: task proto backend:generate
+        run: task proto backend:generate parser:generate
 
       - name: Compare with the commit
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             git status --short
             git diff
-            echo "::error::Generated code is stale: run 'task proto backend:generate' and commit the result"
+            echo "::error::Generated code is stale: run 'task proto backend:generate parser:generate' and commit the result"
             exit 1
           fi
 

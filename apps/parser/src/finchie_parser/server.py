@@ -16,6 +16,7 @@ from finchie_parser.errors import (
     PasswordRequiredError,
     UnsupportedDocumentError,
 )
+from finchie_parser.model import DepositStatement, SecuritiesStatement
 from finchie_parser.ocr import Ocr, RapidOcr
 from finchie_parser.pipeline import parse_document
 from finchie_parser.reading import open_document
@@ -44,24 +45,24 @@ class ParserService(parser_pb2_grpc.ParserServiceServicer):
     ) -> parser_pb2.ParseDocumentResponse:
         started = time.monotonic()
         try:
-            result = parse_document(
-                request.filename,
-                request.content_type,
-                request.content,
-                passwords=self._passwords,
-                ocr=self._ocr,
-            )
+            result = parse_document(request.content, passwords=self._passwords, ocr=self._ocr)
         except Exception as error:
             _reject(context, request.document_id, error)
             raise
         statement = result.statement
+        if isinstance(statement, DepositStatement):
+            lines, balanced = sum(len(a.lines) for a in statement.accounts), statement.balanced
+        elif isinstance(statement, SecuritiesStatement):
+            lines, balanced = len(statement.trades), statement.balanced
+        else:
+            lines, balanced = len(statement.transactions), statement.reconciliation.balanced
         log.info(
-            "document %s parsed by %s v%s: %d transactions, balanced=%s, %.1fs",
+            "document %s parsed by %s v%s: %d lines, balanced=%s, %.1fs",
             request.document_id,
             result.parser,
             result.parser_version,
-            len(statement.transactions),
-            statement.reconciliation.balanced,
+            lines,
+            balanced,
             time.monotonic() - started,
         )
         return to_response(result)
@@ -70,7 +71,7 @@ class ParserService(parser_pb2_grpc.ParserServiceServicer):
         self, request: parser_pb2.OpenDocumentRequest, context: grpc.ServicerContext
     ) -> parser_pb2.OpenDocumentResponse:
         try:
-            opened = open_document(request.filename, request.content_type, request.content, passwords=self._passwords)
+            opened = open_document(request.content, passwords=self._passwords)
         except Exception as error:
             _reject(context, request.document_id, error)
             raise
@@ -113,12 +114,12 @@ def main() -> None:
     server, port = build_server(settings, ocr)
     server.start()
     log.info(
-        "listening on %s:%d (workers=%d, ocr=%s, passwords for: %s)",
+        "listening on %s:%d (workers=%d, ocr=%s, %r)",
         settings.host,
         port,
         settings.workers,
         settings.ocr,
-        ", ".join(sorted(settings.pdf_passwords)) or "none",
+        settings.passwords(),
     )
 
     def stop(signum: int, _frame: FrameType | None) -> None:

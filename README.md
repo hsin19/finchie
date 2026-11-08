@@ -15,7 +15,7 @@ A self-hosted personal finance platform. It turns bank and credit card statement
 | [`apps/backend`](apps/backend/) | Go. The only public service: API, document ingestion, background jobs, and the web app (embedded). Owns the database. | ✅ Upload, parse, and read statements |
 | [`apps/parser`](apps/parser/) | Python. Stateless parser behind gRPC: a raw statement goes in, structured data comes out. Internal only. | ✅ 4 banks |
 | [`apps/mailbox`](apps/mailbox/) | Cloudflare Email Worker. Takes statements Gmail forwards to an address on Email Routing and uploads them to the backend. Deployed by hand | ✅ Automatic ingestion |
-| [`apps/web`](apps/web/) | SvelteKit single-page app. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend) | ✅ Overview, statements, transactions, upload |
+| [`apps/web`](apps/web/) | SvelteKit single-page app. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend) | ✅ Overview, statements, transactions, accounts, upload |
 
 **Shared**
 
@@ -23,7 +23,7 @@ A self-hosted personal finance platform. It turns bank and credit card statement
 |---|---|---|
 | [`proto/`](proto/) | gRPC contracts, managed with buf. Generated code is committed inside each app. | ✅ |
 
-Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents.
+Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents, 0013 accounts, 0014 recognizing statements, 0015 exchange rates, 0016 transfer links, 0017 securities accounts.
 
 ## Why V2
 
@@ -48,10 +48,10 @@ browser ── Cloudflare Access ── Tunnel ──▶ backend (Go) ── gRP
 |---|---|---|
 | E.SUN Bank | PDF attached to the e-statement e-mail | |
 | Taishin Bank | Password-protected PDF | One bill can list several Richart cards |
-| Cathay United Bank | Password-protected PDF | |
+| Cathay United Bank | Password-protected PDF | Deposit accounts come from the CUBE app's e-passbook (電子存摺), since the monthly bank statement e-mail carries only a link |
 | HSBC Taiwan | Password-protected PDF | Transaction descriptions are images, read with OCR |
 
-Upload the e-mail (`.eml`) or the PDF itself, or let Gmail forward statement e-mails to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)). A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
+Statements are taken as e-mails only ([ADR 0014](docs/adr/0014-recognizing-statements.md)). Let Gmail forward them to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)): the upload page offers the Gmail filter to import, generated from the parsers. Or upload the `.eml` by hand, as the bank sent it or forwarded. A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
 
 ## Getting started
 
@@ -74,8 +74,8 @@ Local configuration and secrets go in `.local/` (gitignored):
 | File | Contents |
 |---|---|
 | `.local/backend.env` | `BACKEND_DATABASE_URL=postgres://finchie:finchie@localhost:5432/finchie?sslmode=disable` |
-| `.local/parser.env` | `PARSER_PDF_PASSWORDS__<INSTITUTION>=…` for each bank whose PDFs are encrypted |
-| `.local/statements/` | Real statements for `task parser:test-real` |
+| `.local/parser.env` | `PARSER_IDENTITY__NATIONAL_ID=…` and `PARSER_IDENTITY__BIRTH_DATE=…`: the details the banks' PDF password rules use (ADR 0014) |
+| `.local/statements/` | Real statement e-mails (`.eml`) for `task parser:test-real` |
 
 `docker compose --profile app up --build` runs Postgres, the parser, and the backend (web app included) as containers (needs BuildKit, i.e. `docker buildx`). See each service's README for every variable it reads.
 
@@ -87,4 +87,4 @@ GitHub Actions in [`.github/workflows/`](.github/workflows/README.md): `check.ym
 
 The homelab's Docker Compose runs the released images behind Cloudflare Tunnel and Access. Only the backend is reachable from outside; the parser stays on the internal network. Pin a version tag, never `latest`.
 
-Sign-in is Cloudflare Access with Google, and the backend also verifies every request's Access token (ADR 0008): set `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD` there.
+Sign-in is Cloudflare Access with Google, and the backend also verifies every request's Access token (ADR 0008): set `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD` there. Set `BACKEND_MAILBOX_ADDRESS` for the Gmail filter download, and `PARSER_IDENTITY__*` for the parser's PDF passwords.

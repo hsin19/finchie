@@ -28,7 +28,7 @@ function run(query: string, total: number) {
     const requested: URL[] = [];
     const fetch = async (request: Request) => {
         requested.push(new URL(request.url));
-        const body = { items: [], total, sum: "0", byKind: [], byCard: [] };
+        const body = { items: [], total, sum: "0", flows: [], byKind: [], byCard: [], byAccount: [] };
         return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
     };
     const event = { url: new URL(`https://finchie.test/transactions${query}`), fetch, parent: async () => ({ latestMonth: "2026-10" }) };
@@ -37,9 +37,16 @@ function run(query: string, total: number) {
 
 describe("transactions load", () => {
     it("asks for the filters and the page in the URL, in the latest month by default", async () => {
-        const { result, requested } = run("?kind=purchase&page=2", 79);
+        const { result, requested } = run("?kind=purchase&account=7&hide=transfers&page=2", 79);
         await expect(result).resolves.toMatchObject({ filters: { kinds: ["purchase"], page: 2 } });
-        expect(Object.fromEntries(requested[0].searchParams)).toMatchObject({ from: "2026-10-01", to: "2026-10-31", kind: "purchase", offset: "50" });
+        expect(Object.fromEntries(requested[0].searchParams)).toMatchObject({
+            from: "2026-10-01",
+            to: "2026-10-31",
+            kind: "purchase",
+            account: "7",
+            hideTransfers: "true",
+            offset: "50",
+        });
     });
 
     it("sends a page past the end to the last page", async () => {

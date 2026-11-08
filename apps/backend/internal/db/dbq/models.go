@@ -8,6 +8,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Account struct {
+	ID          int64
+	Institution string
+	Kind        string
+	Number      string
+	Name        *string
+	Expiry      string
+	CreatedAt   pgtype.Timestamptz
+	Label       *string
+	FullNumber  *string
+}
+
+type Balance struct {
+	ID          int64
+	AccountID   int64
+	Unit        string
+	AsOf        pgtype.Date
+	Amount      pgtype.Numeric
+	StatementID int64
+}
+
 type Document struct {
 	ID            int64
 	Sha256        []byte
@@ -23,18 +44,47 @@ type Document struct {
 	ParsedAt      pgtype.Timestamptz
 }
 
+type ExchangeRate struct {
+	Day    pgtype.Date
+	Unit   string
+	PerTwd pgtype.Numeric
+}
+
+type Quote struct {
+	Day    pgtype.Date
+	Name   string
+	Code   string
+	Market string
+	Close  pgtype.Numeric
+}
+
 type Statement struct {
 	ID                 int64
 	DocumentID         int64
 	Institution        string
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
+	Kind               string
+	PeriodStart        pgtype.Date
+	PaidOn             pgtype.Date
+	PaidBy             *int64
+}
+
+type Trade struct {
+	TransactionID int64
+	Category      string
+	Price         pgtype.Numeric
+	Amount        pgtype.Numeric
+	Fee           pgtype.Numeric
+	Tax           pgtype.Numeric
+	Net           pgtype.Numeric
+	Prepaid       pgtype.Numeric
 }
 
 type Transaction struct {
@@ -51,4 +101,11 @@ type Transaction struct {
 	Country          *string
 	CardLast4        *string
 	ParentID         *int64
+	AccountID        int64
+	Unit             string
+	Status           string
+	Memo             *string
+	Counterparty     *string
+	Balance          pgtype.Numeric
+	CounterpartID    *int64
 }

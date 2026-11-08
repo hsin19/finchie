@@ -96,6 +96,10 @@ func relink(ctx context.Context, queries *dbq.Queries) (int, error) {
 	if err := queries.ClearParents(ctx); err != nil {
 		return 0, fmt.Errorf("clear links: %w", err)
 	}
+	// Transfers and bills' payments are links of the same kind, worked out under the same lock (ADR 0016).
+	if err := retransfer(ctx, queries); err != nil {
+		return 0, err
+	}
 	parents := matchParents(lines)
 	if len(parents) == 0 {
 		return 0, nil

@@ -14,7 +14,7 @@ release.yml  v* tag       → check.yml → build each image on x64 + arm64 runn
 | Job | What it guards |
 |---|---|
 | Proto contracts | `buf format`, `buf lint`, and `buf breaking`: against `main` on a PR, against the commit before the push on `main`. Not on release tags (their commit was compared when it reached `main`), nor while the baseline has no contracts. Locally `task proto:breaking` compares against `main`, or `AGAINST=<ref>` |
-| Generated code is committed | Regenerates proto, sqlc, and oapi-codegen output; fails if anything differs from the commit |
+| Generated code is committed | Regenerates proto, sqlc, and oapi-codegen output and the Gmail filter; fails if anything differs from the commit |
 | Parser | ruff, then pytest on synthetic fixtures. Real statements are never in CI (ADR 0006) |
 | Backend | build, golangci-lint, then tests. Integration tests start Postgres with testcontainers on the runner's Docker |
 | Web | API types match `openapi.yaml`, dprint, ESLint, svelte-check, Vitest, then the production build |

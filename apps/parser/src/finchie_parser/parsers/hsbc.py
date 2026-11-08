@@ -9,6 +9,7 @@ from finchie_parser.errors import LayoutError
 from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr, OcrLine
 from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import amount, iso_date, month_day
 
@@ -49,8 +50,15 @@ class HsbcParser(StatementParser):
     name = "hsbc.credit_card"
     version = "2"
     institution = "hsbc"
+    # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
+    sender_domains = ("hsbc.com.tw",)
+    subject_terms = ("信用卡帳單",)
     filename_pattern = re.compile(r"^eStatement_\d{6}\.pdf$", re.IGNORECASE)
     text_marker = "HSBC"
+
+    def passwords(self, identity: Identity) -> list[str]:
+        # The e-mail: 請輸入您的「身分證字號」開啟 …（英文字母需大寫）.
+        return [identity.require_national_id().upper()]
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         texts = document.page_texts()

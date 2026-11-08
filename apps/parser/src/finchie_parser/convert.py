@@ -7,7 +7,20 @@ from google.protobuf import timestamp_pb2
 from google.type import date_pb2, decimal_pb2
 
 from finchie.parser.v1 import parser_pb2 as pb
-from finchie_parser.model import Kind, ParseResult, Statement, Transaction
+from finchie_parser.model import (
+    DepositAccount,
+    DepositKind,
+    DepositLine,
+    DepositStatement,
+    Kind,
+    ParseResult,
+    Reconciliation,
+    SecuritiesStatement,
+    SecuritiesTrade,
+    Statement,
+    TradeSide,
+    Transaction,
+)
 from finchie_parser.reading import OpenedDocument
 
 _KINDS = {
@@ -20,13 +33,24 @@ _KINDS = {
 }
 
 
+_DEPOSIT_KINDS = {
+    DepositKind.OTHER: pb.DEPOSIT_LINE_KIND_OTHER,
+    DepositKind.INTEREST: pb.DEPOSIT_LINE_KIND_INTEREST,
+    DepositKind.FEE: pb.DEPOSIT_LINE_KIND_FEE,
+}
+
+
 def to_response(result: ParseResult) -> pb.ParseDocumentResponse:
-    return pb.ParseDocumentResponse(
-        parser=result.parser,
-        parser_version=result.parser_version,
-        statement=_statement(result.statement),
-        warnings=result.warnings,
+    response = pb.ParseDocumentResponse(
+        parser=result.parser, parser_version=result.parser_version, warnings=result.warnings
     )
+    if isinstance(result.statement, DepositStatement):
+        response.deposit_statement.CopyFrom(_deposit_statement(result.statement))
+    elif isinstance(result.statement, SecuritiesStatement):
+        response.securities_statement.CopyFrom(_securities_statement(result.statement))
+    else:
+        response.statement.CopyFrom(_statement(result.statement))
+    return response
 
 
 def to_open_response(opened: OpenedDocument) -> pb.OpenDocumentResponse:
@@ -58,13 +82,86 @@ def _statement(statement: Statement) -> pb.Statement:
         currency=statement.currency,
         total_due=_decimal(statement.total_due),
         transactions=[_transaction(tx) for tx in statement.transactions],
-        reconciliation=pb.Reconciliation(
-            balanced=reconciliation.balanced,
-            computed=_decimal(reconciliation.computed),
-            stated=_decimal(reconciliation.stated),
-            stated_label=reconciliation.stated_label,
-        ),
+        reconciliation=_reconciliation(reconciliation),
     )
+
+
+def _reconciliation(reconciliation: Reconciliation) -> pb.Reconciliation:
+    return pb.Reconciliation(
+        balanced=reconciliation.balanced,
+        computed=_decimal(reconciliation.computed),
+        stated=_decimal(reconciliation.stated),
+        stated_label=reconciliation.stated_label,
+    )
+
+
+def _deposit_statement(statement: DepositStatement) -> pb.DepositStatement:
+    return pb.DepositStatement(
+        institution=statement.institution,
+        period_start=_date(statement.period_start),
+        period_end=_date(statement.period_end),
+        accounts=[_deposit_account(account) for account in statement.accounts],
+    )
+
+
+def _securities_statement(statement: SecuritiesStatement) -> pb.SecuritiesStatement:
+    return pb.SecuritiesStatement(
+        institution=statement.institution,
+        account_number=statement.account_number,
+        period_start=_date(statement.period_start),
+        period_end=_date(statement.period_end),
+        holdings_date=_date(statement.holdings_date),
+        holdings=[pb.SecuritiesHolding(name=h.name, shares=_decimal(h.shares)) for h in statement.holdings],
+        trades=[_securities_trade(trade) for trade in statement.trades],
+        reconciliation=_reconciliation(statement.reconciliation),
+    )
+
+
+def _securities_trade(trade: SecuritiesTrade) -> pb.SecuritiesTrade:
+    message = pb.SecuritiesTrade(
+        date=_date(trade.date),
+        name=trade.name,
+        side=pb.TRADE_SIDE_BUY if trade.side is TradeSide.BUY else pb.TRADE_SIDE_SELL,
+        shares=_decimal(trade.shares),
+        price=_decimal(trade.price),
+        category=trade.category,
+        amount=_decimal(trade.amount),
+        fee=_decimal(trade.fee),
+        tax=_decimal(trade.tax),
+        net=_decimal(trade.net),
+    )
+    if trade.prepaid is not None:
+        message.prepaid.CopyFrom(_decimal(trade.prepaid))
+    return message
+
+
+def _deposit_account(account: DepositAccount) -> pb.DepositAccount:
+    message = pb.DepositAccount(
+        number=account.number,
+        name=account.name,
+        currency=account.currency,
+        closing_balance=_decimal(account.closing_balance),
+        lines=[_deposit_line(line) for line in account.lines],
+    )
+    if account.opening_balance is not None:
+        message.opening_balance.CopyFrom(_decimal(account.opening_balance))
+    if account.reconciliation is not None:
+        message.reconciliation.CopyFrom(_reconciliation(account.reconciliation))
+    return message
+
+
+def _deposit_line(line: DepositLine) -> pb.DepositLine:
+    message = pb.DepositLine(
+        date=_date(line.date),
+        description=line.description,
+        memo=line.memo,
+        counterparty=line.counterparty,
+        amount=_decimal(line.amount),
+        kind=_DEPOSIT_KINDS[line.kind],
+    )
+    if line.balance is not None:
+        message.balance.CopyFrom(_decimal(line.balance))
+    return message
 
 
 def _transaction(tx: Transaction) -> pb.Transaction:
