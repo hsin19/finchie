@@ -10,7 +10,7 @@ from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositLine, DepositStatement, Kind, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
 from finchie_parser.passwords import Identity
-from finchie_parser.pdf import Document
+from finchie_parser.pdf import Document, Word
 
 
 @dataclass
@@ -90,3 +90,20 @@ def reconcile_account(
         if line.balance is not None and line.balance != running:
             return Reconciliation(running, line.balance, f"{line.date.isoformat()} {line.description} 的餘額")
     return Reconciliation(running, closing, closing_label)
+
+
+def rows_of(words: Iterable[Word], tolerance: float = 2.0) -> list[list[Word]]:
+    """Words grouped into printed rows, top to bottom, each left to right: words whose tops are within
+    `tolerance` points of a row's first word belong to it."""
+    rows: list[list[Word]] = []
+    for word in sorted(words, key=lambda w: (w.top, w.x0)):
+        if rows and abs(rows[-1][0].top - word.top) <= tolerance:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    return [sorted(row, key=lambda w: w.x0) for row in rows]
+
+
+def nearest_column(word: Word, headings: dict[str, Word]) -> str:
+    """The heading whose right edge is nearest the word's: amounts are printed right-aligned."""
+    return min(headings, key=lambda name: abs(headings[name].x1 - word.x1))

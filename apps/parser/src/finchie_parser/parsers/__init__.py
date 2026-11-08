@@ -4,11 +4,13 @@ from finchie_parser.parsers.esun import EsunParser
 from finchie_parser.parsers.esun_deposit import EsunDepositParser
 from finchie_parser.parsers.hsbc import HsbcParser
 from finchie_parser.parsers.taishin import TaishinParser
+from finchie_parser.parsers.taishin_deposit import TaishinDepositParser
 
 PARSERS: tuple[StatementParser, ...] = (
     EsunParser(),
     EsunDepositParser(),
     TaishinParser(),
+    TaishinDepositParser(),
     CathayParser(),
     HsbcParser(),
 )

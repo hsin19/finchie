@@ -6,13 +6,13 @@ them holds an amount, and the text alone does not say which.
 """
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from decimal import Decimal
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositAccount, DepositLine, DepositStatement
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, reconcile_account
+from finchie_parser.parsers.base import Parsed, StatementParser, find, reconcile_account, rows_of
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
 from finchie_parser.text import amount, clean, iso_date, roc_date
@@ -23,8 +23,6 @@ _BALANCE = re.compile(r"^(\S+) (\d+\*+\d+) ([A-Z]{3}) (-?[\d,]+\.\d\d)$", re.ASC
 _AMOUNT = re.compile(r"-?[\d,]+\.\d\d", re.ASCII)
 _ROC_DATE = re.compile(r"\d{3}/\d\d/\d\d", re.ASCII)
 _COLUMNS = ("交易日期", "摘要", "提款", "存款", "轉入帳戶/備註", "對方帳號", "餘額")
-# Words of one printed row share a top within this, in points.
-_ROW_TOLERANCE = 2.0
 
 
 class EsunDepositParser(StatementParser):
@@ -89,7 +87,7 @@ def _lines(document: Document, pages: int) -> dict[str, list[DepositLine]]:
     number = ""
     columns: dict[str, Word] = {}
     for page in range(pages):
-        for row in _rows(document.page_words(page)):
+        for row in rows_of(document.page_words(page)):
             texts = [word.text for word in row]
             if texts[0] == "銀行帳號" and len(texts) == 2:
                 number, columns = texts[1], {}
@@ -98,16 +96,6 @@ def _lines(document: Document, pages: int) -> dict[str, list[DepositLine]]:
             elif _ROC_DATE.fullmatch(texts[0]) and number and columns:
                 by_account.setdefault(number, []).append(_line(row, columns))
     return by_account
-
-
-def _rows(words: Iterable[Word]) -> list[list[Word]]:
-    rows: list[list[Word]] = []
-    for word in sorted(words, key=lambda w: (w.top, w.x0)):
-        if rows and abs(rows[-1][0].top - word.top) <= _ROW_TOLERANCE:
-            rows[-1].append(word)
-        else:
-            rows.append([word])
-    return [sorted(row, key=lambda w: w.x0) for row in rows]
 
 
 def _line(row: list[Word], columns: dict[str, Word]) -> DepositLine:
