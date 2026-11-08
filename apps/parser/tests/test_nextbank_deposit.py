@@ -1,6 +1,7 @@
 """Next Bank's combined statement. Numbers and codes are synthetic (ADR 0006); word positions follow the
 bank's layout: a section per account and currency with its balance in the heading, lines dated by month
-and day, 收入 before 支出, and pockets after the accounts."""
+and day, 收入 before 支出 (printed negative), memos that wrap around their line, and pockets after the
+accounts."""
 
 from datetime import date
 from decimal import Decimal
@@ -38,16 +39,22 @@ def heading(top: float, number: str, currency: str, balance: str) -> list[Word]:
 
 PAGE_2 = [
     *row(339, ("新臺幣帳戶明細", 52, 139)),
-    *heading(369, TWD, "TWD", "新臺幣餘額：NT$10,250"),
+    *heading(369, TWD, "TWD", "新臺幣餘額：NT$10,150"),
     *row(402, *HEADINGS),
     *row(431, ("上期餘額", 109, 143), ("10,000", 303, 336)),
     *row(
         460, ("12/21", 56, 75), ("利息存入", 109, 143), ("300", 201, 217), ("10,300", 303, 336), ("REF0001", 346, 443)
     ),
-    *row(480, ("12/28", 56, 75), ("轉帳支出", 109, 143), ("50", 245, 262), ("10,250", 303, 336), ("REF0002", 346, 443)),
-    *row(493, ("外幣帳戶明細", 52, 127)),
-    *heading(523, FX, "USD", "美元餘額：12.50"),
-    *row(557, *HEADINGS),
+    *row(
+        480, ("12/28", 56, 75), ("轉帳支出", 109, 143), ("-50", 254, 277), ("10,250", 303, 336), ("REF0002", 346, 443)
+    ),
+    # The memo wraps: one row above the line's, one below.
+    *row(503, ("INB0001;BPAY", 346, 407)),
+    *row(510, ("12/30", 56, 75), ("匯出", 117, 134), ("-100", 254, 277), ("10,150", 303, 336)),
+    *row(517, ("GLOBAL;REF0003", 344, 440)),
+    *row(540, ("外幣帳戶明細", 52, 127)),
+    *heading(570, FX, "USD", "美元餘額：12.50"),
+    *row(604, *HEADINGS),
 ]
 # The page breaks after the US$ section's headings.
 PAGE_3 = [
@@ -82,7 +89,7 @@ def test_nextbank_deposit_reads_a_section_per_account_and_currency_and_each_pock
     statement = parse()
     assert (statement.period_start, statement.period_end) == (date(2026, 12, 1), date(2026, 12, 31))
     assert [(a.name, a.number, a.currency, a.opening_balance, a.closing_balance) for a in statement.accounts] == [
-        ("新臺幣帳戶", TWD, "TWD", Decimal(10000), Decimal(10250)),
+        ("新臺幣帳戶", TWD, "TWD", Decimal(10000), Decimal(10150)),
         ("外幣帳戶", FX, "USD", Decimal("12.00"), Decimal("12.50")),
         ("外幣帳戶", FX, "JPY", None, Decimal(1000)),
         ("旅行基金", "AB12C", "TWD", None, Decimal(800)),
@@ -91,10 +98,22 @@ def test_nextbank_deposit_reads_a_section_per_account_and_currency_and_each_pock
 
 def test_nextbank_deposit_reads_income_before_expense_and_marks_interest() -> None:
     lines = parse().accounts[0].lines
-    assert [(line.date, line.description, line.amount, line.kind, line.memo) for line in lines] == [
-        (date(2026, 12, 21), "利息存入", Decimal(300), DepositKind.INTEREST, "REF0001"),
-        (date(2026, 12, 28), "轉帳支出", Decimal(-50), DepositKind.OTHER, "REF0002"),
+    assert [(line.date, line.description, line.amount, line.kind) for line in lines[:2]] == [
+        (date(2026, 12, 21), "利息存入", Decimal(300), DepositKind.INTEREST),
+        # Printed "-50" under 支出: money out, not a negative expense.
+        (date(2026, 12, 28), "轉帳支出", Decimal(-50), DepositKind.OTHER),
     ]
+
+
+def test_nextbank_deposit_joins_a_wrapped_memo_to_its_line_in_printed_order() -> None:
+    assert [line.memo for line in parse().accounts[0].lines] == ["REF0001", "REF0002", "INB0001;BPAY GLOBAL;REF0003"]
+
+
+def test_nextbank_deposit_refuses_a_memo_row_with_no_line_next_to_it() -> None:
+    # Under the yen section's headings, which has no lines.
+    stray = [*PAGE_3, *row(160, ("STRAY", 346, 400))]
+    with pytest.raises(LayoutError, match="no line next to it"):
+        parse(stray)
 
 
 NEW_YEAR = [Word("1/1", w.x0, w.x1, w.top) if w.text == "12/31" else w for w in PAGE_3]

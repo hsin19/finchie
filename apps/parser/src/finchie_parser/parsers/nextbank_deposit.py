@@ -2,13 +2,14 @@
 
 Page 1 prints the period. Every account and currency then has a section of its own (帳號：… ｜ USD ｜
 美元餘額：…) that prints its balance in its heading, then, if it had any lines, the balance brought forward
-(上期餘額) and the lines, dated by month and day only, 收入 before 支出. Pockets (活存口袋) follow, each with
-a balance of its own.
+(上期餘額) and the lines, dated by month and day only, 收入 before 支出; an amount under 支出 is printed
+negative. A long memo wraps onto rows of its own, above and below its line's row. Pockets (活存口袋)
+follow, each with a balance of its own.
 """
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 
@@ -35,6 +36,8 @@ _AMOUNT = re.compile(r"-?[\d,]+(?:\.\d+)?", re.ASCII)
 _COLUMNS = ("收入", "支出", "餘額")
 # The bank's own words for interest.
 _INTEREST = frozenset({"利息存入"})
+# A wrapped memo's rows sit within this many points of their line's row.
+_MEMO_REACH = 20
 
 
 @dataclass
@@ -47,7 +50,7 @@ class _Account:
 
 class NextBankDepositParser(StatementParser):
     name = "nextbank.deposit"
-    version = "1"
+    version = "2"
     institution = "nextbank"
     # 【將來銀行通知】2026年9月綜合對帳單, from no_reply@eblsdr.nextbank.com.tw (the e-mail asks to trust
     # eStatement@nextbank.com.tw).
@@ -89,6 +92,9 @@ class _Reader:
         self.pocket_name = ""
 
     def read_page(self, words: Sequence[Word]) -> None:
+        # This page's lines (their row's top, account, and index) and the memo rows wrapped around them.
+        placed: list[tuple[float, _Account, int]] = []
+        wrapped: list[tuple[float, _Account, str]] = []
         for row in rows_of(words):
             texts = [word.text for word in row]
             first = texts[0]
@@ -117,6 +123,27 @@ class _Reader:
                 if self.kind == "口袋":
                     raise LayoutError("a pocket's lines: a layout not seen yet")
                 self.current.lines.append(self._line(row))
+                placed.append((row[0].top, self.current, len(self.current.lines) - 1))
+            elif self.current is not None and "餘額" in self.headings and row[0].x0 > self.headings["餘額"].x1:
+                wrapped.append((row[0].top, self.current, clean(" ".join(texts))))
+        self._unwrap(placed, wrapped)
+
+    @staticmethod
+    def _unwrap(placed: list[tuple[float, _Account, int]], wrapped: list[tuple[float, _Account, str]]) -> None:
+        """Joins each wrapped memo row to the nearest line of its account, in the order printed."""
+        pieces: dict[tuple[int, int], list[tuple[float, str]]] = {}
+        for top, account, text in wrapped:
+            near = [(abs(top - line_top), index) for line_top, owner, index in placed if owner is account]
+            distance, index = min(near, default=(_MEMO_REACH + 1, -1))
+            if distance > _MEMO_REACH:
+                raise LayoutError(f"{text}: a memo row with no line next to it")
+            pieces.setdefault((id(account), index), []).append((top, text))
+        for line_top, account, index in placed:
+            extra = pieces.get((id(account), index))
+            if extra:
+                line = account.lines[index]
+                memo = " ".join(text for _, text in sorted([*extra, (line_top, line.memo)]) if text)
+                account.lines[index] = replace(line, memo=memo)
 
     def _section(self, number: str, currency: str, balance_text: str, name: str) -> None:
         balance = _HEADING_BALANCE.search(balance_text)
@@ -147,7 +174,8 @@ class _Reader:
         return DepositLine(
             date=self._date(when.text),
             description=description,
-            amount=by_column.get("收入", Decimal(0)) - by_column.get("支出", Decimal(0)),
+            # 支出 is printed negative ("-15,020"): what matters is the column.
+            amount=by_column.get("收入", Decimal(0)) - abs(by_column.get("支出", Decimal(0))),
             kind=DepositKind.INTEREST if description in _INTEREST else DepositKind.OTHER,
             memo=clean(" ".join(w.text for w in text if w.x0 > columns["餘額"].x1)),
             balance=by_column["餘額"],
