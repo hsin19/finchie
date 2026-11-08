@@ -19,7 +19,10 @@ import {
     invalidate,
     refreshAll,
 } from "$app/navigation";
-import { resolve } from "$app/paths";
+import {
+    asset,
+    resolve,
+} from "$app/paths";
 import { page } from "$app/state";
 import type { LayoutProps } from "./$types";
 
@@ -104,10 +107,7 @@ function onkeydown(event: KeyboardEvent) {
 <div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-3.5 pb-28 md:px-5 md:pt-5 md:pb-6">
     <header class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-2.5 md:panel md:px-3.5 md:py-2.5">
         <div class="min-w-0 grow truncate text-[14px]">
-            <a href={resolve("/")} aria-label="finchie" class="font-bold text-accent"><svg aria-hidden="true" viewBox="6 6.5 19.5 19" class="-mr-0.5 inline-block size-[18px] align-[-4px]">
-                    <path d="M7.6 22.8c.7 2 3.8 2.2 4.4-.8l1.2-9.5c.4-3.3 2.8-4.7 5.8-4.3l5.2 2.2-4.6 2.2c-2 3.8-5.4 6.2-11.4 6.2h11.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-                    <circle cx="17.8" cy="10.4" r="1.25" fill="currentColor" />
-                </svg>inchie</a>
+            <a href={resolve("/")} aria-label="finchie" class="font-bold text-accent"><img src={asset("favicon.svg")} alt="" class="-mr-0.5 inline-block size-[18px] align-[-4px]" />inchie</a>
             {prompt.command}{#each prompt.flags as flag (flag.name)}
                 <span class="text-mute">{` ${flag.name}`}</span>{flag.value ? ` ${flag.value}` : ""}
             {/each}
