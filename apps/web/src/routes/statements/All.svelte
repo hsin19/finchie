@@ -46,7 +46,7 @@ async function reparse(id: number) {
 <section class="panel px-3.5 pt-1 pb-2.5">
     <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
         <h1 class="label">STATEMENTS · 全部帳單（{statements.length}）</h1>
-        <span class="text-[12px] text-mute">依結帳日，新的在上 · <a href={resolve("/statements")} class="text-dim hover:text-ink"><span class="text-accent">[a]</span> 按月看 →</a></span>
+        <span class="text-[12px] text-mute">依結帳日，新的在上 · <a href={resolve("/statements")} class="text-dim hover:text-ink"><span class="text-accent">[l]</span> 按月看 →</a></span>
     </div>
     <div class="overflow-x-auto">
         <table class="w-full min-w-[860px] border-collapse">

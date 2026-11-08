@@ -39,7 +39,7 @@ const nav = $derived([
     { key: "o", label: "總覽", href: resolve("/"), current: page.route.id === "/" },
     { key: "s", label: "帳單", href: resolve(`/statements${carried.statements}`), current: /^\/(statements|documents)/.test(page.route.id ?? "") },
     { key: "t", label: "交易", href: resolve(`/transactions${carried.transactions}`), current: page.route.id === "/transactions" },
-    { key: "b", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? "") },
+    { key: "a", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? "") },
     { key: "u", label: "上傳", href: resolve("/upload"), current: page.route.id === "/upload" },
 ]);
 // The last one, upload, sits apart on wide screens.
@@ -84,7 +84,7 @@ onKeys({
     "o": () => go("o"),
     "s": () => go("s"),
     "t": () => go("t"),
-    "b": () => go("b"),
+    "a": () => go("a"),
     "u": () => go("u"),
     "/": () => void searchTransactions(),
     "?": () => (help = !help),

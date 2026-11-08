@@ -9,7 +9,7 @@ import Period from "./Period.svelte";
 let { data }: PageProps = $props();
 
 onKeys({
-    a: () => void goto(data.view === "all" ? resolve("/statements") : resolve("/statements?all")),
+    l: () => void goto(data.view === "all" ? resolve("/statements") : resolve("/statements?all")),
 });
 </script>
 

@@ -13,7 +13,7 @@ The browser app (ADR 0007): a SvelteKit single-page app, embedded in the backend
 | `/accounts/{id}` | One account: balances, gaps, its lines with running balances and where linked ones' money went (ADR 0016), every balance it has had; the owner can name it and give its full number |
 | `/upload` | Drop statement e-mails (`.eml`) and follow each through parsing; links the Gmail filter download |
 
-Keys: `o` `s` `t` `b` `u` switch pages, `/` searches, `j` `k` `Enter` `n` `p` move through transactions, `f` opens a statement's PDF, `1`–`9` a document's attachments, `?` lists everything, `⌘K` opens the command palette.
+Keys: `o` `s` `t` `a` `u` switch pages, `/` searches, `j` `k` `Enter` `n` `p` move through transactions, `f` opens a statement's PDF, `1`–`9` a document's attachments, `?` lists everything, `⌘K` opens the command palette.
 
 A document opens in a new tab (`FileLink`, `openUrl` in `src/lib/documents.ts`): a PDF, or an e-mail a parser recognized (parsed, needs review, duplicate), as its statement PDF decrypted (`/api/documents/{id}/preview/pdf`); an e-mail that failed, was skipped, or is still parsing on `/documents/{id}`, to see what it is; anything else as the original download (`/api/documents/{id}/content`).
 
