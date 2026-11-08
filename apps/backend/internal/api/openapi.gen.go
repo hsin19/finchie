@@ -272,10 +272,15 @@ type Decimal = string
 
 // Document defines model for Document.
 type Document struct {
-	ContentType   string     `json:"contentType"`
-	Error         *string    `json:"error,omitempty"`
-	Filename      string     `json:"filename"`
-	Id            int64      `json:"id"`
+	// AccountCount Accounts its statement reported, 0 without one
+	AccountCount int     `json:"accountCount"`
+	ContentType  string  `json:"contentType"`
+	Error        *string `json:"error,omitempty"`
+	Filename     string  `json:"filename"`
+	Id           int64   `json:"id"`
+
+	// LineCount Lines its statement holds, 0 without one
+	LineCount     int        `json:"lineCount"`
 	ParsedAt      *time.Time `json:"parsedAt,omitempty"`
 	Parser        *string    `json:"parser,omitempty"`
 	ParserVersion *string    `json:"parserVersion,omitempty"`
@@ -284,6 +289,9 @@ type Document struct {
 	// Sha256 Hex
 	Sha256    string `json:"sha256"`
 	SizeBytes int    `json:"sizeBytes"`
+
+	// StatementKind The kind of statement it produced, if any; card bills only are listed by /api/statements
+	StatementKind *AccountKind `json:"statementKind,omitempty"`
 
 	// Status pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
 	// transactions don't add up to the statement. duplicate: the same statement came from

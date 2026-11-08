@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
@@ -267,5 +268,10 @@ func TestDepositStatementsStayOutOfTheCardViewsUntilTheyHaveTheirOwn(t *testing.
 	}
 	if search := decode[TransactionSearch](t, get(t, e, "/api/transactions")); search.Total != 1 || search.Sum != "100" {
 		t.Fatalf("search = total %d, sum %s", search.Total, search.Sum)
+	}
+	// The document says what it produced, so the upload page needs no card bill to count its lines.
+	stored := decode[Document](t, get(t, e, fmt.Sprintf("/api/documents/%d", doc.ID)))
+	if stored.StatementKind == nil || *stored.StatementKind != Deposit || stored.LineCount != 1 || stored.AccountCount != 1 {
+		t.Fatalf("document = kind %v, %d lines, %d accounts", stored.StatementKind, stored.LineCount, stored.AccountCount)
 	}
 }

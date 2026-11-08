@@ -24,6 +24,12 @@ func toDocument(row dbq.GetDocumentRow) Document {
 		Parser:        row.Parser,
 		ParserVersion: row.ParserVersion,
 		Warnings:      row.Warnings,
+		LineCount:     int(row.LineCount),
+		AccountCount:  int(row.AccountCount),
+	}
+	if row.StatementKind != nil {
+		kind := AccountKind(*row.StatementKind)
+		doc.StatementKind = &kind
 	}
 	if doc.Warnings == nil {
 		doc.Warnings = []string{}

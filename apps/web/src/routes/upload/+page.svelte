@@ -126,7 +126,7 @@ function hint(error: string): string {
     return "按「重新解析」再試一次";
 }
 
-type Row = { tag: keyof typeof statuses; stage: string; detail: string; tone: "ink" | "dim" | "neg"; hint: string; link?: { statementId: number; text: string; }; percent: number; };
+type Row = { tag: keyof typeof statuses; stage: string; detail: string; tone: "ink" | "dim" | "neg"; hint: string; link?: { href: string; text: string; }; percent: number; };
 
 function describe(doc: Document | undefined, upload?: Entry): Row {
     if (upload?.error) return { tag: "failed", stage: "upload → failed", detail: upload.error, tone: "neg", hint: "", percent: 100 };
@@ -135,10 +135,14 @@ function describe(doc: Document | undefined, upload?: Entry): Row {
         return { tag: "uploading", stage: `uploading ${sent}%`, detail: "上傳中…", tone: "ink", hint: "", percent: sent };
     }
     const statement = statementOf.get(doc.id);
-    const link = statement && {
-        statementId: statement.id,
-        text: `→ 查看帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}`,
-    };
+    // A card bill has a page of its own; a deposit statement's lines are on its accounts' pages.
+    const deposit = doc.statementKind === "deposit";
+    const link = statement
+        ? { href: resolve("/statements/[id]", { id: String(statement.id) }), text: `→ 查看帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}` }
+        : deposit
+        ? { href: resolve("/accounts"), text: `→ 查看帳戶` }
+        : undefined;
+    const accounts = deposit ? ` · ${doc.accountCount} 個帳戶` : "";
     const sameNote = upload?.same ? `上傳過了，沿用 #${doc.id} · ` : "";
     switch (doc.status) {
         case "pending":
@@ -147,14 +151,19 @@ function describe(doc: Document | undefined, upload?: Entry): Row {
             return {
                 tag: upload?.same ? "same" : "parsed",
                 stage: "parsed",
-                detail: `${sameNote}${doc.parser} v${doc.parserVersion} · ${statement?.transactionCount ?? "?"} 筆 · balanced`,
+                detail: `${sameNote}${doc.parser} v${doc.parserVersion} · ${doc.lineCount} 筆${accounts} · balanced`,
                 tone: upload?.same ? "dim" : "ink",
                 hint: "",
                 link,
                 percent: 100,
             };
         case "needs_review": {
-            const delta = statement ? formatAmount(subtract(statement.reconciliation.stated, statement.reconciliation.computed), { signed: true }) : "?";
+            if (!statement) {
+                // A deposit statement names each account whose lines do not add up in the document's warnings.
+                const detail = doc.warnings.join("；") || "有帳戶的明細加總對不上";
+                return { tag: "needs_review", stage: "parsed → needs_review", detail: `${sameNote}${detail}`, tone: "neg", hint: "打開帳戶看是哪一列沒抓到", link, percent: 100 };
+            }
+            const delta = formatAmount(subtract(statement.reconciliation.stated, statement.reconciliation.computed), { signed: true });
             return { tag: "needs_review", stage: "parsed → needs_review", detail: `${sameNote}明細加總跟帳單差 ${delta}`, tone: "neg", hint: "打開帳單看是哪一列沒抓到", link, percent: 100 };
         }
         case "duplicate":
@@ -198,7 +207,8 @@ onKeys({ Enter: () => input?.click() });
         <td class="py-2.5 pl-2">
             <div class={r.tone === "neg" ? "text-neg" : r.tone === "dim" ? "text-dim" : "text-ink"}>{r.detail}</div>
             {#if r.link}
-                <a class="text-[12px]" href={resolve("/statements/[id]", { id: String(r.link.statementId) })}>{r.link.text}</a>
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved where the row is described -->
+                <a class="text-[12px]" href={r.link.href}>{r.link.text}</a>
             {:else if r.hint}
                 <div class="mt-0.5 text-[12px] text-mute">{r.hint}</div>
             {/if}

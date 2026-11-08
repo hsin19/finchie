@@ -479,7 +479,7 @@ components:
 
     Document:
       type: object
-      required: [id, filename, contentType, sizeBytes, sha256, receivedAt, status, warnings]
+      required: [id, filename, contentType, sizeBytes, sha256, receivedAt, status, warnings, lineCount, accountCount]
       properties:
         id: { type: integer, format: int64 }
         filename: { type: string }
@@ -495,6 +495,11 @@ components:
           type: array
           items: { type: string }
         parsedAt: { type: string, format: date-time }
+        statementKind:
+          allOf: [{ $ref: "#/components/schemas/AccountKind" }]
+          description: The kind of statement it produced, if any; card bills only are listed by /api/statements
+        lineCount: { type: integer, description: "Lines its statement holds, 0 without one" }
+        accountCount: { type: integer, description: "Accounts its statement reported, 0 without one" }
 
     DocumentPreview:
       type: object

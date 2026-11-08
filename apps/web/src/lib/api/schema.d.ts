@@ -375,6 +375,12 @@ export interface components {
             warnings: string[];
             /** Format: date-time */
             parsedAt?: string;
+            /** @description The kind of statement it produced, if any; card bills only are listed by /api/statements */
+            statementKind?: components["schemas"]["AccountKind"];
+            /** @description Lines its statement holds, 0 without one */
+            lineCount: number;
+            /** @description Accounts its statement reported, 0 without one */
+            accountCount: number;
         };
         DocumentPreview: {
             email?: components["schemas"]["EmailPreview"];
