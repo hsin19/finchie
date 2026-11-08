@@ -1,4 +1,8 @@
 <script lang="ts">
+import {
+    sortAccounts,
+    totalWorth,
+} from "#lib/accounts.js";
 import type { Account } from "#lib/api/client.js";
 import {
     accountKinds,
@@ -17,9 +21,16 @@ let { data }: PageProps = $props();
 // Deposit accounts first: their balances are checked; a card bill's are what it says is owed.
 const groups = $derived(
     (["deposit", "credit_card"] as const)
-        .map(kind => ({ kind, accounts: data.accounts.filter(a => a.kind === kind) }))
+        .map(kind => {
+            const accounts = data.accounts.filter(a => a.kind === kind);
+            return { kind, accounts: sortAccounts(accounts, data.sort), worth: totalWorth(accounts) };
+        })
         .filter(group => group.accounts.length > 0),
 );
+const sorts = [
+    { value: "bank", label: "依銀行", href: resolve("/accounts") },
+    { value: "balance", label: "依餘額", href: resolve("/accounts?sort=balance") },
+] as const;
 const gapped = $derived(data.accounts.filter(a => a.gaps.length > 0));
 
 function href(account: Account) {
@@ -42,13 +53,26 @@ function href(account: Account) {
     </section>
 {/if}
 
+<nav aria-label="排序" class="flex items-baseline gap-2 text-[12px] text-mute">
+    排序
+    {#each sorts as sort (sort.value)}
+        <a
+            href={sort.href}
+            aria-current={data.sort === sort.value ? "page" : undefined}
+            class="rounded-[4px] border px-2 py-1 {data.sort === sort.value ? 'border-accent text-ink' : 'border-line text-dim hover:text-ink'}"
+        >{sort.label}</a>
+    {/each}
+    <span>· 外幣以最新匯率折合新臺幣比較</span>
+</nav>
+
 {#each groups as group (group.kind)}
     <section class="panel px-3.5 pt-1 pb-2.5">
         <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
             <h1 class="label">ACCOUNTS · {accountKinds[group.kind].label}（{group.accounts.length}）</h1>
-            {#if group.kind === "credit_card"}
-                <span class="text-[12px] text-mute">餘額是帳單上的應繳金額，負數是欠款</span>
-            {/if}
+            <span class="text-[12px] text-mute">
+                合計 ≈ NT${formatAmount(group.worth.total)}{group.worth.missing ? `（${group.worth.missing} 個帳戶沒有匯率，不計）` : ""}
+                {#if group.kind === "credit_card"}· 餘額是帳單上的應繳金額，負數是欠款{/if}
+            </span>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full min-w-[720px] border-collapse">
@@ -74,12 +98,19 @@ function href(account: Account) {
                                     <div class={sign(balance.amount) < 0 ? "text-neg" : "text-ink"}>
                                         {formatAmount(balance.amount)} <span class="text-mute">{balance.unit}</span>
                                     </div>
+                                    {#if balance.unit !== "TWD" && balance.worth !== undefined}
+                                        <div class="text-[12px] text-mute" title={`${balance.rateDay} 的匯率`}>≈ NT${formatAmount(balance.worth)}</div>
+                                    {/if}
                                 {:else}
                                     <span class="text-mute">—</span>
                                 {/each}
                             </td>
                             <td class="px-2 py-2.5 text-dim">
-                                {#each account.balances as balance (balance.unit)}<div>{balance.asOf}</div>{/each}
+                                {#each account.balances as balance (balance.unit)}
+                                    <div>{balance.asOf}</div>
+                                    <!-- Keeps each date beside its balance when a worth line follows the balance. -->
+                                    {#if balance.unit !== "TWD" && balance.worth !== undefined}<div aria-hidden="true" class="invisible text-[12px]">·</div>{/if}
+                                {/each}
                             </td>
                             <td class="py-2.5 pl-2">
                                 {#if account.continuity === "unknown"}

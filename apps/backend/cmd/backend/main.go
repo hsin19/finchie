@@ -29,6 +29,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/db"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/rates"
 	"github.com/hsin19/finchie/apps/backend/internal/telemetry"
 	"github.com/hsin19/finchie/apps/backend/internal/web"
 )
@@ -120,10 +121,12 @@ func run() error {
 	workers := river.NewWorkers()
 	parser := parserv1.NewParserServiceClient(conn)
 	river.AddWorker(workers, ingest.NewWorker(pool, parser, cfg.ParseTimeout))
+	river.AddWorker(workers, rates.NewWorker(pool, &http.Client{Timeout: 30 * time.Second}, rates.Feeds))
 	jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
-		Workers: workers,
-		Logger:  logger,
+		Queues:       map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
+		Workers:      workers,
+		PeriodicJobs: []*river.PeriodicJob{rates.Periodic()},
+		Logger:       logger,
 		// Without it, the signal that cancels the context passed to Start cancels running jobs too.
 		SoftStopTimeout: jobStopTimeout,
 		// The parse job's span links back to the upload that enqueued it, and is named after the job.

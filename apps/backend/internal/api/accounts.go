@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -34,7 +35,7 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 
 	balancesOf := map[int64][]Balance{}
 	for _, b := range latest {
-		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID))
+		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], toLatestBalance(b))
 	}
 	gapsOf := map[int64][]BalanceGap{}
 	for _, g := range gaps {
@@ -60,21 +61,23 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	if err != nil {
 		return nil, fmt.Errorf("account balances: %w", err)
 	}
+	latestRows, err := queries.LatestBalances(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest balances: %w", err)
+	}
 	gapRows, err := queries.AccountGaps(ctx, &request.Id)
 	if err != nil {
 		return nil, fmt.Errorf("account gaps: %w", err)
 	}
 
 	history := make([]Balance, 0, len(rows))
-	var latest []Balance
-	seen := map[string]bool{}
 	for _, b := range rows {
-		balance := toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID)
-		history = append(history, balance)
-		// Newest first, so the first of each unit is its latest.
-		if !seen[b.Unit] {
-			seen[b.Unit] = true
-			latest = append(latest, balance)
+		history = append(history, toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID))
+	}
+	var latest []Balance
+	for _, b := range latestRows {
+		if b.AccountID == request.Id {
+			latest = append(latest, toLatestBalance(b))
 		}
 	}
 	gaps := make([]BalanceGap, 0, len(gapRows))
@@ -85,7 +88,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	return GetAccount200JSONResponse(AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
 		Label: account.Label, Name: account.Name, Balances: account.Balances, Continuity: account.Continuity,
-		Gaps: account.Gaps, History: history,
+		Worth: account.Worth, Gaps: account.Gaps, History: history,
 	}), nil
 }
 
@@ -134,7 +137,41 @@ func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap) Acc
 	return Account{
 		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
 		Label: row.Label, Name: row.Name, Balances: balances, Continuity: continuity, Gaps: gaps,
+		Worth: worthOf(balances),
 	}
+}
+
+// toLatestBalance adds the balance's worth in NT$ at the newest rate of its unit (ADR 0015).
+func toLatestBalance(b dbq.LatestBalancesRow) Balance {
+	balance := toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID)
+	if b.Worth.Valid {
+		worth := decimalString(b.Worth)
+		balance.Worth = &worth
+	}
+	if b.RateDay.Valid && b.Unit != "TWD" {
+		balance.RateDay = &openapi_types.Date{Time: b.RateDay.Time}
+	}
+	return balance
+}
+
+// worthOf adds up balances' worth exactly; none when a balance has no worth, or there are none.
+func worthOf(balances []Balance) *Decimal {
+	if len(balances) == 0 {
+		return nil
+	}
+	total := new(big.Rat)
+	for _, b := range balances {
+		if b.Worth == nil {
+			return nil
+		}
+		value, ok := new(big.Rat).SetString(*b.Worth)
+		if !ok {
+			return nil
+		}
+		total.Add(total, value)
+	}
+	worth := total.FloatString(2)
+	return &worth
 }
 
 func toBalance(unit string, asOf pgtype.Date, amount pgtype.Numeric, statementID int64) Balance {

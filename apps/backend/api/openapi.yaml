@@ -570,6 +570,9 @@ components:
           description: The newest balance in each unit
           items: { $ref: "#/components/schemas/Balance" }
         continuity: { $ref: "#/components/schemas/AccountContinuity" }
+        worth:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "Its newest balances' worth in NT$ added up; absent if any of them has none"
         gaps:
           type: array
           items: { $ref: "#/components/schemas/BalanceGap" }
@@ -593,6 +596,10 @@ components:
         asOf: { type: string, format: date, description: The end of the day it was held }
         amount: { $ref: "#/components/schemas/Decimal" }
         statementId: { type: integer, format: int64, description: The statement that reported it }
+        worth:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points"
+        rateDay: { type: string, format: date, description: "The day of the rate its worth used; absent for NT$" }
 
     BalanceGap:
       type: object

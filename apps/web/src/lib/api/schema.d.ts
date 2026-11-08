@@ -452,6 +452,8 @@ export interface components {
             /** @description The newest balance in each unit */
             balances: components["schemas"]["Balance"][];
             continuity: components["schemas"]["AccountContinuity"];
+            /** @description Its newest balances' worth in NT$ added up; absent if any of them has none */
+            worth?: components["schemas"]["Decimal"];
             gaps: components["schemas"]["BalanceGap"][];
         };
         AccountDetail: components["schemas"]["Account"] & {
@@ -475,6 +477,13 @@ export interface components {
              * @description The statement that reported it
              */
             statementId: number;
+            /** @description In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points */
+            worth?: components["schemas"]["Decimal"];
+            /**
+             * Format: date
+             * @description The day of the rate its worth used; absent for NT$
+             */
+            rateDay?: string;
         };
         /** @description Two consecutive balances in one unit that the lines between them do not join */
         BalanceGap: {

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gdate "google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/genproto/googleapis/type/decimal"
@@ -138,5 +140,64 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 		if got := get(t, e, missing).Code; got != http.StatusNotFound {
 			t.Errorf("%s: status = %d", missing, got)
 		}
+	}
+}
+
+func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	ctx := t.Context()
+	queries := dbq.New(pool)
+	rate := func(day, unit, perTWD string) {
+		t.Helper()
+		var n pgtype.Numeric
+		if err := n.Scan(perTWD); err != nil {
+			t.Fatal(err)
+		}
+		d, _ := time.Parse(time.DateOnly, day)
+		if err := queries.UpsertRates(ctx, dbq.UpsertRatesParams{Day: pgtype.Date{Time: d, Valid: true}, Units: []string{unit}, PerTwd: []pgtype.Numeric{n}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rate("2026-11-06", "USD", "0.025")
+	rate("2026-11-07", "USD", "0.03125") // the newest: 1 USD is NT$32
+	doc, err := queries.UpsertDocument(ctx, dbq.UpsertDocumentParams{Sha256: []byte("fx"), Filename: "fx.eml", ContentType: "message/rfc822", Content: []byte("From: bank")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	balance := func(number, currency, closing string) *parserv1.DepositAccount {
+		return &parserv1.DepositAccount{Number: number, Name: "外幣活存", Currency: currency, ClosingBalance: &decimal.Decimal{Value: closing}}
+	}
+	statement := &parserv1.DepositStatement{
+		Institution: "esun",
+		PeriodStart: &gdate.Date{Year: 2026, Month: 10, Day: 1},
+		PeriodEnd:   &gdate.Date{Year: 2026, Month: 10, Day: 31},
+		Accounts: []*parserv1.DepositAccount{
+			balance(savings, "TWD", "1000"),
+			balance("7777777***777", "USD", "10.50"),
+			balance("8888888***888", "USD", "100"),
+			balance("8888888***888", "JPY", "500"),
+		},
+	}
+	if _, err := ingest.Store(ctx, pool, doc.ID, &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	// NT$ is worth itself, with no rate to name.
+	if twd := accountNamed(t, accounts, savings); *twd.Worth != "1000.00" || *twd.Balances[0].Worth != "1000" || twd.Balances[0].RateDay != nil {
+		t.Fatalf("NT$ account = %+v", twd)
+	}
+	dollars := accountNamed(t, accounts, "7777777***777")
+	if *dollars.Balances[0].Worth != "336.00" || dollars.Balances[0].RateDay.String() != "2026-11-07" || *dollars.Worth != "336.00" {
+		t.Fatalf("US$ account = %+v", dollars)
+	}
+	// No rate for JPY: its balance has no worth, and so neither has the account.
+	mixed := accountNamed(t, accounts, "8888888***888")
+	if mixed.Worth != nil {
+		t.Fatalf("an account with a unit without a rate has worth %s", *mixed.Worth)
+	}
+	detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", dollars.Id)))
+	if detail.Worth == nil || *detail.Worth != "336.00" {
+		t.Fatalf("detail worth = %v", detail.Worth)
 	}
 }

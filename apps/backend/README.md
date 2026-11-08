@@ -17,7 +17,7 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 | `GET` | `/api/documents/{id}/preview/body` | The e-mail's body as a page for an iframe, sandboxed by its own Content-Security-Policy: no scripts, only `data:` and https images, links to a new tab. `Cache-Control: no-store` |
 | `GET` | `/api/documents/{id}/preview/files/{index}` | One file, a PDF decrypted. Only PDFs open in the browser; anything else downloads as `application/octet-stream` with `nosniff`. `Cache-Control: no-store` |
 | `POST` | `/api/documents/{id}/reparse` | Parse the stored original again. The document's statement is replaced, so it gets a new id |
-| `GET` | `/api/accounts` | Every account (ADR 0013), with its newest balance in each unit, `continuity` (`checked` for deposit accounts, `unknown` for card bills), and its `gaps`: two consecutive balances in one unit whose difference the lines dated between them do not account for, with the `unseen` amount. Worked out on every read, never stored |
+| `GET` | `/api/accounts` | Every account (ADR 0013), with its newest balance in each unit and that balance's `worth` in NT$ at the newest rate of its unit (ADR 0015; the account's `worth` adds them up, none if a unit has no rate), `continuity` (`checked` for deposit accounts, `unknown` for card bills), and its `gaps`: two consecutive balances in one unit whose difference the lines dated between them do not account for, with the `unseen` amount. Worked out on every read, never stored |
 | `GET` | `/api/accounts/{id}` | One account, plus `history`, every balance its statements reported |
 | `GET` | `/api/accounts/{id}/lines` | Its lines, newest first, `?limit=` up to 500 and `offset`. Amounts as the source reports them: money in is positive on a deposit account, a purchase on a card bill |
 | `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' sender domains (ADR 0014). `404` while that is not set |
@@ -44,6 +44,8 @@ Amounts are decimal strings; statement dates are `YYYY-MM-DD` (ADR 0004).
 | `needs_review` | Stored, but the transactions do not add up |
 | `duplicate` | Another document already holds this statement (same institution, kind, and closing date) |
 | `failed` | The parser rejected it (`error` says why), or every attempt failed: the parser stayed unreachable, or the database refused the result |
+
+`fetch_exchange_rates` runs every 6 hours and at start (ADR 0015): it reads the day's rates to NT$ from Fawaz Ahmed's currency API on jsDelivr, else its Cloudflare Pages mirror, into `exchange_rates`, so the backend needs outbound access to `cdn.jsdelivr.net` and `currency-api.pages.dev`; without it, only NT$ balances have a worth.
 
 Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, and `RESOURCE_EXHAUSTED` from the parser are retried (6 attempts with River's back-off); everything else it returns fails at once (ADR 0005). Database errors are retried too.
 

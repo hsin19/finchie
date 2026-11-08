@@ -35,7 +35,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("start postgres: %v", initErr)
 	}
 	ctx := t.Context()
-	if _, err := pool.Exec(ctx, "TRUNCATE documents, accounts, river_job RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE documents, accounts, exchange_rates, river_job RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("reset database: %v", err)
 	}
 	return pool

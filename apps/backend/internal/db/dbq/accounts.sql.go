@@ -228,9 +228,16 @@ func (q *Queries) InsertBalance(ctx context.Context, arg InsertBalanceParams) er
 }
 
 const latestBalances = `-- name: LatestBalances :many
-SELECT DISTINCT ON (account_id, unit) account_id, unit, as_of, amount, statement_id
-FROM balances
-ORDER BY account_id, unit, as_of DESC, id DESC
+SELECT DISTINCT ON (b.account_id, b.unit) b.account_id, b.unit, b.as_of, b.amount, b.statement_id,
+       (CASE WHEN b.unit = 'TWD' THEN b.amount ELSE round(b.amount / rate.per_twd, 2) END)::numeric AS worth,
+       rate.day AS rate_day
+FROM balances b
+LEFT JOIN LATERAL (SELECT r.day, r.per_twd
+                   FROM exchange_rates r
+                   WHERE r.unit = b.unit
+                   ORDER BY r.day DESC
+                   LIMIT 1) rate ON true
+ORDER BY b.account_id, b.unit, b.as_of DESC, b.id DESC
 `
 
 type LatestBalancesRow struct {
@@ -239,9 +246,12 @@ type LatestBalancesRow struct {
 	AsOf        pgtype.Date
 	Amount      pgtype.Numeric
 	StatementID int64
+	Worth       pgtype.Numeric
+	RateDay     pgtype.Date
 }
 
-// Each account's newest balance in each unit.
+// Each account's newest balance in each unit, with its worth in NT$ at the newest rate of the unit
+// (ADR 0015); NT$ is worth itself, a unit without a rate nothing.
 func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, error) {
 	rows, err := q.db.Query(ctx, latestBalances)
 	if err != nil {
@@ -257,6 +267,8 @@ func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, erro
 			&i.AsOf,
 			&i.Amount,
 			&i.StatementID,
+			&i.Worth,
+			&i.RateDay,
 		); err != nil {
 			return nil, err
 		}

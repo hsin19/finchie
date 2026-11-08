@@ -43,6 +43,12 @@ type Document struct {
 	ParsedAt      pgtype.Timestamptz
 }
 
+type ExchangeRate struct {
+	Day    pgtype.Date
+	Unit   string
+	PerTwd pgtype.Numeric
+}
+
 type Statement struct {
 	ID                 int64
 	DocumentID         int64

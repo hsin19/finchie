@@ -161,6 +161,9 @@ type Account struct {
 	//
 	// Example: 1234567***890
 	Number string `json:"number"`
+
+	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
+	Worth *Decimal `json:"worth,omitempty"`
 }
 
 // AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet)
@@ -195,6 +198,9 @@ type AccountDetail struct {
 	//
 	// Example: 1234567***890
 	Number string `json:"number"`
+
+	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
+	Worth *Decimal `json:"worth,omitempty"`
 }
 
 // AccountKind defines model for AccountKind.
@@ -231,6 +237,9 @@ type Balance struct {
 	// AsOf The end of the day it was held
 	AsOf openapi_types.Date `json:"asOf"`
 
+	// RateDay The day of the rate its worth used; absent for NT$
+	RateDay *openapi_types.Date `json:"rateDay,omitempty"`
+
 	// StatementId The statement that reported it
 	StatementId int64 `json:"statementId"`
 
@@ -238,6 +247,9 @@ type Balance struct {
 	//
 	// Example: TWD
 	Unit string `json:"unit"`
+
+	// Worth In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points
+	Worth *Decimal `json:"worth,omitempty"`
 }
 
 // BalanceGap Two consecutive balances in one unit that the lines between them do not join

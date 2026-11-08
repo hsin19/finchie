@@ -71,5 +71,5 @@ A migration creates one `credit_card` account per institution that has statement
 - The web app gets an accounts page (latest balance per account and unit, flagged gaps), and search an account facet.
 - The statements' uniqueness key changes; existing statements become `credit_card`.
 - ADR 0004 gets a note: a points program's unit counts as an amount's currency.
-- Net worth is the latest balance of every account and unit, whatever reported it; it needs exchange rates, which come with InTheGreenYet's ADR, and for points their worth.
+- Net worth is the latest balance of every account and unit, whatever reported it; it needs exchange rates, which come with InTheGreenYet's ADR (came first, with ADR 0015), and for points their worth.
 - What an account is for can later be read from its lines instead of being told: a salary that arrives every month, rent that leaves every month. One that stops is the kind of thing worth a notification (`AGENTS.md`, no work for the owner).
