@@ -46,7 +46,12 @@ PAGE_2 = [
         460, ("12/21", 56, 75), ("利息存入", 109, 143), ("300", 201, 217), ("10,300", 303, 336), ("REF0001", 346, 443)
     ),
     *row(
-        480, ("12/28", 56, 75), ("轉帳支出", 109, 143), ("-50", 254, 277), ("10,250", 303, 336), ("REF0002", 346, 443)
+        480,
+        ("12/28", 56, 75),
+        ("轉帳支出", 109, 143),
+        ("-50", 254, 277),
+        ("10,250", 303, 336),
+        ("玉山銀行-0012345678901;FT0002", 346, 512),
     ),
     # The memo wraps: one row above the line's, one below.
     *row(503, ("INB0001;BPAY", 346, 407)),
@@ -106,7 +111,23 @@ def test_nextbank_deposit_reads_income_before_expense_and_marks_interest() -> No
 
 
 def test_nextbank_deposit_joins_a_wrapped_memo_to_its_line_in_printed_order() -> None:
-    assert [line.memo for line in parse().accounts[0].lines] == ["REF0001", "REF0002", "INB0001;BPAY GLOBAL;REF0003"]
+    assert [line.memo for line in parse().accounts[0].lines] == [
+        "REF0001",
+        "玉山銀行-0012345678901;FT0002",
+        "INB0001;BPAY GLOBAL;REF0003",
+    ]
+
+
+def test_nextbank_deposit_reads_the_other_side_of_a_transfer_from_its_memo() -> None:
+    assert [line.counterparty for line in parse().accounts[0].lines] == ["", "808 0012345678901", ""]
+
+
+def test_nextbank_deposit_keeps_a_bank_it_has_no_code_for_by_name() -> None:
+    page_2 = [Word("某某銀行-123456;FT0002", w.x0, w.x1, w.top) if w.text.startswith("玉山銀行") else w for w in PAGE_2]
+    document = FakeDocument([PAGE_1, "", ""], words={1: page_2, 2: PAGE_3})
+    statement = NextBankDepositParser().parse(document, ocr=None).statement
+    assert isinstance(statement, DepositStatement)
+    assert statement.accounts[0].lines[1].counterparty == "某某銀行 123456"
 
 
 def test_nextbank_deposit_refuses_a_memo_row_with_no_line_next_to_it() -> None:

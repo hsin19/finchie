@@ -15,8 +15,9 @@ import (
 )
 
 // Money that moves between two of the owner's lines is linked (ADR 0016): a deposit account paying a
-// card bill, or one account paying into another. Banks print no such link either, so like parents it is
-// worked out from amounts, dates, and the counterparties they print.
+// card bill, one account paying into another, or one currency exchanged for another. Banks print no
+// such link either, so like parents it is worked out from amounts, dates, the counterparties they print,
+// and the reference a bank prints on both sides of an exchange.
 
 const (
 	// A transfer's two lines are at most this many days apart: banks post them on different days.
@@ -86,7 +87,7 @@ func retransfer(ctx context.Context, queries *dbq.Queries) error {
 }
 
 // matchTransfers returns line ID → counterpart line ID, both ways. Each line is in one link at most:
-// nearer days pair first, then card payments before own transfers.
+// nearer days pair first, then card payments before own transfers and exchanges.
 func matchTransfers(lines []transferLine) map[int64]int64 {
 	var outs, ins, payments []transferLine
 	for _, l := range lines {
@@ -109,12 +110,16 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 	for _, out := range outs {
 		// A card payment line is credited as the outflow is debited: both negative.
 		for _, p := range payments {
-			if d := daysApart(out.TransactionDate, p.TransactionDate); d <= transferWindowDays && cents(amount(out.Amount)) == cents(amount(p.Amount)) {
+			if d := daysApart(out.TransactionDate, p.TransactionDate); d <= transferWindowDays && out.Unit == p.Unit && cents(amount(out.Amount)) == cents(amount(p.Amount)) {
 				candidates = append(candidates, candidate{out.ID, p.ID, d, true})
 			}
 		}
 		for _, in := range ins {
-			if in.AccountID == out.AccountID || cents(amount(out.Amount)) != -cents(amount(in.Amount)) {
+			if exchanged(out, in) {
+				candidates = append(candidates, candidate{out.ID, in.ID, 0, false})
+				continue
+			}
+			if in.AccountID == out.AccountID || in.Unit != out.Unit || cents(amount(out.Amount)) != -cents(amount(in.Amount)) {
 				continue
 			}
 			if d := daysApart(out.TransactionDate, in.TransactionDate); d <= transferWindowDays && (fits(out.Counterparty, out.Institution, in) || fits(in.Counterparty, in.Institution, out)) {
@@ -137,6 +142,14 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 		pairs[c.out], pairs[c.other] = c.other, c.out
 	}
 	return pairs
+}
+
+// exchanged reports whether an outflow and an inflow are one exchange of currencies: at the same bank,
+// on the same day, in two units, with the same memo, which carries the reference the bank prints on both
+// sides (Next Bank's 新臺幣換美元;@31.5000;FT…). The amounts differ by the rate, so they prove nothing.
+func exchanged(out, in transferLine) bool {
+	return out.Unit != in.Unit && out.Institution == in.Institution && daysApart(out.TransactionDate, in.TransactionDate) == 0 &&
+		out.Memo != nil && in.Memo != nil && strings.TrimSpace(*out.Memo) != "" && *out.Memo == *in.Memo
 }
 
 type payment struct {
@@ -163,7 +176,8 @@ func matchPaid(bills []dbq.CardBillsRow, lines []transferLine) map[int64]payment
 		last := bill.DueDate.Time.AddDate(0, 0, paidGraceDays)
 		within := func(l transferLine) bool {
 			at := l.TransactionDate.Time
-			return !used[l.ID] && at.After(bill.ClosingDate.Time) && !at.After(last) && cents(amount(l.Amount)) == -due
+			return !used[l.ID] && (bill.Currency == nil || l.Unit == *bill.Currency) &&
+				at.After(bill.ClosingDate.Time) && !at.After(last) && cents(amount(l.Amount)) == -due
 		}
 		var fromDeposit, fromBill *transferLine
 		for i := range lines {

@@ -3,8 +3,9 @@
 Page 1 prints the period. Every account and currency then has a section of its own (帳號：… ｜ USD ｜
 美元餘額：…) that prints its balance in its heading, then, if it had any lines, the balance brought forward
 (上期餘額) and the lines, dated by month and day only, 收入 before 支出; an amount under 支出 is printed
-negative. A long memo wraps onto rows of its own, above and below its line's row. Pockets (活存口袋)
-follow, each with a balance of its own.
+negative. A long memo wraps onto rows of its own, above and below its line's row. A transfer's memo
+starts with the other side's bank, by name, and account (玉山銀行-…;FT…). Pockets (活存口袋) follow,
+each with a balance of its own.
 """
 
 import re
@@ -38,6 +39,10 @@ _COLUMNS = ("收入", "支出", "餘額")
 _INTEREST = frozenset({"利息存入"})
 # A wrapped memo's rows sit within this many points of their line's row.
 _MEMO_REACH = 20
+# A transfer's memo names the other side: 玉山銀行-0012345678901;FT….
+_COUNTERPARTY = re.compile(r"(?P<bank>[^\d;-]+)-(?P<number>\d[\d*]*)")
+# Banks by the name a memo gives them, with their codes (金融機構代號), as statements have shown them.
+_BANK_CODES = {"玉山銀行": "808"}
 
 
 @dataclass
@@ -50,7 +55,7 @@ class _Account:
 
 class NextBankDepositParser(StatementParser):
     name = "nextbank.deposit"
-    version = "2"
+    version = "3"
     institution = "nextbank"
     # 【將來銀行通知】2026年9月綜合對帳單, from no_reply@eblsdr.nextbank.com.tw (the e-mail asks to trust
     # eStatement@nextbank.com.tw).
@@ -75,6 +80,7 @@ class NextBankDepositParser(StatementParser):
 
         accounts = []
         for (number, currency), found in reader.accounts.items():
+            found.lines = [replace(line, counterparty=_counterparty(line.memo)) for line in found.lines]
             reconciliation = reconcile_account(found.opening, found.closing, found.lines, "餘額")
             accounts.append(
                 DepositAccount(number, found.name, currency, found.closing, found.lines, reconciliation, found.opening)
@@ -189,3 +195,13 @@ class _Reader:
             if self.start <= candidate <= self.end:
                 return candidate
         raise LayoutError(f"{month_day} is outside the statement period")
+
+
+def _counterparty(memo: str) -> str:
+    """ "808 0012345678901" for a memo naming a bank whose code is known, as other banks print it; else the
+    name as printed, which shows where the money went but fits no account."""
+    named = _COUNTERPARTY.fullmatch(memo.split(";", 1)[0])
+    if named is None:
+        return ""
+    code = _BANK_CODES.get(named["bank"])
+    return f"{code or named['bank']} {named['number']}"

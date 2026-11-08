@@ -209,14 +209,14 @@ WHERE t.id = l.id;
 -- name: TransferLines :many
 -- The lines a transfer link can join (ADR 0016): every deposit account's lines, and card payment lines.
 SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
-       t.transaction_date, t.kind, t.amount, t.counterparty
+       t.transaction_date, t.kind, t.amount, t.unit, t.memo, t.counterparty
 FROM transactions t
 JOIN accounts a ON a.id = t.account_id
 WHERE a.kind = 'deposit' OR t.kind = 'payment'
 ORDER BY t.id;
 
 -- name: CardBills :many
-SELECT id, institution, closing_date, due_date, total_due
+SELECT id, institution, closing_date, due_date, currency, total_due
 FROM statements
 WHERE kind = 'credit_card'
 ORDER BY institution, closing_date;

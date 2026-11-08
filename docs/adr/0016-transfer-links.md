@@ -8,11 +8,12 @@ Money that moves between two of the owner's lines is linked: a deposit account p
 |---|---|
 | Card payment | A deposit account's outflow and a bill's payment line (`payment`) of the same amount, at most 3 days apart. Either bank's: a card is paid from whichever account |
 | Own transfer | An outflow of one deposit account and an inflow of another, of the same amount, at most 3 days apart, and at least one of them prints a counterparty that fits the other account. A pair that prints none is not linked: two equal amounts prove nothing by themselves |
+| Exchange | An outflow in one unit and an inflow in another, at the same bank, on the same day, with the same memo: the bank prints the exchange's reference on both sides (Next Bank: `新臺幣換美元;@31.5000;FT…`). The amounts differ by the rate, so they prove nothing; a bank that prints no common reference leaves its exchanges unlinked |
 | Bill paid | A card bill is paid on the day an outflow of its total due leaves a deposit account, or a later bill of its bank shows a payment of it, between its closing and 5 days past its due date. A bill that owes nothing is paid on its closing date |
 
-Each line is in one link at most; nearer days pair first, then card payments before own transfers.
+Each line is in one link at most; nearer days pair first, then card payments before own transfers and exchanges. Amounts that must be the same are in the same unit, a bill's total due included.
 
-**A counterparty fits an account** when its bank code is the account's bank's (none printed means the line's own bank) and, right-aligned with leading zeros dropped, no digit both print differs and at least 4 do agree. Banks print counterparties masked as well (`812 0087654321***234`); an account's full number, where the owner gave one, fits with every digit.
+**A counterparty fits an account** when its bank code is the account's bank's (none printed means the line's own bank; a bank that names the other side's bank instead has its parser turn the name into the code) and, right-aligned with leading zeros dropped, no digit both print differs and at least 4 do agree. Banks print counterparties masked as well (`812 0087654321***234`); an account's full number, where the owner gave one, fits with every digit.
 
 ### What links are for
 

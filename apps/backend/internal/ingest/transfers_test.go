@@ -46,7 +46,7 @@ func depositLine(t *testing.T, id int64, at deposit, on, amount, counterparty st
 	t.Helper()
 	l := transferLine{
 		ID: id, AccountID: at.account, AccountKind: KindDeposit, Institution: at.institution, Number: at.number,
-		StatementID: at.statement, TransactionDate: day(t, on), Kind: "other", Amount: money(t, amount),
+		StatementID: at.statement, TransactionDate: day(t, on), Kind: "other", Amount: money(t, amount), Unit: "TWD",
 	}
 	if at.full != "" {
 		l.FullNumber = &at.full
@@ -61,8 +61,16 @@ func paymentLine(t *testing.T, id int64, institution string, statement int64, on
 	t.Helper()
 	return transferLine{
 		ID: id, AccountID: 100, AccountKind: KindCreditCard, Institution: institution, StatementID: statement,
-		TransactionDate: day(t, on), Kind: "payment", Amount: money(t, amount),
+		TransactionDate: day(t, on), Kind: "payment", Amount: money(t, amount), Unit: "TWD",
 	}
+}
+
+func inUnit(l transferLine, unit, memo string) transferLine {
+	l.Unit = unit
+	if memo != "" {
+		l.Memo = &memo
+	}
+	return l
 }
 
 func TestACardPaymentLinksToTheDepositOutflowOfTheSameAmountWithinThreeDays(t *testing.T) {
@@ -143,6 +151,53 @@ func TestAFullNumberLetsACounterpartyFitWithEveryDigit(t *testing.T) {
 	owner.full = "87654321349234"
 	if pairs := matchTransfers(lines(owner)); pairs[1] != 2 {
 		t.Fatalf("with the full number: pairs = %v", pairs)
+	}
+}
+
+func TestAnExchangeLinksTheTwoLegsTheBankPrintsOneReferenceOn(t *testing.T) {
+	twd := deposit{account: 5, institution: "nextbank", number: "123456****7890", statement: 50}
+	fx := deposit{account: 6, institution: "nextbank", number: "123456****1111", statement: 50}
+	const reference = "新臺幣換美元;@31.5000;FT0000001AAA"
+	out := func(memo string) transferLine {
+		return inUnit(depositLine(t, 1, twd, "2026-02-23", "-300000", ""), "TWD", memo)
+	}
+	in := func(at deposit, on, memo string) transferLine {
+		return inUnit(depositLine(t, 2, at, on, "9523.81", ""), "USD", memo)
+	}
+	cases := map[string]struct {
+		lines []transferLine
+		want  bool
+	}{
+		"the same reference on both, the same day":        {[]transferLine{out(reference), in(fx, "2026-02-23", reference)}, true},
+		"another reference":                               {[]transferLine{out(reference), in(fx, "2026-02-23", "新臺幣換美元;@31.5000;FT0000002BBB")}, false},
+		"no memo: two amounts in two units prove nothing": {[]transferLine{out(""), in(fx, "2026-02-23", "")}, false},
+		"another day":                                     {[]transferLine{out(reference), in(fx, "2026-02-24", reference)}, false},
+		"another bank":                                    {[]transferLine{out(reference), in(taishinRichart, "2026-02-23", reference)}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			pairs := matchTransfers(tc.lines)
+			if linked := pairs[1] == 2 && pairs[2] == 1; linked != tc.want {
+				t.Fatalf("linked = %v, want %v (pairs %v)", linked, tc.want, pairs)
+			}
+		})
+	}
+}
+
+func TestATransferOrPaymentIsInOneUnit(t *testing.T) {
+	pairs := matchTransfers([]transferLine{
+		inUnit(depositLine(t, 1, esunSavings, "2026-07-21", "-500", "812 0087654321***234"), "USD", ""),
+		depositLine(t, 2, taishinRichart, "2026-07-21", "500", ""),
+		inUnit(depositLine(t, 3, esunSavings, "2026-09-22", "-6350", ""), "USD", ""),
+		paymentLine(t, 4, "esun", 50, "2026-09-22", "-6350"),
+	})
+	if len(pairs) != 0 {
+		t.Fatalf("pairs = %v, want none across units", pairs)
+	}
+	usd := "USD"
+	bills := []dbq.CardBillsRow{{ID: 50, Institution: "esun", ClosingDate: day(t, "2026-09-07"), DueDate: day(t, "2026-09-22"), Currency: &usd, TotalDue: money(t, "6350")}}
+	if paid := matchPaid(bills, []transferLine{depositLine(t, 3, esunSavings, "2026-09-22", "-6350", "")}); len(paid) != 0 {
+		t.Fatalf("a US$ bill paid in NT$: %v", paid)
 	}
 }
 

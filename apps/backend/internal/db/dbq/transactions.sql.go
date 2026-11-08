@@ -12,7 +12,7 @@ import (
 )
 
 const cardBills = `-- name: CardBills :many
-SELECT id, institution, closing_date, due_date, total_due
+SELECT id, institution, closing_date, due_date, currency, total_due
 FROM statements
 WHERE kind = 'credit_card'
 ORDER BY institution, closing_date
@@ -23,6 +23,7 @@ type CardBillsRow struct {
 	Institution string
 	ClosingDate pgtype.Date
 	DueDate     pgtype.Date
+	Currency    *string
 	TotalDue    pgtype.Numeric
 }
 
@@ -40,6 +41,7 @@ func (q *Queries) CardBills(ctx context.Context) ([]CardBillsRow, error) {
 			&i.Institution,
 			&i.ClosingDate,
 			&i.DueDate,
+			&i.Currency,
 			&i.TotalDue,
 		); err != nil {
 			return nil, err
@@ -749,7 +751,7 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 
 const transferLines = `-- name: TransferLines :many
 SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
-       t.transaction_date, t.kind, t.amount, t.counterparty
+       t.transaction_date, t.kind, t.amount, t.unit, t.memo, t.counterparty
 FROM transactions t
 JOIN accounts a ON a.id = t.account_id
 WHERE a.kind = 'deposit' OR t.kind = 'payment'
@@ -767,6 +769,8 @@ type TransferLinesRow struct {
 	TransactionDate pgtype.Date
 	Kind            string
 	Amount          pgtype.Numeric
+	Unit            string
+	Memo            *string
 	Counterparty    *string
 }
 
@@ -791,6 +795,8 @@ func (q *Queries) TransferLines(ctx context.Context) ([]TransferLinesRow, error)
 			&i.TransactionDate,
 			&i.Kind,
 			&i.Amount,
+			&i.Unit,
+			&i.Memo,
 			&i.Counterparty,
 		); err != nil {
 			return nil, err
