@@ -6,7 +6,7 @@
 		<category term='filter'></category>
 		<title>Mail Filter</title>
 		<content></content>
-		<apps:property name="hasTheWord" value='(from:(cathaybk.com.tw) subject:("信用卡" "電子帳單")) OR (from:(ctbcbank.com) subject:("電子對帳單")) OR (from:(esunbank.com) subject:("信用卡電子帳單")) OR (from:(esunbank.com) subject:("綜合對帳單")) OR (from:(hsbc.com.tw) subject:("信用卡帳單")) OR (from:(nextbank.com.tw) subject:("綜合對帳單")) OR (from:(taipeifubon.com.tw) subject:("銀行對帳單")) OR (from:(taishinbank.com.tw) subject:("信用卡電子帳單")) OR (from:(taishinbank.com.tw) subject:("綜合對帳單"))'/>
+		<apps:property name="hasTheWord" value='(from:(cathaybk.com.tw) subject:("信用卡" "電子帳單")) OR (from:(ctbcbank.com) subject:("電子對帳單")) OR (from:(esunbank.com) subject:("信用卡電子帳單")) OR (from:(esunbank.com) subject:("綜合對帳單")) OR (from:(hsbc.com.tw) subject:("信用卡帳單")) OR (from:(nextbank.com.tw) subject:("綜合對帳單")) OR (from:(sk88.com.tw) subject:("證券月對帳單")) OR (from:(taipeifubon.com.tw) subject:("銀行對帳單")) OR (from:(taishinbank.com.tw) subject:("信用卡電子帳單")) OR (from:(taishinbank.com.tw) subject:("綜合對帳單"))'/>
 		<apps:property name="hasAttachment" value="true"/>
 		<apps:property name="label" value="Finchie"/>
 		<apps:property name="shouldNeverSpam" value="true"/>

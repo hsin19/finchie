@@ -95,9 +95,58 @@ class DepositStatement:
         return all(a.reconciliation is None or a.reconciliation.balanced for a in self.accounts)
 
 
+class TradeSide(StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+@dataclass(frozen=True)
+class SecuritiesTrade:
+    date: date
+    # Unicode-normalized, as the exchanges spell it (ADR 0017).
+    name: str
+    side: TradeSide
+    # Positive, whichever the side.
+    shares: Decimal
+    price: Decimal
+    category: str
+    amount: Decimal
+    fee: Decimal
+    tax: Decimal
+    # Received positive, paid negative; zero for a buy paid in advance.
+    net: Decimal
+    prepaid: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class SecuritiesHolding:
+    name: str
+    shares: Decimal
+
+
+@dataclass(frozen=True)
+class SecuritiesStatement:
+    institution: str
+    account_number: str
+    period_start: date
+    period_end: date
+    holdings_date: date
+    # The whole account: a security not listed holds nothing.
+    holdings: list[SecuritiesHolding]
+    trades: list[SecuritiesTrade]
+    reconciliation: Reconciliation
+
+    @property
+    def balanced(self) -> bool:
+        return self.reconciliation.balanced
+
+
+AnyStatement = Statement | DepositStatement | SecuritiesStatement
+
+
 @dataclass(frozen=True)
 class ParseResult:
     parser: str
     parser_version: str
-    statement: Statement | DepositStatement
+    statement: AnyStatement
     warnings: list[str] = field(default_factory=list)

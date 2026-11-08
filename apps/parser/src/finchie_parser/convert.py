@@ -15,7 +15,10 @@ from finchie_parser.model import (
     Kind,
     ParseResult,
     Reconciliation,
+    SecuritiesStatement,
+    SecuritiesTrade,
     Statement,
+    TradeSide,
     Transaction,
 )
 from finchie_parser.reading import OpenedDocument
@@ -43,6 +46,8 @@ def to_response(result: ParseResult) -> pb.ParseDocumentResponse:
     )
     if isinstance(result.statement, DepositStatement):
         response.deposit_statement.CopyFrom(_deposit_statement(result.statement))
+    elif isinstance(result.statement, SecuritiesStatement):
+        response.securities_statement.CopyFrom(_securities_statement(result.statement))
     else:
         response.statement.CopyFrom(_statement(result.statement))
     return response
@@ -97,6 +102,37 @@ def _deposit_statement(statement: DepositStatement) -> pb.DepositStatement:
         period_end=_date(statement.period_end),
         accounts=[_deposit_account(account) for account in statement.accounts],
     )
+
+
+def _securities_statement(statement: SecuritiesStatement) -> pb.SecuritiesStatement:
+    return pb.SecuritiesStatement(
+        institution=statement.institution,
+        account_number=statement.account_number,
+        period_start=_date(statement.period_start),
+        period_end=_date(statement.period_end),
+        holdings_date=_date(statement.holdings_date),
+        holdings=[pb.SecuritiesHolding(name=h.name, shares=_decimal(h.shares)) for h in statement.holdings],
+        trades=[_securities_trade(trade) for trade in statement.trades],
+        reconciliation=_reconciliation(statement.reconciliation),
+    )
+
+
+def _securities_trade(trade: SecuritiesTrade) -> pb.SecuritiesTrade:
+    message = pb.SecuritiesTrade(
+        date=_date(trade.date),
+        name=trade.name,
+        side=pb.TRADE_SIDE_BUY if trade.side is TradeSide.BUY else pb.TRADE_SIDE_SELL,
+        shares=_decimal(trade.shares),
+        price=_decimal(trade.price),
+        category=trade.category,
+        amount=_decimal(trade.amount),
+        fee=_decimal(trade.fee),
+        tax=_decimal(trade.tax),
+        net=_decimal(trade.net),
+    )
+    if trade.prepaid is not None:
+        message.prepaid.CopyFrom(_decimal(trade.prepaid))
+    return message
 
 
 def _deposit_account(account: DepositAccount) -> pb.DepositAccount:

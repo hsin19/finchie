@@ -27,6 +27,9 @@ IDENTITY = Identity(national_id="a123456789", birth_date=date(2000, 1, 2))
         ("service@bhu.taipeifubon.com.tw", "台北富邦銀行2026年10月 銀行對帳單", "fubon.deposit"),
         ("no_reply@eblsdr.nextbank.com.tw", "【將來銀行通知】2026年9月綜合對帳單", "nextbank.deposit"),
         ("ebill@estats.ctbcbank.com", "中國信託銀行電子對帳單 11510", "ctbc.deposit"),
+        ("SKSEM@ebill.sk88.com.tw", "新光證券115/07證券月對帳單", "skis.securities"),
+        # Its daily trade reports are not read (ADR 0017).
+        ("SKSED@ebill.sk88.com.tw", "新光證券2026/07/24證券帳務回報通知", None),
         ("estatement@esunbank.com.example", "玉山銀行2026年09月信用卡電子帳單", None),
         # The banks' notices, from the same domains.
         ("webmaster@taishinbank.com.tw", "台新網路銀行/行動銀行登入成功通知", None),
@@ -56,6 +59,7 @@ def by_name(name: str) -> StatementParser:
         ("fubon.deposit", ["A123456789"]),
         ("nextbank.deposit", ["A123456789"]),
         ("ctbc.deposit", ["A123456789"]),
+        ("skis.securities", ["A123456789"]),
     ],
 )
 def test_each_banks_password_rule(parser: str, passwords: list[str]) -> None:

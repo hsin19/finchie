@@ -87,12 +87,13 @@ message ParseDocumentResponse {
   // Bumped whenever the parser's output for the same input can change, so the
   // caller knows what to re-parse.
   string parser_version = 2;
-  // A credit card bill. Exactly one of statement and deposit_statement is set
-  // (ADR 0013).
+  // A credit card bill. Exactly one of statement, deposit_statement, and
+  // securities_statement is set (ADR 0013, ADR 0017).
   Statement statement = 3;
   // Problems that did not stop parsing, e.g. OCR text that could not be read.
   repeated string warnings = 4;
   DepositStatement deposit_statement = 5;
+  SecuritiesStatement securities_statement = 6;
 }
 
 // A credit card bill.
@@ -202,4 +203,56 @@ enum DepositLineKind {
   DEPOSIT_LINE_KIND_OTHER = 1;
   DEPOSIT_LINE_KIND_INTEREST = 2;
   DEPOSIT_LINE_KIND_FEE = 3;
+}
+
+// A brokerage account's monthly statement: the month's trades and the holdings
+// at its end (ADR 0017).
+message SecuritiesStatement {
+  // Stable institution ID, as for Statement, e.g. "skis".
+  string institution = 1;
+  // As printed, masked by the broker.
+  string account_number = 2;
+  google.type.Date period_start = 3;
+  google.type.Date period_end = 4;
+  // The day the holdings are as of.
+  google.type.Date holdings_date = 5;
+  // The whole account on holdings_date: a security not listed holds nothing.
+  repeated SecuritiesHolding holdings = 6;
+  repeated SecuritiesTrade trades = 7;
+  // Whether the trades add up to the totals the statement prints.
+  Reconciliation reconciliation = 8;
+}
+
+message SecuritiesHolding {
+  // The security's name as printed, Unicode-normalized, e.g. "台積電".
+  string name = 1;
+  // Ordinary shares (普通).
+  google.type.Decimal shares = 2;
+}
+
+message SecuritiesTrade {
+  google.type.Date date = 1;
+  // As for SecuritiesHolding.
+  string name = 2;
+  TradeSide side = 3;
+  // Shares traded, positive.
+  google.type.Decimal shares = 4;
+  google.type.Decimal price = 5;
+  // The broker's category as printed, e.g. "集買".
+  string category = 6;
+  // 價金: the shares at the price.
+  google.type.Decimal amount = 7;
+  google.type.Decimal fee = 8;
+  google.type.Decimal tax = 9;
+  // 應收付: what the owner receives (positive) or pays (negative); zero for a
+  // buy paid in advance.
+  google.type.Decimal net = 10;
+  // 預繳金, unset unless the buy was paid in advance.
+  google.type.Decimal prepaid = 11;
+}
+
+enum TradeSide {
+  TRADE_SIDE_UNSPECIFIED = 0;
+  TRADE_SIDE_BUY = 1;
+  TRADE_SIDE_SELL = 2;
 }

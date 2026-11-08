@@ -10,7 +10,7 @@ A brokerage account is an account (ADR 0013) of kind `securities`: what it holds
 |---|---|
 | E-mail | From `ebill.sk88.com.tw`, subject `新光證券115/07證券月對帳單`, sent only for months with trades (ADR 0013). The PDF opens with the national ID, letters upper case, as the e-mail says |
 | Trades (交易資料明細) | Per trade: the date (month and day), the security's name, shares, price, category (集買, 集賣, …), amount (價金), fee, tax, and the net paid or received (應收付, marked `(付)` or `(收)`). A buy paid in advance (預繳) prints 0 to pay, with the amount prepaid (預繳金) on the row below. A 合計 row totals each column |
-| Holdings (庫存資料明細) | On the month's last day: each security's name and its shares, in four columns: ordinary (普通), margin (融資), short (融券), pledged (借貸擔保品) |
+| Holdings (庫存資料明細) | On the month's last day (corrected: on the day the statement prints, a few days into the next month, counting that day's trades, which the next month's statement lists; continuity still holds, since it goes by the lines' dates): each security's name and its shares, in four columns: ordinary (普通), margin (融資), short (融券), pledged (借貸擔保品) |
 | Not printed | Codes, prices, market values, cash. The money settles in a bank account (交割戶), one net amount per day |
 
 The parser reconciles its trades against the 合計 row: amounts, fees, taxes, and the net paid or received must each add up (ADR 0005). The owner trades ordinary shares only. A statement with margin, short, or pledged shares raises a layout error until one has been seen; reading them as ordinary shares would be wrong.

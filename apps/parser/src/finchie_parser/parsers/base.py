@@ -7,7 +7,7 @@ from typing import ClassVar
 
 from finchie_parser.documents import Mail
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositLine, DepositStatement, Kind, Reconciliation, Statement, Transaction
+from finchie_parser.model import AnyStatement, DepositLine, Kind, Reconciliation, Transaction
 from finchie_parser.ocr import Ocr
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
@@ -15,7 +15,7 @@ from finchie_parser.pdf import Document, Word
 
 @dataclass
 class Parsed:
-    statement: Statement | DepositStatement
+    statement: AnyStatement
     warnings: list[str] = field(default_factory=list)
 
 
