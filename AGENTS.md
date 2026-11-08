@@ -22,8 +22,8 @@ V1 lives only at tag `v1.0.0`; look there for its code (for example the IMAP fet
 Finchie exists to take work off its owner, never to hand them any. V1 died of a chore (re-authorizing Gmail every seven days, ADR 0001). Check every proposal against this first.
 
 - Data comes only from sources that keep arriving by themselves: statement e-mails Gmail forwards, read-only API keys that do not expire. Anything that needs periodic re-authorization is out.
-- Configuration happens at most once. Accounts, cards, and the like are created from what statements print (ADR 0013), not set up by hand.
-- Quiet unless action is needed: an unbalanced statement, money that moved between two statements unseen, a card bill not paid automatically. Nothing else notifies.
+- Configuration happens at most once. Accounts, cards, and the like are discovered from what their sources report (ADR 0013), not set up by hand.
+- Quiet unless action is needed: an unbalanced statement, money that moved unseen between two balances of an account, a card bill not paid automatically. Nothing else notifies.
 - Manual input is an optional supplement, never what a feature depends on. A feature that needs someone to keep rules up to date, such as card promotions, stays out unless its data can come by itself.
 
 ## Build and test
