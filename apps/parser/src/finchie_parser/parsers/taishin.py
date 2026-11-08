@@ -28,7 +28,7 @@ _ROW = re.compile(
 
 class TaishinParser(StatementParser):
     name = "taishin.credit_card"
-    version = "3"
+    version = "4"
     institution = "taishin"
     # 台新信用卡電子帳單 2026年10月; the combined (deposit) statement, 台新銀行綜合對帳單 2026年9月份,
     # comes from the same address.
@@ -102,7 +102,8 @@ def _kind(description: str, value: Decimal) -> Kind:
         return Kind.FOREIGN_TRANSACTION_FEE
     if "年費" in description:
         return Kind.ANNUAL_FEE
-    if value < 0 and ("扣繳" in description or "繳款" in description):
+    # Older bills word it 台新自動扣款, and before that 您的付款已收到,謝謝您!.
+    if value < 0 and any(word in description for word in ("扣繳", "繳款", "自動扣款", "付款已收到")):
         return Kind.PAYMENT
     if "折抵" in description:
         return Kind.REBATE

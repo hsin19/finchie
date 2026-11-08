@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from fakes import FakeDocument
 
 from finchie_parser.model import Kind
@@ -58,6 +59,16 @@ def test_taishin_joins_wrapped_descriptions() -> None:
     assert "信用卡消費折抵_測試百貨股份有限 公司" in descriptions
     # The line after a wrapped row is consumed, not parsed again.
     assert len(descriptions) == 10
+
+
+@pytest.mark.parametrize("wording", ["台新自動扣款", "您的付款已收到,謝謝您!"])
+def test_taishin_reads_older_bills_wordings_of_a_payment(wording: str) -> None:
+    older = PAGE_2.replace(
+        "台新銀行帳戶自動轉帳扣繳台新信用\n115/03/24 115/03/24 -2,000\n卡款", f"115/03/24 115/03/24 {wording} -2,000"
+    )
+    statement = TaishinParser().parse(FakeDocument([PAGE_1, older]), ocr=None).statement
+    assert {tx.description: tx.kind for tx in statement.transactions}[wording] is Kind.PAYMENT
+    assert statement.reconciliation.balanced
 
 
 def test_taishin_classifies_lines() -> None:

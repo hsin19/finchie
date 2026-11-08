@@ -95,6 +95,14 @@ def test_ctbc_deposit_reads_a_block_of_lines_from_the_balance_brought_forward_to
     assert digital.reconciliation.balanced
 
 
+def test_ctbc_deposit_reads_a_balance_right_of_the_number_whatever_digits_the_account_kind_has() -> None:
+    # Until mid-2026 台幣數二 was MyWay數2, whose MyWay and 2 the text layer holds.
+    text = [*words(210, ("MyWay", 37, 63), ("2", 71, 75)), *TEXT]
+    ocr = [OcrLine("MyWay數2", 201, 213, 35) if line.text == "台幣數二" else line for line in OCR]
+    digital = parse(text, ocr).accounts[1]
+    assert (digital.name, digital.number, digital.closing_balance) == ("MyWay數2", DIGITAL, Decimal(15124))
+
+
 def test_ctbc_deposit_needs_ocr() -> None:
     with pytest.raises(LayoutError, match="need OCR"):
         CtbcDepositParser().parse(FakeDocument([PAGE_1, ""], words={1: TEXT}), ocr=None)

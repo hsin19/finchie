@@ -49,7 +49,7 @@ class _Account:
 
 class CtbcDepositParser(StatementParser):
     name = "ctbc.deposit"
-    version = "1"
+    version = "2"
     institution = "ctbc"
     # 中國信託銀行電子對帳單 11510, from ebill@estats.ctbcbank.com.
     sender_domains = ("ctbcbank.com",)
@@ -118,11 +118,14 @@ class _Reader:
                 self._lines_row(row, beside, headings)
 
     def _holding(self, row: list[Word], beside: list[OcrLine], headings: dict[str, OcrLine]) -> None:
-        number = next(w.text for w in row if _NUMBER.fullmatch(w.text))
-        amounts = [w for w in row if _AMOUNT.fullmatch(w.text) and not _NUMBER.fullmatch(w.text)]
+        at = next(w for w in row if _NUMBER.fullmatch(w.text))
+        number = at.text
+        # Right of the number: an account kind's name left of it may carry digits of its own (MyWay數2,
+        # whose 2 the text layer holds).
+        amounts = [w for w in row if w.x0 > at.x1 and _AMOUNT.fullmatch(w.text)]
         if len(amounts) != 1:
             raise LayoutError(f"{number}: expected one balance, found {[w.text for w in amounts]}")
-        name = " ".join(line.text for line in beside if line.left < row[0].x0 - 20)
+        name = " ".join(line.text for line in beside if line.left < at.x0 - 20)
         currency = "TWD"
         if self.section == "外幣存款帳戶":
             # By name, not by column: OCR does not always read the 幣別 heading apart from its neighbour.
