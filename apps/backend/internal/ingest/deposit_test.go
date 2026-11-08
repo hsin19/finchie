@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/genproto/googleapis/type/decimal"
 
+	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
@@ -137,6 +138,168 @@ func TestABanksCardBillAndDepositStatementClosingTheSameDayAreBothStored(t *test
 	}
 	if countRows(t, pool, "statements") != 2 {
 		t.Fatal("both statements must be stored")
+	}
+}
+
+// passbook is a synthetic (ADR 0006) on-demand export of one NT$ account, as Cathay's e-passbook is:
+// its period runs from its first line to its last.
+func passbook(from, to *date.Date, opening, closing string, lines ...*parserv1.DepositLine) *parserv1.DepositStatement {
+	return &parserv1.DepositStatement{
+		Institution: "cathay",
+		PeriodStart: from,
+		PeriodEnd:   to,
+		Accounts: []*parserv1.DepositAccount{{
+			Number: "123-45-678901-2", Name: "數位存款帳戶", Currency: "TWD",
+			OpeningBalance: &decimal.Decimal{Value: opening},
+			ClosingBalance: &decimal.Decimal{Value: closing},
+			Lines:          lines,
+			Reconciliation: &parserv1.Reconciliation{
+				Balanced: true, Computed: &decimal.Decimal{Value: closing}, Stated: &decimal.Decimal{Value: closing}, StatedLabel: "餘額",
+			},
+		}},
+	}
+}
+
+func on2026(month, day int32) *date.Date {
+	return &date.Date{Year: 2026, Month: month, Day: day}
+}
+
+func passbookLine(month, day int32, description, amount, balance string) *parserv1.DepositLine {
+	return &parserv1.DepositLine{
+		Date: on2026(month, day), Description: description, Amount: &decimal.Decimal{Value: amount},
+		Balance: &decimal.Decimal{Value: balance}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
+	}
+}
+
+// May to October: 10,000 before it; -500 → 9,500; +1,000 → 10,500; -200 → 10,300.
+func mayToOctober() *parserv1.DepositStatement {
+	return passbook(on2026(5, 19), on2026(10, 29), "10000", "10300",
+		passbookLine(5, 19, "五月卡款", "-500", "9500"),
+		passbookLine(6, 19, "六月轉入(舊)", "1000", "10500"),
+		passbookLine(10, 29, "十月轉出(舊)", "-200", "10300"),
+	)
+}
+
+// June to November, sharing June to October with the export above: +1,000 → 10,500; -200 → 10,300;
+// +3,000 → 13,300.
+func juneToNovember() *parserv1.DepositStatement {
+	return passbook(on2026(6, 19), on2026(11, 19), "9500", "13300",
+		passbookLine(6, 19, "六月轉入(新)", "1000", "10500"),
+		passbookLine(10, 29, "十月轉出(新)", "-200", "10300"),
+		passbookLine(11, 19, "十一月薪資", "3000", "13300"),
+	)
+}
+
+// checkLedger compares every line and balance stored, oldest first, and requires no continuity gap.
+func checkLedger(t *testing.T, pool *pgxpool.Pool, wantLines, wantBalances string) {
+	t.Helper()
+	ctx := t.Context()
+	scan := func(query string) string {
+		t.Helper()
+		rows, err := pool.Query(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var got []string
+		for rows.Next() {
+			var day time.Time
+			var rest string
+			if err := rows.Scan(&day, &rest); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, day.Format(time.DateOnly)+" "+rest)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(got, "; ")
+	}
+	if got := scan("SELECT transaction_date, description || ' ' || amount::text FROM transactions ORDER BY transaction_date, id"); got != wantLines {
+		t.Fatalf("lines = %q, want %q", got, wantLines)
+	}
+	if got := scan("SELECT as_of, amount::text FROM balances ORDER BY as_of, id"); got != wantBalances {
+		t.Fatalf("balances = %q, want %q", got, wantBalances)
+	}
+	gaps, err := dbq.New(pool).AccountGaps(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaps) != 0 {
+		t.Fatalf("gaps = %+v, want none", gaps)
+	}
+}
+
+// Over the days two exports share, the one closing later stands: May stays from the first, June to
+// November comes from the second.
+const (
+	sharedLines    = "2026-05-19 五月卡款 -500; 2026-06-19 六月轉入(新) 1000; 2026-10-29 十月轉出(新) -200; 2026-11-19 十一月薪資 3000"
+	sharedBalances = "2026-05-18 10000; 2026-06-18 9500; 2026-11-19 13300"
+)
+
+func TestOverlappingExportsKeepTheSharedDaysOfTheOneClosingLater(t *testing.T) {
+	pool := testdb.Pool(t)
+	older := storeDeposit(t, pool, "may-oct.eml", mayToOctober())
+	newer := storeDeposit(t, pool, "jun-nov.eml", juneToNovember())
+	if document(t, pool, older).Status != StatusParsed || document(t, pool, newer).Status != StatusParsed {
+		t.Fatal("both overlapping exports must be parsed")
+	}
+	checkLedger(t, pool, sharedLines, sharedBalances)
+
+	// Re-parsing the export closing earlier changes nothing.
+	parser := &fakeParser{response: &parserv1.ParseDocumentResponse{Parser: "cathay.deposit", ParserVersion: "1", DepositStatement: mayToOctober()}}
+	if err := NewWorker(pool, parser, time.Minute).Work(t.Context(), job(older, 1, 6)); err != nil {
+		t.Fatal(err)
+	}
+	checkLedger(t, pool, sharedLines, sharedBalances)
+
+	// One closing the same day but starting earlier is no duplicate, and as the later document it keeps
+	// every day it covers, its opening balance with them.
+	whole := storeDeposit(t, pool, "may-nov.eml", passbook(on2026(5, 19), on2026(11, 19), "10000", "13300",
+		passbookLine(5, 19, "五月卡款", "-500", "9500"),
+		passbookLine(6, 19, "六月轉入(全)", "1000", "10500"),
+		passbookLine(10, 29, "十月轉出(全)", "-200", "10300"),
+		passbookLine(11, 19, "十一月薪資", "3000", "13300"),
+	))
+	if got := document(t, pool, whole).Status; got != StatusParsed {
+		t.Fatalf("status = %s, want parsed for a wider period ending on the same day", got)
+	}
+	checkLedger(t, pool,
+		"2026-05-19 五月卡款 -500; 2026-06-19 六月轉入(全) 1000; 2026-10-29 十月轉出(全) -200; 2026-11-19 十一月薪資 3000",
+		"2026-05-18 10000; 2026-11-19 13300",
+	)
+}
+
+func TestOverlappingExportsStoredTheOtherWayRoundEndTheSame(t *testing.T) {
+	pool := testdb.Pool(t)
+	storeDeposit(t, pool, "jun-nov.eml", juneToNovember())
+	storeDeposit(t, pool, "may-oct.eml", mayToOctober())
+	checkLedger(t, pool, sharedLines, sharedBalances)
+}
+
+func TestAdjoiningStatementsKeepEachOthersBalancesWhicheverArrivesFirst(t *testing.T) {
+	pool := testdb.Pool(t)
+	september := sampleDeposit()
+	october := sampleDeposit()
+	october.PeriodStart, october.PeriodEnd = &date.Date{Year: 2026, Month: 10, Day: 1}, &date.Date{Year: 2026, Month: 10, Day: 31}
+	october.Accounts = october.Accounts[:1]
+	october.Accounts[0].OpeningBalance = &decimal.Decimal{Value: "51000"}
+	october.Accounts[0].Lines = nil
+	october.Accounts[0].ClosingBalance = &decimal.Decimal{Value: "51000"}
+
+	// The older one arrives last, as a backfill does: October's opening balance, on September's last
+	// day, is October's and stays.
+	storeDeposit(t, pool, "october.eml", october)
+	storeDeposit(t, pool, "september.eml", september)
+	var n int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM balances WHERE as_of = '2026-09-30' AND unit = 'TWD'").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("balances on 2026-09-30 = %d, want September's closing and October's opening", n)
+	}
+	if countRows(t, pool, "transactions") != 2 {
+		t.Fatal("September's lines must stay")
 	}
 }
 

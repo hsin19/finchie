@@ -134,6 +134,11 @@ function amountTone(value: string) {
             {/if}
         </div>
     </div>
+    {#if account.institution === "cathay" && account.kind === "deposit"}
+        <p class="mt-2.5 border-t border-rule pt-2 text-[12px] text-dim">
+            來源流程：<span class="text-ink">CUBE App → 更多 → 臺幣 → 匯出臺幣電子存摺</span> → Gmail 篩選器自動轉寄 → 解析入帳（單次上限 220 筆；期間和之前匯出的重疊沒關係，重疊的日子以結束日較晚的那份為準）。
+        </p>
+    {/if}
 </section>
 
 {#if account.gaps.length > 0}

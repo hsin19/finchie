@@ -5,7 +5,45 @@ WHERE document_id = @document_id;
 -- name: FindStatementByKey :one
 SELECT id, document_id
 FROM statements
-WHERE institution = @institution AND kind = @kind AND closing_date = @closing_date;
+WHERE institution = @institution
+  AND kind = @kind
+  AND period_start IS NOT DISTINCT FROM @period_start
+  AND closing_date = @closing_date;
+
+-- name: OverlappingDepositStatements :many
+-- The other deposit statements whose periods share days with this one's and that report the account in
+-- the currency: on-demand exports such as Cathay's e-passbook (ADR 0013). Statements that only adjoin,
+-- as monthly ones do, share no day.
+SELECT o.id, o.document_id, o.period_start, o.closing_date
+FROM statements s
+JOIN statements o ON o.id <> s.id
+    AND o.kind = 'deposit'
+    AND o.period_start <= s.closing_date
+    AND o.closing_date >= s.period_start
+WHERE s.id = @statement_id
+  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = @account_id AND t.unit = @unit)
+    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = @account_id AND b.unit = @unit));
+
+-- name: TrimStatementLines :exec
+-- A statement's lines of an account in a currency on the days another statement keeps.
+DELETE FROM transactions
+WHERE statement_id = @statement_id
+  AND account_id = @account_id
+  AND unit = @unit
+  AND transaction_date BETWEEN @from_date AND @to_date;
+
+-- name: TrimStatementBalances :exec
+-- A statement's balances of an account in a currency on the days another statement keeps, and on a day
+-- before them that statement has a balance for too: the opening balance two exports starting the same
+-- day both have.
+DELETE FROM balances b
+WHERE b.statement_id = @statement_id
+  AND b.account_id = @account_id
+  AND b.unit = @unit
+  AND b.as_of <= @to_date
+  AND (b.as_of >= @from_date OR EXISTS (
+      SELECT 1 FROM balances k
+      WHERE k.statement_id = @keeper_id AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of));
 
 -- name: InsertStatement :one
 -- The bill's columns are null for a deposit statement (ADR 0013).

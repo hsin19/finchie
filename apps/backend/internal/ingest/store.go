@@ -101,6 +101,7 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 		existing, err := queries.FindStatementByKey(ctx, dbq.FindStatementByKeyParams{
 			Institution: statement.Institution,
 			Kind:        statement.Kind,
+			PeriodStart: statement.PeriodStart,
 			ClosingDate: statement.ClosingDate,
 		})
 		switch {
@@ -144,6 +145,15 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 		}
 		if _, err := queries.InsertTransactions(ctx, lines); err != nil {
 			return err
+		}
+		if statement.Kind == KindDeposit {
+			this := span{id: statementID, documentID: documentID, start: statement.PeriodStart.Time, end: statement.ClosingDate.Time}
+			for i, reported := range result.accounts {
+				// Each section reports one currency, and always its closing balance.
+				if err := trimOverlaps(ctx, queries, this, accountIDs[i], reported.balances[0].Unit); err != nil {
+					return err
+				}
+			}
 		}
 		if statement.Kind == KindSecurities {
 			if err := storeHoldings(ctx, queries, statementID, result.trades, accountIDs); err != nil {

@@ -24,12 +24,16 @@ func (q *Queries) DeleteStatementsForDocument(ctx context.Context, documentID in
 const findStatementByKey = `-- name: FindStatementByKey :one
 SELECT id, document_id
 FROM statements
-WHERE institution = $1 AND kind = $2 AND closing_date = $3
+WHERE institution = $1
+  AND kind = $2
+  AND period_start IS NOT DISTINCT FROM $3
+  AND closing_date = $4
 `
 
 type FindStatementByKeyParams struct {
 	Institution string
 	Kind        string
+	PeriodStart pgtype.Date
 	ClosingDate pgtype.Date
 }
 
@@ -39,7 +43,12 @@ type FindStatementByKeyRow struct {
 }
 
 func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKeyParams) (FindStatementByKeyRow, error) {
-	row := q.db.QueryRow(ctx, findStatementByKey, arg.Institution, arg.Kind, arg.ClosingDate)
+	row := q.db.QueryRow(ctx, findStatementByKey,
+		arg.Institution,
+		arg.Kind,
+		arg.PeriodStart,
+		arg.ClosingDate,
+	)
 	var i FindStatementByKeyRow
 	err := row.Scan(&i.ID, &i.DocumentID)
 	return i, err
@@ -358,6 +367,59 @@ func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]Li
 	return items, nil
 }
 
+const overlappingDepositStatements = `-- name: OverlappingDepositStatements :many
+SELECT o.id, o.document_id, o.period_start, o.closing_date
+FROM statements s
+JOIN statements o ON o.id <> s.id
+    AND o.kind = 'deposit'
+    AND o.period_start <= s.closing_date
+    AND o.closing_date >= s.period_start
+WHERE s.id = $1
+  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = $2 AND t.unit = $3)
+    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = $2 AND b.unit = $3))
+`
+
+type OverlappingDepositStatementsParams struct {
+	StatementID int64
+	AccountID   int64
+	Unit        string
+}
+
+type OverlappingDepositStatementsRow struct {
+	ID          int64
+	DocumentID  int64
+	PeriodStart pgtype.Date
+	ClosingDate pgtype.Date
+}
+
+// The other deposit statements whose periods share days with this one's and that report the account in
+// the currency: on-demand exports such as Cathay's e-passbook (ADR 0013). Statements that only adjoin,
+// as monthly ones do, share no day.
+func (q *Queries) OverlappingDepositStatements(ctx context.Context, arg OverlappingDepositStatementsParams) ([]OverlappingDepositStatementsRow, error) {
+	rows, err := q.db.Query(ctx, overlappingDepositStatements, arg.StatementID, arg.AccountID, arg.Unit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OverlappingDepositStatementsRow
+	for rows.Next() {
+		var i OverlappingDepositStatementsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentID,
+			&i.PeriodStart,
+			&i.ClosingDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const statementExists = `-- name: StatementExists :one
 SELECT EXISTS (SELECT 1 FROM statements WHERE id = $1 AND kind = 'credit_card')
 `
@@ -367,4 +429,67 @@ func (q *Queries) StatementExists(ctx context.Context, id int64) (bool, error) {
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const trimStatementBalances = `-- name: TrimStatementBalances :exec
+DELETE FROM balances b
+WHERE b.statement_id = $1
+  AND b.account_id = $2
+  AND b.unit = $3
+  AND b.as_of <= $4
+  AND (b.as_of >= $5 OR EXISTS (
+      SELECT 1 FROM balances k
+      WHERE k.statement_id = $6 AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of))
+`
+
+type TrimStatementBalancesParams struct {
+	StatementID int64
+	AccountID   int64
+	Unit        string
+	ToDate      pgtype.Date
+	FromDate    pgtype.Date
+	KeeperID    int64
+}
+
+// A statement's balances of an account in a currency on the days another statement keeps, and on a day
+// before them that statement has a balance for too: the opening balance two exports starting the same
+// day both have.
+func (q *Queries) TrimStatementBalances(ctx context.Context, arg TrimStatementBalancesParams) error {
+	_, err := q.db.Exec(ctx, trimStatementBalances,
+		arg.StatementID,
+		arg.AccountID,
+		arg.Unit,
+		arg.ToDate,
+		arg.FromDate,
+		arg.KeeperID,
+	)
+	return err
+}
+
+const trimStatementLines = `-- name: TrimStatementLines :exec
+DELETE FROM transactions
+WHERE statement_id = $1
+  AND account_id = $2
+  AND unit = $3
+  AND transaction_date BETWEEN $4 AND $5
+`
+
+type TrimStatementLinesParams struct {
+	StatementID int64
+	AccountID   int64
+	Unit        string
+	FromDate    pgtype.Date
+	ToDate      pgtype.Date
+}
+
+// A statement's lines of an account in a currency on the days another statement keeps.
+func (q *Queries) TrimStatementLines(ctx context.Context, arg TrimStatementLinesParams) error {
+	_, err := q.db.Exec(ctx, trimStatementLines,
+		arg.StatementID,
+		arg.AccountID,
+		arg.Unit,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	return err
 }
