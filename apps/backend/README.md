@@ -31,7 +31,7 @@ Amounts are decimal strings; statement dates are `YYYY-MM-DD` (ADR 0004).
 ## Ingestion
 
 1. Upload: the document is stored with its SHA-256 and a `parse_document` River job is inserted **in the same transaction**, so every stored document has a job.
-2. The job calls the parser over gRPC (`BACKEND_PARSE_TIMEOUT`) and, in one transaction, replaces whatever the document produced before.
+2. The job calls the parser over gRPC (`BACKEND_PARSE_TIMEOUT`) and, in one transaction, replaces whatever the document produced before. The statement's account is found or created as it reports it, a bank's card bill being one account (ADR 0013); its lines go into that account, and the bill's balance (−total due, on the closing date) into `balances`. Accounts are never deleted with a document.
 3. The document ends up as:
 
 | Status | Meaning |

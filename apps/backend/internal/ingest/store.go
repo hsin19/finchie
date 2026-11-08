@@ -25,6 +25,12 @@ const (
 	StatusFailed      = "failed"
 )
 
+// Account kinds, as stored in accounts.kind (ADR 0013).
+const (
+	AccountCreditCard = "credit_card"
+	AccountDeposit    = "deposit"
+)
+
 // ErrInvalidResponse means the parser returned something that breaks the contract; retrying won't help.
 var ErrInvalidResponse = errors.New("invalid parser response")
 
@@ -88,11 +94,25 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 		if err != nil {
 			return err
 		}
+		// A bank's card bill is one account, found or created as the bill reports it (ADR 0013).
+		accountID, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{
+			Institution: statement.Institution, Kind: AccountCreditCard, Number: "",
+		})
+		if err != nil {
+			return fmt.Errorf("find account: %w", err)
+		}
 		for i := range transactions {
 			transactions[i].StatementID = statementID
+			transactions[i].AccountID = accountID
+			transactions[i].Unit = statement.Currency
 		}
 		if _, err := queries.InsertTransactions(ctx, transactions); err != nil {
 			return err
+		}
+		if err := queries.InsertCardBillBalance(ctx, dbq.InsertCardBillBalanceParams{
+			AccountID: accountID, StatementID: statementID,
+		}); err != nil {
+			return fmt.Errorf("record balance: %w", err)
 		}
 		// Its lines may be parents or children of lines on other statements.
 		if _, err := relink(ctx, queries); err != nil {

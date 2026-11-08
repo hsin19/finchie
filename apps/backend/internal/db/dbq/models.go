@@ -8,6 +8,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Account struct {
+	ID          int64
+	Institution string
+	Kind        string
+	Number      string
+	Name        *string
+	Expiry      string
+	CreatedAt   pgtype.Timestamptz
+}
+
+type Balance struct {
+	ID          int64
+	AccountID   int64
+	Unit        string
+	AsOf        pgtype.Date
+	Amount      pgtype.Numeric
+	StatementID int64
+}
+
 type Document struct {
 	ID            int64
 	Sha256        []byte
@@ -51,4 +70,7 @@ type Transaction struct {
 	Country          *string
 	CardLast4        *string
 	ParentID         *int64
+	AccountID        int64
+	Unit             string
+	Status           string
 }

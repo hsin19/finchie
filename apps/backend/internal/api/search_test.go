@@ -37,10 +37,14 @@ func seedStatement(t *testing.T, pool *pgxpool.Pool, institution, closing string
 	if err != nil {
 		t.Fatal(err)
 	}
+	account, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{Institution: institution, Kind: ingest.AccountCreditCard})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rows := make([]dbq.InsertTransactionsParams, 0, len(lines))
 	for i, l := range lines {
 		rows = append(rows, dbq.InsertTransactionsParams{
-			StatementID: id, LineNo: int32(i + 1), TransactionDate: pgDate(t, l.date), Description: l.description,
+			StatementID: id, AccountID: account, Unit: "TWD", LineNo: int32(i + 1), TransactionDate: pgDate(t, l.date), Description: l.description,
 			Kind: l.kind, Amount: numeric(t, l.amount),
 			OriginalCurrency: optional(l.currency), Country: optional(l.country), CardLast4: optional(l.card),
 		})

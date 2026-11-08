@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
+	"google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -105,6 +106,63 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 	if value, _ := rows[0].OriginalAmount.Value(); value != "780.00" {
 		t.Fatalf("original amount = %v, want the exact decimal back", value)
+	}
+}
+
+func TestABillIsStoredInItsBanksCardAccountWithWhatItSaysIsOwed(t *testing.T) {
+	pool := testdb.Pool(t)
+	store := func(name string, statement *parserv1.Statement) {
+		t.Helper()
+		if err := NewWorker(pool, parsed(statement), time.Minute).Work(t.Context(), job(addDocument(t, pool, name), 1, 6)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store("october.eml", sampleStatement(true))
+
+	var account int64
+	var kind, number string
+	if err := pool.QueryRow(t.Context(), "SELECT id, kind, number FROM accounts WHERE institution = 'hsbc'").Scan(&account, &kind, &number); err != nil {
+		t.Fatal(err)
+	}
+	if kind != AccountCreditCard || number != "" {
+		t.Fatalf("account = %s %q", kind, number)
+	}
+	var lines int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions WHERE account_id = $1 AND unit = 'TWD' AND status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
+		t.Fatalf("lines in the account = %d (%v)", lines, err)
+	}
+	var asOf time.Time
+	var amount string
+	if err := pool.QueryRow(t.Context(), "SELECT as_of, amount::text FROM balances WHERE account_id = $1 AND unit = 'TWD'", account).Scan(&asOf, &amount); err != nil {
+		t.Fatal(err)
+	}
+	// The sample bill's total due is -40010, a credit: the owner is owed 40010.
+	if asOf.Format(time.DateOnly) != "2026-10-21" || amount != "40010" {
+		t.Fatalf("balance = %s on %s", amount, asOf.Format(time.DateOnly))
+	}
+
+	november := sampleStatement(true)
+	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
+	store("november.eml", november)
+	other := sampleStatement(true)
+	other.Institution = "taishin"
+	store("taishin.eml", other)
+	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 3 {
+		t.Fatalf("accounts = %d, balances = %d: one account per bank's bill, one balance per bill",
+			countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
+	}
+}
+
+func TestReparsingKeepsTheAccountAndReplacesTheBalance(t *testing.T) {
+	pool := testdb.Pool(t)
+	id := addDocument(t, pool, "again.eml")
+	for range 2 {
+		if err := NewWorker(pool, parsed(sampleStatement(true)), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if countRows(t, pool, "accounts") != 1 || countRows(t, pool, "balances") != 1 {
+		t.Fatalf("accounts = %d, balances = %d", countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
 	}
 }
 

@@ -128,6 +128,8 @@ func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams
 
 type InsertTransactionsParams struct {
 	StatementID      int64
+	AccountID        int64
+	Unit             string
 	LineNo           int32
 	TransactionDate  pgtype.Date
 	PostingDate      pgtype.Date

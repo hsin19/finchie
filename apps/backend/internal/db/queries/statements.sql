@@ -15,10 +15,10 @@ VALUES (@document_id, @institution, @closing_date, @due_date, @currency, @total_
 RETURNING id;
 
 -- name: InsertTransactions :copyfrom
-INSERT INTO transactions (statement_id, line_no, transaction_date, posting_date, description, kind, amount,
-                          original_amount, original_currency, country, card_last4)
-VALUES (@statement_id, @line_no, @transaction_date, @posting_date, @description, @kind, @amount,
-        @original_amount, @original_currency, @country, @card_last4);
+INSERT INTO transactions (statement_id, account_id, unit, line_no, transaction_date, posting_date, description, kind,
+                          amount, original_amount, original_currency, country, card_last4)
+VALUES (@statement_id, @account_id, @unit, @line_no, @transaction_date, @posting_date, @description, @kind,
+        @amount, @original_amount, @original_currency, @country, @card_last4);
 
 -- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
