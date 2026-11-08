@@ -32,11 +32,18 @@ const institutions: Record<string, Institution> = {
     esun: { name: "玉山", code: "ESUN", color: "#c98500" },
 };
 
+// Banks Finchie reads deposit statements from only: no card bills, so never in a spending chart.
+const depositOnly: Record<string, Institution> = {
+    fubon: { name: "富邦", code: "TFB", color: "var(--color-mute)" },
+    ctbc: { name: "中信", code: "CTBC", color: "var(--color-mute)" },
+    nextbank: { name: "將來", code: "NEXT", color: "var(--color-mute)" },
+};
+
 /** Banks in chart order; a bank without a color comes after them. */
 export const institutionOrder = Object.keys(institutions);
 
 export function institution(id: string): Institution {
-    return institutions[id] ?? { name: id, code: id.toUpperCase(), color: "var(--color-mute)" };
+    return institutions[id] ?? depositOnly[id] ?? { name: id, code: id.toUpperCase(), color: "var(--color-mute)" };
 }
 
 /** "HSBC··4417", or just "HSBC" for rows without a card. */

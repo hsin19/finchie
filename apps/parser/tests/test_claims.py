@@ -24,6 +24,7 @@ IDENTITY = Identity(national_id="a123456789", birth_date=date(2000, 1, 2))
         ("webmaster@bhurecv.taishinbank.com.tw", "台新銀行綜合對帳單 2026年9月份", "taishin.deposit"),
         ("service@pxbillrc01.cathaybk.com.tw", "國泰世華銀行信用卡2026年11月電子帳單", "cathay.credit_card"),
         ("cards@estatements.hsbc.com.tw", "115年10月滙豐某某卡信用卡帳單", "hsbc.credit_card"),
+        ("service@bhu.taipeifubon.com.tw", "台北富邦銀行2026年10月 銀行對帳單", "fubon.deposit"),
         ("estatement@esunbank.com.example", "玉山銀行2026年09月信用卡電子帳單", None),
         ("statements@bank.example", "範例銀行 2026年11月 信用卡電子帳單", None),
     ],
@@ -46,6 +47,7 @@ def by_name(name: str) -> StatementParser:
         ("taishin.deposit", ["A123456789"]),
         ("cathay.credit_card", ["A123456789"]),
         ("hsbc.credit_card", ["A123456789"]),
+        ("fubon.deposit", ["A123456789"]),
     ],
 )
 def test_each_banks_password_rule(parser: str, passwords: list[str]) -> None:

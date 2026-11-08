@@ -2,6 +2,7 @@ from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.cathay import CathayParser
 from finchie_parser.parsers.esun import EsunParser
 from finchie_parser.parsers.esun_deposit import EsunDepositParser
+from finchie_parser.parsers.fubon_deposit import FubonDepositParser
 from finchie_parser.parsers.hsbc import HsbcParser
 from finchie_parser.parsers.taishin import TaishinParser
 from finchie_parser.parsers.taishin_deposit import TaishinDepositParser
@@ -13,6 +14,7 @@ PARSERS: tuple[StatementParser, ...] = (
     TaishinDepositParser(),
     CathayParser(),
     HsbcParser(),
+    FubonDepositParser(),
 )
 
 __all__ = ["PARSERS", "Parsed", "StatementParser"]

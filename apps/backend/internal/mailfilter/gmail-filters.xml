@@ -6,7 +6,7 @@
 		<category term='filter'></category>
 		<title>Mail Filter</title>
 		<content></content>
-		<apps:property name="from" value="cathaybk.com.tw OR esunbank.com OR hsbc.com.tw OR taishinbank.com.tw"/>
+		<apps:property name="from" value="cathaybk.com.tw OR esunbank.com OR hsbc.com.tw OR taipeifubon.com.tw OR taishinbank.com.tw"/>
 		<apps:property name="hasAttachment" value="true"/>
 		<apps:property name="label" value="Finchie"/>
 		<apps:property name="shouldNeverSpam" value="true"/>
