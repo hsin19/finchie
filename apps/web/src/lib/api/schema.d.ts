@@ -647,6 +647,10 @@ export interface components {
             /** @description Negative or zero */
             spent: components["schemas"]["Decimal"];
             received: components["schemas"]["Decimal"];
+            /** @description What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received */
+            moved: components["schemas"]["Decimal"];
+            /** @description Rows listed for it */
+            movedCount: number;
         };
         AccountTotal: {
             /** Format: int64 */

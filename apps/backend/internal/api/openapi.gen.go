@@ -574,6 +574,12 @@ type TransactionSort string
 
 // UnitFlow defines model for UnitFlow.
 type UnitFlow struct {
+	// Moved What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received
+	Moved Decimal `json:"moved"`
+
+	// MovedCount Rows listed for it
+	MovedCount int `json:"movedCount"`
+
 	// Received Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50

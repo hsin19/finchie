@@ -254,13 +254,15 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
 	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")
 
+	// Every account's lines, each link once: Taishin's inflow and the bill's payment line are listed
+	// under the E.SUN outflows they came from.
 	all := decode[TransactionSearch](t, get(t, e, "/api/transactions"))
-	if all.Total != 7 {
-		t.Fatalf("total = %d, want every account's lines", all.Total)
+	if all.Total != 5 || len(all.Items) != 5 {
+		t.Fatalf("total = %d, items = %d", all.Total, len(all.Items))
 	}
 	// What went out and came in: the purchase and the fee, and the salary. The card payment and the
-	// transfer moved money between the owner's own lines.
-	if len(all.Flows) != 1 || all.Flows[0] != (UnitFlow{Unit: "TWD", Spent: "-6365", Received: "60000"}) {
+	// transfer only moved money between the owner's own lines.
+	if len(all.Flows) != 1 || all.Flows[0] != (UnitFlow{Unit: "TWD", Spent: "-6365", Received: "60000", Moved: "11350", MovedCount: 2}) {
 		t.Fatalf("flows = %+v", all.Flows)
 	}
 	items := map[string]Transaction{}
@@ -276,8 +278,21 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	if out := items["行銀跨行轉優"]; out.Counterpart == nil || *out.Counterpart.AccountId != taishin.Id || *out.Memo != "房租" {
 		t.Fatalf("transfer = %+v", out)
 	}
-	if paid := items["感謝您辦理本行自動轉帳繳款"]; paid.Counterpart == nil || *paid.Counterpart.AccountId != esun.Id {
+	if paid := items["玉山卡款扣繳"]; paid.Counterpart == nil || paid.Counterpart.AccountKind != CreditCard {
 		t.Fatalf("card payment = %+v", paid)
+	}
+	// Without the outflow, the line it went to is a row of its own.
+	inflow := decode[TransactionSearch](t, get(t, e, fmt.Sprintf("/api/transactions?account=%d", taishin.Id)))
+	if inflow.Total != 1 || inflow.Items[0].Description != "CD轉入" || *inflow.Items[0].Counterpart.AccountId != esun.Id || inflow.Flows[0].MovedCount != 1 {
+		t.Fatalf("Taishin alone = %+v", inflow)
+	}
+	payments := decode[TransactionSearch](t, get(t, e, "/api/transactions?kind=payment"))
+	if payments.Total != 1 || *payments.Items[0].Counterpart.AccountId != esun.Id {
+		t.Fatalf("payments = %+v", payments.Items)
+	}
+	// The kind facet counts lines as printed.
+	if counts := countByKind(all.ByKind); counts[Other] != 4 || counts[Payment] != 1 {
+		t.Fatalf("byKind = %+v", all.ByKind)
 	}
 	kinds := map[TransactionKind]string{}
 	for _, k := range all.ByKind {
@@ -287,7 +302,7 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 		t.Fatalf("byKind = %+v", all.ByKind)
 	}
 
-	if hidden := decode[TransactionSearch](t, get(t, e, "/api/transactions?hideTransfers=true")); hidden.Total != 3 || hidden.Flows[0] != all.Flows[0] {
+	if hidden := decode[TransactionSearch](t, get(t, e, "/api/transactions?hideTransfers=true")); hidden.Total != 3 || hidden.Flows[0].Spent != "-6365" || hidden.Flows[0].MovedCount != 0 {
 		t.Fatalf("without transfers: total %d, flows %+v", hidden.Total, hidden.Flows)
 	}
 	// The account picker's facets skip the picker itself.
@@ -313,4 +328,12 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	if stored.StatementKind == nil || *stored.StatementKind != Deposit || stored.LineCount != 4 || stored.AccountCount != 1 {
 		t.Fatalf("document = kind %v, %d lines, %d accounts", stored.StatementKind, stored.LineCount, stored.AccountCount)
 	}
+}
+
+func countByKind(totals []KindTotal) map[TransactionKind]int {
+	counts := map[TransactionKind]int{}
+	for _, k := range totals {
+		counts[k.Kind] = k.Count
+	}
+	return counts
 }

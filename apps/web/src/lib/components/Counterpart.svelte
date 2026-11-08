@@ -3,7 +3,8 @@ import type { LineCounterpart } from "#lib/api/client.js";
 import { institution } from "#lib/labels.js";
 import { resolve } from "$app/paths";
 
-let { other, class: className = "" }: { other: LineCounterpart; class?: string; } = $props();
+/** `out`: the money left this line for the other one. */
+let { other, out, class: className = "" }: { other: LineCounterpart; out: boolean; class?: string; } = $props();
 
 // Where a linked line's money went or came from (ADR 0016): another of the owner's accounts, or the
 // card bill a payment went to, scrolled to its payment line.
@@ -20,4 +21,4 @@ const text = $derived(
 </script>
 
 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved above -->
-<a {href} class={className}>↔ {text}</a>
+<a {href} class={className}>{out ? "→" : "←"} {text}</a>

@@ -232,6 +232,27 @@ func (q *Queries) LockLinks(ctx context.Context) error {
 
 const searchTransactions = `-- name: SearchTransactions :many
 
+WITH matched AS (
+    SELECT t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow
+    FROM transactions t
+    JOIN statements s ON s.id = t.statement_id
+    JOIN accounts a ON a.id = t.account_id
+    WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
+      AND ($5::date IS NULL OR t.transaction_date >= $5::date)
+      AND ($6::date IS NULL OR t.transaction_date <= $6::date)
+      AND ($7::date IS NULL OR s.closing_date >= $7::date)
+      AND ($8::date IS NULL OR s.closing_date <= $8::date)
+      AND ($9::text[] IS NULL OR t.kind = ANY ($9::text[]))
+      AND ($10::text IS NULL OR s.institution = $10::text)
+      AND ($11::text IS NULL OR t.card_last4 = $11::text)
+      AND ($12::bigint IS NULL OR t.account_id = $12::bigint)
+      AND (NOT $13::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
+      AND ($14::text IS NULL OR a.kind = $14::text)
+      -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
+      AND (NOT $15::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+      AND ($16::text IS NULL
+           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($16::text)) > 0)
+)
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
@@ -244,7 +265,8 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
        coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
        ca.full_number AS counterpart_full_number
-FROM transactions t
+FROM matched m
+JOIN transactions t ON t.id = m.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
@@ -261,30 +283,19 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE $1::boolean AND c.parent_id = t.id) kids ON true
-WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
-  AND ($2::date IS NULL OR t.transaction_date >= $2::date)
-  AND ($3::date IS NULL OR t.transaction_date <= $3::date)
-  AND ($4::date IS NULL OR s.closing_date >= $4::date)
-  AND ($5::date IS NULL OR s.closing_date <= $5::date)
-  AND ($6::text[] IS NULL OR t.kind = ANY ($6::text[]))
-  AND ($7::text IS NULL OR s.institution = $7::text)
-  AND ($8::text IS NULL OR t.card_last4 = $8::text)
-  AND ($9::bigint IS NULL OR t.account_id = $9::bigint)
-  AND (NOT $10::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND ($11::text IS NULL OR a.kind = $11::text)
-  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
-  AND (NOT $12::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-  AND ($13::text IS NULL
-       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($13::text)) > 0)
-ORDER BY CASE WHEN $14::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
-         CASE WHEN $14::text = 'smallest' THEN abs(t.amount + coalesce(kids.amount, 0)) END ASC NULLS LAST,
-         CASE WHEN $14::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
+WHERE NOT (m.counterpart_id IS NOT NULL AND NOT m.outflow AND m.counterpart_id IN (SELECT id FROM matched))
+ORDER BY CASE WHEN $2::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
+         CASE WHEN $2::text = 'smallest' THEN abs(t.amount + coalesce(kids.amount, 0)) END ASC NULLS LAST,
+         CASE WHEN $2::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
          t.transaction_date DESC, t.statement_id DESC, t.line_no
-LIMIT $16 OFFSET $15
+LIMIT $4 OFFSET $3
 `
 
 type SearchTransactionsParams struct {
 	Fold          bool
+	Sort          string
+	RowOffset     int32
+	RowLimit      int32
 	FromDate      pgtype.Date
 	ToDate        pgtype.Date
 	ClosingFrom   pgtype.Date
@@ -297,9 +308,6 @@ type SearchTransactionsParams struct {
 	AccountKind   *string
 	HideTransfers bool
 	Query         *string
-	Sort          string
-	RowOffset     int32
-	RowLimit      int32
 }
 
 type SearchTransactionsRow struct {
@@ -341,11 +349,17 @@ type SearchTransactionsRow struct {
 // Search filters: a NULL argument means "no filter". SearchTransactions and TransactionTotals must
 // apply the same ones. With @fold, a line with a parent (a linked fee or refund) is not a row of its
 // own: it is one of its parent's children, and the parent's amounts count it (ADR 0009).
+// A link (ADR 0016) is one row too: the line its money went to (another account's inflow, a card bill's
+// payment line) is listed under the outflow it came from whenever that outflow matches as well. A view
+// without the outflow, such as another account or the month before, lists the line itself.
 // Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
 // big payment counts as large. Ties go newest first, then in statement line order.
 func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactionsParams) ([]SearchTransactionsRow, error) {
 	rows, err := q.db.Query(ctx, searchTransactions,
 		arg.Fold,
+		arg.Sort,
+		arg.RowOffset,
+		arg.RowLimit,
 		arg.FromDate,
 		arg.ToDate,
 		arg.ClosingFrom,
@@ -358,9 +372,6 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 		arg.AccountKind,
 		arg.HideTransfers,
 		arg.Query,
-		arg.Sort,
-		arg.RowOffset,
-		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -594,45 +605,53 @@ func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]Transactio
 }
 
 const transactionTotals = `-- name: TransactionTotals :many
-SELECT t.kind,
-       a.kind AS account_kind,
-       t.account_id,
-       coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number,
-       s.institution,
-       t.card_last4,
-       t.unit,
-       ($1::text[] IS NULL OR t.kind = ANY ($1::text[]))::boolean AS kind_match,
-       (($2::text IS NULL OR s.institution = $2::text)
-           -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
-           AND ($3::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $3::text)
-           AND ($4::bigint IS NULL OR t.account_id = $4::bigint))::boolean AS pick_match,
+WITH lines AS (
+    SELECT t.kind, a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+           coalesce(a.full_number, a.number) AS account_number, s.institution, t.card_last4, t.unit,
+           t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow,
+           ($1::text[] IS NULL OR t.kind = ANY ($1::text[])) AS kind_match,
+           (($2::text IS NULL OR s.institution = $2::text)
+               -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
+               AND ($3::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $3::text)
+               AND ($4::bigint IS NULL OR t.account_id = $4::bigint)) AS pick_match,
+           t.amount + coalesce(kids.amount, 0) AS amount,
+           CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS flow,
+           (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer
+    FROM transactions t
+    JOIN statements s ON s.id = t.statement_id
+    JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
+                       FROM transactions c
+                       WHERE $5::boolean AND c.parent_id = t.id) kids ON true
+    WHERE NOT ($5::boolean AND t.parent_id IS NOT NULL)
+      AND ($6::date IS NULL OR t.transaction_date >= $6::date)
+      AND ($7::date IS NULL OR t.transaction_date <= $7::date)
+      AND ($8::date IS NULL OR s.closing_date >= $8::date)
+      AND ($9::date IS NULL OR s.closing_date <= $9::date)
+      AND (NOT $10::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
+      AND ($11::text IS NULL OR a.kind = $11::text)
+      AND (NOT $12::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+      AND ($13::text IS NULL
+           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($13::text)) > 0)
+),
+marked AS (
+    SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
+           l.kind_match, l.pick_match, l.amount, l.flow, l.transfer,
+           (l.counterpart_id IS NOT NULL AND NOT l.outflow
+               AND EXISTS (SELECT 1 FROM lines o WHERE o.id = l.counterpart_id AND o.kind_match AND o.pick_match)) AS folded
+    FROM lines l
+)
+SELECT kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit,
+       kind_match::boolean AS kind_match, pick_match::boolean AS pick_match, folded::boolean AS folded,
        count(*)::integer AS row_count,
-       sum(t.amount + coalesce(kids.amount, 0))::numeric AS amount,
-       coalesce(sum(flow.amount) FILTER (WHERE flow.amount < 0 AND NOT flow.transfer), 0)::numeric AS spent,
-       coalesce(sum(flow.amount) FILTER (WHERE flow.amount > 0 AND NOT flow.transfer), 0)::numeric AS received
-FROM transactions t
-JOIN statements s ON s.id = t.statement_id
-JOIN accounts a ON a.id = t.account_id
-LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
-                   FROM transactions c
-                   WHERE $5::boolean AND c.parent_id = t.id) kids ON true
-CROSS JOIN LATERAL (SELECT CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS amount,
-                           (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer) flow
-WHERE NOT ($5::boolean AND t.parent_id IS NOT NULL)
-  AND ($6::date IS NULL OR t.transaction_date >= $6::date)
-  AND ($7::date IS NULL OR t.transaction_date <= $7::date)
-  AND ($8::date IS NULL OR s.closing_date >= $8::date)
-  AND ($9::date IS NULL OR s.closing_date <= $9::date)
-  AND (NOT $10::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND ($11::text IS NULL OR a.kind = $11::text)
-  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
-  AND (NOT $12::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-  AND ($13::text IS NULL
-       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($13::text)) > 0)
-GROUP BY t.kind, a.kind, t.account_id, coalesce(a.name, a.label), coalesce(a.full_number, a.number), s.institution,
-         t.card_last4, t.unit
-ORDER BY t.kind, s.institution, t.card_last4, t.account_id, t.unit
+       sum(amount)::numeric AS amount,
+       coalesce(sum(flow) FILTER (WHERE flow < 0 AND NOT transfer), 0)::numeric AS spent,
+       coalesce(sum(flow) FILTER (WHERE flow > 0 AND NOT transfer), 0)::numeric AS received,
+       count(*) FILTER (WHERE transfer)::integer AS moved_count,
+       coalesce(sum(abs(flow)) FILTER (WHERE transfer), 0)::numeric AS moved
+FROM marked
+GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, kind_match, pick_match, folded
+ORDER BY kind, institution, card_last4, account_id, unit
 `
 
 type TransactionTotalsParams struct {
@@ -662,16 +681,20 @@ type TransactionTotalsRow struct {
 	Unit          string
 	KindMatch     bool
 	PickMatch     bool
+	Folded        bool
 	RowCount      int32
 	Amount        pgtype.Numeric
 	Spent         pgtype.Numeric
 	Received      pgtype.Numeric
+	MovedCount    int32
+	Moved         pgtype.Numeric
 }
 
 // The rows SearchTransactions lists, one group per kind, account, card, and unit, with flags for whether
-// the group passes the kind filter and the account picker's (bank, card, account), so the caller can
-// build the totals and the account facets from a single scan. Amounts are net of children; spent and
-// received are seen from the owner and leave out transfers and card payments (ADR 0016).
+// the group passes the kind filter and the account picker's (bank, card, account), and whether its
+// lines are folded under the outflows they came from; so the caller can build the totals and the
+// account facets from a single scan. Amounts are net of children; spent and received are seen from the
+// owner and leave out transfers and card payments, whose money only moved (ADR 0016).
 func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsParams) ([]TransactionTotalsRow, error) {
 	rows, err := q.db.Query(ctx, transactionTotals,
 		arg.Kinds,
@@ -706,10 +729,13 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 			&i.Unit,
 			&i.KindMatch,
 			&i.PickMatch,
+			&i.Folded,
 			&i.RowCount,
 			&i.Amount,
 			&i.Spent,
 			&i.Received,
+			&i.MovedCount,
+			&i.Moved,
 		); err != nil {
 			return nil, err
 		}

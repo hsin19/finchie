@@ -332,7 +332,7 @@ onKeys({
             {/if}
             {#if t.counterpart}
                 <dt class="text-mute">{t.accountKind === "deposit" && t.counterpart.accountKind === "credit_card" ? "paid" : "transfer"}</dt>
-                <dd class="m-0"><Counterpart other={t.counterpart} /></dd>
+                <dd class="m-0"><Counterpart other={t.counterpart} out={sign(flowOf(t)) < 0} /></dd>
             {/if}
             {#if t.balance}
                 <dt class="text-mute">balance</dt>
@@ -430,8 +430,12 @@ onKeys({
         {#if unit === "" || sign(flow.spent) !== 0}<span>{unit}支出 <span class="text-ink">{formatAmount(flow.spent)}</span></span>{/if}
         {#if unit === "" || sign(flow.received) !== 0}<span>{unit}收入 <span class="text-pos">{formatAmount(flow.received, { signed: true })}</span></span>{/if}
         <span>{unit}淨額 <span class={sign(total) < 0 ? "text-neg" : "text-ink"}>{formatAmount(total, { signed: true })}</span></span>
+        {#if flow.movedCount > 0}
+            <span title="自己帳戶之間的轉帳、繳卡費：每筆只列一次，不算支出或收入">
+                {unit}轉帳 <span class="text-mute">{formatAmount(flow.moved)}（{flow.movedCount} 筆）</span>
+            </span>
+        {/if}
     {/each}
-    {#if data.result.flows.length > 0 && !filters.hideTransfers}<span class="text-mute">轉帳與卡費不計</span>{/if}
     <span role="group" aria-label="排序" class="ml-auto flex items-center gap-2 text-mute">
         sort
         <button
@@ -484,7 +488,7 @@ onKeys({
                             <td class="max-w-[320px] px-2 py-2">
                                 <span class="block truncate">{t.description}{#if t.memo}<span class="text-dim"> · {t.memo}</span>{/if}</span>
                                 {#if breakdown(t)}<span class="block truncate text-[11px] text-mute">帳單上 {breakdown(t)}</span>{/if}
-                                {#if t.counterpart}<Counterpart other={t.counterpart} class="block truncate text-[11px] text-mute hover:text-ink" />{/if}
+                                {#if t.counterpart}<Counterpart other={t.counterpart} out={sign(flowOf(t)) < 0} class="block truncate text-[11px] text-mute hover:text-ink" />{/if}
                             </td>
                             <td class="px-2 py-2 {tone[kinds[t.kind].tone]}">{kinds[t.kind].short}</td>
                             <td class="px-2 py-2 whitespace-nowrap text-dim">{lineAccount(t)}</td>
@@ -509,7 +513,7 @@ onKeys({
                     <span class="shrink-0 {amountTone(t)}">{amount(t)}{unitOf(t) ? ` ${unitOf(t)}` : ""}</span>
                 </span>
                 <span class="text-[12px] text-mute">
-                    {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{lineAccount(t)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · ${breakdown(t)}` : ""}{t.counterpart ? " · ↔ 自己的帳戶" : ""}
+                    {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{lineAccount(t)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · ${breakdown(t)}` : ""}{t.counterpart ? ` · ${sign(flowOf(t)) < 0 ? "→" : "←"} 自己的帳戶` : ""}
                 </span>
             </button>
         {/snippet}

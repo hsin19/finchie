@@ -16,7 +16,7 @@ Each line is in one link at most; nearer days pair first, then card payments bef
 
 ### What links are for
 
-- A transfer between the owner's accounts is no income and no spending; a card payment is not spending either, the purchases on the bill were.
+- A transfer between the owner's accounts is no income and no spending; a card payment is not spending either, the purchases on the bill were. Still, money moved: a list of lines shows each link once, as its outflow, with the line the money went to (another account's inflow, the bill's payment line) folded under it like ADR 0009's children, and totals show what moved apart from what was spent and received. A list without the outflow, of another account or another month, shows the other line itself. Unlike a parent, a link is no `parent_id`: the two lines are the same money on two accounts, not a purchase and what adjusts it, and adding them up as a parent's amount would count it twice.
 - What net worth takes off for cards is the newest bill of each bank not yet paid (ADR 0013).
 - An account's page shows where each linked line's money went or came from.
 

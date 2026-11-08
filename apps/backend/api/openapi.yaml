@@ -791,11 +791,15 @@ components:
 
     UnitFlow:
       type: object
-      required: [unit, spent, received]
+      required: [unit, spent, received, moved, movedCount]
       properties:
         unit: { type: string }
         spent: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "Negative or zero" }
         received: { $ref: "#/components/schemas/Decimal" }
+        moved:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received"
+        movedCount: { type: integer, description: "Rows listed for it" }
 
     AccountTotal:
       type: object

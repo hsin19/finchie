@@ -145,7 +145,7 @@ function amountTone(value: string) {
                         <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
                         <td class="px-2 py-2">
                             {line.description}
-                            {#if line.counterpart}<Counterpart other={line.counterpart} class="block text-[12px] text-dim hover:text-ink" />{/if}
+                            {#if line.counterpart}<Counterpart other={line.counterpart} out={sign(line.amount) < 0} class="block text-[12px] text-dim hover:text-ink" />{/if}
                         </td>
                         <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
                         <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>

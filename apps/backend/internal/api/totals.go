@@ -30,25 +30,33 @@ type summary struct {
 	byAccount []AccountTotal
 }
 
-// summarize folds the groups from TransactionTotals into the search total, what went out and came in
-// per unit, and the account picker's facets: cards and deposit accounts, which skip the picker's own
-// filter but keep the kind filter.
+// summarize folds the groups from TransactionTotals into the search total, what went out, came in, and
+// moved per unit, and the account picker's facets: cards and deposit accounts, which skip the picker's
+// own filter but keep the kind filter. The facets count each account's lines whether folded under a
+// link's outflow or not: picking one account lists them all, since a link joins two accounts. (A bank's
+// count, the sum of its accounts', counts both lines of a link within the bank.)
 func summarize(groups []dbq.TransactionTotalsRow) summary {
 	total := tally{amount: zero()}
-	type flow struct{ spent, received pgtype.Numeric }
+	type flow struct {
+		spent, received, moved pgtype.Numeric
+		movedCount             int
+	}
 	flows := map[string]*flow{}
 	type cardKey struct{ institution, last4 string }
 	cards := map[cardKey]*tally{}
 	accounts := map[int64]*AccountTotal{}
 
 	for _, g := range groups {
-		if g.KindMatch && g.PickMatch {
+		if g.KindMatch && g.PickMatch && !g.Folded {
 			total.add(g.RowCount, g.Amount)
 			if flows[g.Unit] == nil {
-				flows[g.Unit] = &flow{spent: zero(), received: zero()}
+				flows[g.Unit] = &flow{spent: zero(), received: zero(), moved: zero()}
 			}
-			flows[g.Unit].spent = addNumeric(flows[g.Unit].spent, g.Spent)
-			flows[g.Unit].received = addNumeric(flows[g.Unit].received, g.Received)
+			f := flows[g.Unit]
+			// A folded line is always a transfer: never spent or received, and its link is counted once,
+			// at the outflow it is listed under.
+			f.spent, f.received = addNumeric(f.spent, g.Spent), addNumeric(f.received, g.Received)
+			f.moved, f.movedCount = addNumeric(f.moved, g.Moved), f.movedCount+int(g.MovedCount)
 		}
 		if !g.KindMatch {
 			continue
@@ -69,7 +77,10 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 
 	result := summary{total: total, flows: make([]UnitFlow, 0, len(flows))}
 	for _, unit := range slices.Sorted(maps.Keys(flows)) {
-		result.flows = append(result.flows, UnitFlow{Unit: unit, Spent: decimalString(flows[unit].spent), Received: decimalString(flows[unit].received)})
+		f := flows[unit]
+		result.flows = append(result.flows, UnitFlow{
+			Unit: unit, Spent: decimalString(f.spent), Received: decimalString(f.received), Moved: decimalString(f.moved), MovedCount: f.movedCount,
+		})
 	}
 	cardOrder := slices.SortedFunc(maps.Keys(cards), func(a, b cardKey) int {
 		return cmp.Or(strings.Compare(a.institution, b.institution), strings.Compare(a.last4, b.last4))
