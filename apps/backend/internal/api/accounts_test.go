@@ -370,6 +370,17 @@ func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSp
 	if held.Unit != "範例電子" || *held.Worth != "176750.00" || *held.Code != "1234" || *held.Price != "50.50" || held.RateDay.String() != "2026-11-06" {
 		t.Fatalf("holding = %+v, worth %v", held, *held.Worth)
 	}
+	// Held before this, the oldest statement: what either cost is not known.
+	detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", account.Id)))
+	if detail.Positions == nil || len(*detail.Positions) != 2 {
+		t.Fatalf("positions = %+v", detail.Positions)
+	}
+	if p := (*detail.Positions)[0]; p.Unit != "範例電子" || p.Shares != "3500" || p.Worth == nil || p.Cost != nil || p.Gain != nil {
+		t.Fatalf("held = %+v", p)
+	}
+	if p := (*detail.Positions)[1]; p.Unit != "範例航運" || p.Shares != "0" || p.Worth != nil || p.Realized != nil {
+		t.Fatalf("sold out = %+v", p)
+	}
 	lines := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", account.Id)))
 	if len(lines) != 2 || lines[0].Amount != "-1000" || lines[0].Trade == nil || lines[0].Trade.Net != "29554" {
 		t.Fatalf("lines = %+v", lines)

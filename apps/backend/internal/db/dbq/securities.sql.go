@@ -11,6 +11,54 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const accountTrades = `-- name: AccountTrades :many
+SELECT t.unit, t.transaction_date, t.kind, t.amount AS shares, tr.amount, tr.fee, tr.tax
+FROM transactions t
+JOIN trades tr ON tr.transaction_id = t.id
+WHERE t.account_id = $1
+ORDER BY t.transaction_date, t.statement_id, t.line_no
+`
+
+type AccountTradesRow struct {
+	Unit            string
+	TransactionDate pgtype.Date
+	Kind            string
+	Shares          pgtype.Numeric
+	Amount          pgtype.Numeric
+	Fee             pgtype.Numeric
+	Tax             pgtype.Numeric
+}
+
+// A securities account's trades in the order they happened, for working out each position's cost
+// (ADR 0017).
+func (q *Queries) AccountTrades(ctx context.Context, accountID int64) ([]AccountTradesRow, error) {
+	rows, err := q.db.Query(ctx, accountTrades, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountTradesRow
+	for rows.Next() {
+		var i AccountTradesRow
+		if err := rows.Scan(
+			&i.Unit,
+			&i.TransactionDate,
+			&i.Kind,
+			&i.Shares,
+			&i.Amount,
+			&i.Fee,
+			&i.Tax,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const clearEmptyHoldings = `-- name: ClearEmptyHoldings :exec
 DELETE FROM balances b
 USING statements s

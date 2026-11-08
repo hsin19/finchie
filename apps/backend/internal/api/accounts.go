@@ -87,11 +87,20 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	for _, g := range gapRows {
 		gaps = append(gaps, toGap(g))
 	}
+	var held *[]Position
+	if row.Kind == ingest.KindSecurities {
+		trades, err := queries.AccountTrades(ctx, request.Id)
+		if err != nil {
+			return nil, fmt.Errorf("account trades: %w", err)
+		}
+		list := positions(trades, rows, gapRows, latest)
+		held = &list
+	}
 	account := toAccount(row, latest, gaps)
 	return GetAccount200JSONResponse(AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
-		Continuity: account.Continuity, Worth: account.Worth, Gaps: account.Gaps, History: history,
+		Continuity: account.Continuity, Worth: account.Worth, Gaps: account.Gaps, History: history, Positions: held,
 	}), nil
 }
 

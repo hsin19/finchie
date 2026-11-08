@@ -625,6 +625,29 @@ components:
               type: array
               description: Every balance, newest first
               items: { $ref: "#/components/schemas/Balance" }
+            positions:
+              type: array
+              description: "A securities account's: every security it holds or has traded, by name (ADR 0017)"
+              items: { $ref: "#/components/schemas/Position" }
+
+    Position:
+      type: object
+      description: >-
+        A security in a securities account. Its cost is the average cost of the shares held: a buy adds its
+        amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the
+        account held none of it with no gap since; never estimated (ADR 0017).
+      required: [unit, shares]
+      properties:
+        unit: { type: string, description: The security's name, as statements print it }
+        code: { type: string }
+        shares: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: The newest holding; 0 once sold out }
+        worth: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: The shares at the newest close }
+        cost: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: What the shares held cost; absent when not known }
+        gain: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: Worth less cost, where both are known }
+        realized:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known"
+        since: { type: string, format: date, description: The day it was last held at none, from which cost is known }
 
     Balance:
       type: object

@@ -12,6 +12,7 @@ import {
     institution,
 } from "#lib/labels.js";
 import {
+    approx,
     formatAmount,
     negate,
     sign,
@@ -33,10 +34,18 @@ function tradeMoney(trade: Trade): string {
     return sign(trade.net) < 0 ? `付 ${formatAmount(negate(trade.net))}` : `收 ${formatAmount(trade.net)}`;
 }
 
-/** A holding's worth at its newest close, or why it has none. */
-function holdingWorth(worth: string | undefined, price: string | undefined, day: string | undefined): string {
-    return worth !== undefined && price ? `≈ NT$${formatAmount(worth)} · ${day} 收盤 ${price}` : "沒有收盤價";
+// Held first, then what was sold out; cost and gains only where known (ADR 0017).
+const held = $derived((account.positions ?? []).filter(p => sign(p.shares) !== 0));
+// Sold out: worth showing only for what a sale is known to have gained or lost.
+const soldOut = $derived((account.positions ?? []).filter(p => sign(p.shares) === 0 && p.realized !== undefined && sign(p.realized) !== 0));
+const closeOf = $derived(new Map(account.balances.map(b => [b.unit, b])));
+
+/** Gain as a share of cost, for showing only. */
+function percent(gain: string, cost: string): string {
+    return approx(cost) > 0 ? `${((approx(gain) / approx(cost)) * 100).toFixed(1)}%` : "";
 }
+
+const unknownCost = "最舊那期之前就有，或之後有缺口：成本不知道";
 
 // The owner's details (ADR 0016): optional, and an empty field clears one.
 let editing = $state(false);
@@ -94,14 +103,21 @@ function amountTone(value: string) {
         </form>
     {/if}
     <div class="mt-2 flex flex-wrap gap-x-8 gap-y-2">
-        {#each account.balances as balance (balance.unit)}
+        {#if brokerage}
             <div>
-                <div class="label">{brokerage ? "HOLDING" : "BALANCE"} · {balance.unit}{balance.code ? ` ${balance.code}` : ""}</div>
-                <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}{brokerage ? " 股" : ""}</div>
-                {#if brokerage}<div class="text-[12px] text-mute">{holdingWorth(balance.worth, balance.price, balance.rateDay)}</div>{/if}
-                <div class="text-[12px] text-mute">{balance.asOf} 為止</div>
+                <div class="label">WORTH · 市值</div>
+                <div class="text-[18px] text-ink">{account.worth !== undefined ? `≈ NT$${formatAmount(account.worth)}` : "有證券沒有收盤價"}</div>
+                <div class="text-[12px] text-mute">{held.length} 檔，股數到 {account.balances[0]?.asOf ?? "—"} 為止</div>
             </div>
-        {/each}
+        {:else}
+            {#each account.balances as balance (balance.unit)}
+                <div>
+                    <div class="label">BALANCE · {balance.unit}</div>
+                    <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</div>
+                    <div class="text-[12px] text-mute">{balance.asOf} 為止</div>
+                </div>
+            {/each}
+        {/if}
         <div>
             <div class="label">KIND</div>
             <div>{accountKinds[account.kind].label}</div>
@@ -135,6 +151,54 @@ function amountTone(value: string) {
                 {/each}
             </tbody>
         </table>
+    </section>
+{/if}
+
+{#if brokerage}
+    <section class="panel px-3.5 pt-1 pb-2.5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
+            <h2 class="label">POSITIONS · 持股與損益</h2>
+            <span class="text-[12px] text-mute">平均成本，含手續費；賣出扣手續費和稅</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[760px] border-collapse">
+                <thead>
+                    <tr class="text-left text-mute">
+                        <th class="py-2 pr-2 font-medium">SECURITY</th>
+                        <th class="px-2 py-2 text-right font-medium">SHARES</th>
+                        <th class="px-2 py-2 text-right font-medium">CLOSE</th>
+                        <th class="px-2 py-2 text-right font-medium">WORTH</th>
+                        <th class="px-2 py-2 text-right font-medium">COST</th>
+                        <th class="px-2 py-2 text-right font-medium">GAIN</th>
+                        <th class="py-2 pl-2 text-right font-medium">REALIZED</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {#each [...held, ...soldOut] as position (position.unit)}
+                        {@const close = closeOf.get(position.unit)}
+                        <tr class="border-t border-rule">
+                            <td class="py-2 pr-2">{position.unit} <span class="text-mute">{position.code ?? ""}</span></td>
+                            <td class="px-2 py-2 text-right">{sign(position.shares) === 0 ? "出清" : formatAmount(position.shares)}</td>
+                            <td class="px-2 py-2 text-right text-dim" title={close?.rateDay ?? ""}>{close?.price ? formatAmount(close.price) : ""}</td>
+                            <td class="px-2 py-2 text-right">{sign(position.shares) === 0 ? "" : position.worth !== undefined ? formatAmount(position.worth) : "—"}</td>
+                            <td class="px-2 py-2 text-right text-dim" title={position.cost !== undefined ? `${position.since} 起的成交` : unknownCost}>
+                                {position.cost !== undefined ? formatAmount(position.cost) : sign(position.shares) === 0 ? "" : "不知道"}
+                            </td>
+                            <td class="px-2 py-2 text-right {position.gain ? (sign(position.gain) < 0 ? 'text-neg' : 'text-pos') : 'text-mute'}">
+                                {#if position.gain !== undefined && position.cost !== undefined}
+                                    {formatAmount(position.gain, { signed: true })} <span class="text-[12px]">{percent(position.gain, position.cost)}</span>
+                                {/if}
+                            </td>
+                            <td class="py-2 pl-2 text-right {position.realized ? (sign(position.realized) < 0 ? 'text-neg' : 'text-pos') : 'text-mute'}">
+                                {position.realized !== undefined && sign(position.realized) !== 0 ? formatAmount(position.realized, { signed: true }) : ""}
+                            </td>
+                        </tr>
+                    {:else}
+                        <tr><td colspan="7" class="py-2.5 text-mute">目前沒有持股。</td></tr>
+                    {/each}
+                </tbody>
+            </table>
+        </div>
     </section>
 {/if}
 

@@ -223,6 +223,9 @@ type AccountDetail struct {
 	// Example: 1234567***890
 	Number string `json:"number"`
 
+	// Positions A securities account's: every security it holds or has traded, by name (ADR 0017)
+	Positions *[]Position `json:"positions,omitempty"`
+
 	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
 	Worth *Decimal `json:"worth,omitempty"`
 }
@@ -422,6 +425,32 @@ type LineCounterpart struct {
 	Id            int64              `json:"id"`
 	Institution   string             `json:"institution"`
 	StatementId   int64              `json:"statementId"`
+}
+
+// Position A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017).
+type Position struct {
+	Code *string `json:"code,omitempty"`
+
+	// Cost What the shares held cost; absent when not known
+	Cost *Decimal `json:"cost,omitempty"`
+
+	// Gain Worth less cost
+	Gain *Decimal `json:"gain,omitempty"`
+
+	// Realized What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known
+	Realized *Decimal `json:"realized,omitempty"`
+
+	// Shares The newest holding; 0 once sold out
+	Shares Decimal `json:"shares"`
+
+	// Since The day it was last held at none
+	Since *openapi_types.Date `json:"since,omitempty"`
+
+	// Unit The security's name
+	Unit string `json:"unit"`
+
+	// Worth The shares at the newest close
+	Worth *Decimal `json:"worth,omitempty"`
 }
 
 // PreviewFile defines model for PreviewFile.

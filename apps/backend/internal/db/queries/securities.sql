@@ -50,3 +50,12 @@ INSERT INTO quotes (day, name, code, market, close)
 SELECT unnest(@days::date[]), unnest(@names::text[]), unnest(@codes::text[]), unnest(@markets::text[]),
        unnest(@closes::numeric[])
 ON CONFLICT (day, name) DO UPDATE SET code = EXCLUDED.code, market = EXCLUDED.market, close = EXCLUDED.close;
+
+-- name: AccountTrades :many
+-- A securities account's trades in the order they happened, for working out each position's cost
+-- (ADR 0017).
+SELECT t.unit, t.transaction_date, t.kind, t.amount AS shares, tr.amount, tr.fee, tr.tax
+FROM transactions t
+JOIN trades tr ON tr.transaction_id = t.id
+WHERE t.account_id = @account_id
+ORDER BY t.transaction_date, t.statement_id, t.line_no;

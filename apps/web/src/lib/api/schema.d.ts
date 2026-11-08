@@ -475,6 +475,29 @@ export interface components {
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Every balance, newest first */
             history: components["schemas"]["Balance"][];
+            /** @description A securities account's: every security it holds or has traded, by name (ADR 0017) */
+            positions?: components["schemas"]["Position"][];
+        };
+        /** @description A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017). */
+        Position: {
+            /** @description The security's name */
+            unit: string;
+            code?: string;
+            /** @description The newest holding; 0 once sold out */
+            shares: components["schemas"]["Decimal"];
+            /** @description The shares at the newest close */
+            worth?: components["schemas"]["Decimal"];
+            /** @description What the shares held cost; absent when not known */
+            cost?: components["schemas"]["Decimal"];
+            /** @description Worth less cost */
+            gain?: components["schemas"]["Decimal"];
+            /** @description What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known */
+            realized?: components["schemas"]["Decimal"];
+            /**
+             * Format: date
+             * @description The day it was last held at none
+             */
+            since?: string;
         };
         Balance: {
             /**
