@@ -13,7 +13,7 @@ There is no account setup. A source that reports an account Finchie has not seen
 | `credit_card` | Institution: one bill | Empty | Not an account the owner has: a container for the bank's card lines, which need one to belong to. It holds no balance and is not listed among the accounts. Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
 | `deposit` | Account number | As the bank prints it, usually masked (`12345**6789*`). The parser normalizes it so one account reads the same every month | One account can hold several currencies; its balance is per currency |
 
-More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one.
+More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one (`securities` came with ADR 0017).
 
 An account outlives every report of it: re-parsing or deleting a document never deletes one, so whatever is attached to an account stays.
 
