@@ -9,7 +9,7 @@ The browser app (ADR 0007): a SvelteKit single-page app, embedded in the backend
 | `/statements/{id}` | One statement: metadata, reconciliation by kind, its lines in statement order, processing log, re-parse; `?line=` scrolls to a line |
 | `/documents/{id}` | One document opened for reading (ADR 0012): an e-mail's headers, attachments, and body; the original to download even when the parser cannot open it |
 | `/transactions` | Search across statements: period, card, kinds, overseas, text; totals for the whole match |
-| `/upload` | Drop `.eml` / `.pdf` files and follow each through parsing |
+| `/upload` | Drop statement e-mails (`.eml`) and follow each through parsing; links the Gmail filter download |
 
 Keys: `o` `s` `t` `u` switch pages, `/` searches, `j` `k` `Enter` `n` `p` move through transactions, `f` opens a statement's PDF, `1`–`9` a document's attachments, `?` lists everything, `⌘K` opens the command palette.
 

@@ -51,7 +51,7 @@ browser ── Cloudflare Access ── Tunnel ──▶ backend (Go) ── gRP
 | Cathay United Bank | Password-protected PDF | |
 | HSBC Taiwan | Password-protected PDF | Transaction descriptions are images, read with OCR |
 
-Upload the e-mail (`.eml`) or the PDF itself, or let Gmail forward statement e-mails to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)). A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
+Statements are taken as e-mails only ([ADR 0014](docs/adr/0014-recognizing-statements.md)). Let Gmail forward them to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)): the upload page offers the Gmail filter to import, generated from the parsers. Or upload the `.eml` by hand, as the bank sent it or forwarded. A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
 
 ## Getting started
 
@@ -87,4 +87,4 @@ GitHub Actions in [`.github/workflows/`](.github/workflows/README.md): `check.ym
 
 The homelab's Docker Compose runs the released images behind Cloudflare Tunnel and Access. Only the backend is reachable from outside; the parser stays on the internal network. Pin a version tag, never `latest`.
 
-Sign-in is Cloudflare Access with Google, and the backend also verifies every request's Access token (ADR 0008): set `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD` there.
+Sign-in is Cloudflare Access with Google, and the backend also verifies every request's Access token (ADR 0008): set `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD` there. Set `BACKEND_MAILBOX_ADDRESS` for the Gmail filter download, and `PARSER_IDENTITY__*` for the parser's PDF passwords.

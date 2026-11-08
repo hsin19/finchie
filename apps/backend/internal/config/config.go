@@ -25,6 +25,9 @@ type Config struct {
 	// leave both empty for local development.
 	AccessTeamDomain string `env:"ACCESS_TEAM_DOMAIN"`
 	AccessAudience   string `env:"ACCESS_AUD"`
+	// The address the mailbox Worker receives statements at (ADR 0010). Only the Gmail filter
+	// download uses it (ADR 0014); it is the deployment's, never in the repository.
+	MailboxAddress string `env:"MAILBOX_ADDRESS"`
 }
 
 func Load() (Config, error) {

@@ -25,6 +25,8 @@ func newAPI(t *testing.T, maxUploadBytes int64) (*echo.Echo, *pgxpool.Pool) {
 	return newAPIWithParser(t, maxUploadBytes, nil)
 }
 
+const testMailbox = "finchie@mailbox.example"
+
 func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv1.ParserServiceClient) (*echo.Echo, *pgxpool.Pool) {
 	t.Helper()
 	pool := testdb.Pool(t)
@@ -34,7 +36,7 @@ func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv1.Parser
 		t.Fatal(err)
 	}
 	e := echo.New()
-	Register(e, NewServer(pool, jobs, parser, maxUploadBytes))
+	Register(e, NewServer(pool, jobs, parser, maxUploadBytes, testMailbox))
 	return e, pool
 }
 
@@ -114,11 +116,25 @@ func TestUploadStoresTheDocumentAndQueuesOneParse(t *testing.T) {
 	}
 }
 
-func TestUploadDetectsPDFsFromTheirBytes(t *testing.T) {
-	e, _ := newAPI(t, 1<<20)
-	recorder := postFile(t, e, "file", "whatever.bin", []byte("%PDF-1.7 ..."))
-	if got := decode[Document](t, recorder).ContentType; got != "application/pdf" {
-		t.Fatalf("content type = %s", got)
+func TestUploadRefusesAnythingButAnEmailBeforeStoringIt(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	cases := map[string][]byte{
+		"statement.pdf": []byte("%PDF-1.7 ..."),
+		"renamed.eml":   []byte("%PDF-1.7 ..."),
+		"image.png":     []byte("\x89PNG\r\n\x1a\n"),
+		"notes.txt":     []byte("just some text"),
+	}
+	for name, content := range cases {
+		recorder := postFile(t, e, "file", name, content)
+		if recorder.Code != http.StatusUnsupportedMediaType || decode[Problem](t, recorder).Message == "" {
+			t.Errorf("%s: %d %s", name, recorder.Code, recorder.Body)
+		}
+	}
+	if docs := decode[[]Document](t, get(t, e, "/api/documents")); len(docs) != 0 {
+		t.Fatalf("documents = %+v", docs)
+	}
+	if n := queuedJobs(t, pool); n != 0 {
+		t.Fatalf("queued jobs = %d", n)
 	}
 }
 
@@ -162,7 +178,7 @@ func TestUploadThatIsNotAMultipartFormIsABadRequest(t *testing.T) {
 
 func TestReadEndpoints(t *testing.T) {
 	e, _ := newAPI(t, 1<<20)
-	postFile(t, e, "file", "a.eml", []byte("one"))
+	postFile(t, e, "file", "a.eml", []byte("From: bank\r\n\r\none"))
 
 	if docs := decode[[]Document](t, get(t, e, "/api/documents?limit=10")); len(docs) != 1 {
 		t.Fatalf("documents = %+v", docs)
@@ -177,7 +193,7 @@ func TestReadEndpoints(t *testing.T) {
 	}
 }
 
-func TestOriginalsKeepOnlySafeContentTypesAndOnlyPDFsOpenInPlace(t *testing.T) {
+func TestAnUploadedEmailIsStoredAsOneAndServedAsADownload(t *testing.T) {
 	e, _ := newAPI(t, 1<<20)
 	cases := []struct {
 		name, declared string
@@ -185,11 +201,9 @@ func TestOriginalsKeepOnlySafeContentTypesAndOnlyPDFsOpenInPlace(t *testing.T) {
 		stored, served string
 		disposition    string
 	}{
-		{"statement.pdf", "application/pdf", []byte("%PDF-1.7 ..."), "application/pdf", "application/pdf", "inline; filename=statement.pdf"},
 		{"statement.eml", "application/octet-stream", []byte("From: bank\r\n\r\nhello"), "message/rfc822", "application/octet-stream", "attachment; filename=statement.eml"},
-		// What the browser declares is ignored: these would run as pages on the app's origin.
-		{"page.html", "text/html", []byte("<script>alert(1)</script>"), "application/octet-stream", "application/octet-stream", "attachment; filename=page.html"},
-		{"image.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`), "application/octet-stream", "application/octet-stream", "attachment; filename=image.svg"},
+		// What the browser declares is ignored: stored as declared, it would run as a page on the app's origin.
+		{"page.html", "text/html", []byte("From: bank\r\n\r\n<script>alert(1)</script>"), "message/rfc822", "application/octet-stream", "attachment; filename=page.html"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -204,5 +218,26 @@ func TestOriginalsKeepOnlySafeContentTypesAndOnlyPDFsOpenInPlace(t *testing.T) {
 				t.Fatalf("content: %d %v", recorder.Code, header)
 			}
 		})
+	}
+}
+
+func TestTheMailFilterForwardsToTheDeploymentsMailbox(t *testing.T) {
+	e, _ := newAPI(t, 1<<20)
+	recorder := get(t, e, "/api/mail-filters.xml")
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "application/xml" ||
+		recorder.Header().Get("Content-Disposition") != `attachment; filename="finchie-mail-filters.xml"` {
+		t.Fatalf("mail filter: %d %v", recorder.Code, recorder.Header())
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `name="forwardTo" value="`+testMailbox+`"`) {
+		t.Fatalf("filter does not forward to %s:\n%s", testMailbox, body)
+	}
+}
+
+func TestTheMailFilterIsMissingWithoutAMailboxAddress(t *testing.T) {
+	e := echo.New()
+	Register(e, NewServer(nil, nil, nil, 1<<20, ""))
+	recorder := get(t, e, "/api/mail-filters.xml")
+	if recorder.Code != http.StatusNotFound || !strings.Contains(decode[Problem](t, recorder).Message, "BACKEND_MAILBOX_ADDRESS") {
+		t.Fatalf("mail filter: %d %s", recorder.Code, recorder.Body)
 	}
 }

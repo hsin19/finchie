@@ -3,6 +3,7 @@ import {
     api,
     type Document,
     LEDGER,
+    MAIL_FILTERS_URL,
     unwrap,
 } from "#lib/api/client.js";
 import Bar from "#lib/components/Bar.svelte";
@@ -118,9 +119,9 @@ function refuseDrop(event: DragEvent) {
 
 // What to do about a failure, by the gRPC code the worker recorded ("FailedPrecondition: ...").
 function hint(error: string): string {
-    if (error.startsWith("Unimplemented")) return "只收滙豐、台新、國泰、玉山的 .eml 或 .pdf 帳單";
-    if (error.startsWith("FailedPrecondition")) return "多半是 PDF 密碼沒設或不對：設定 parser 的密碼後按「重新解析」";
-    if (error.startsWith("InvalidArgument")) return "檔案讀不出來：確認是銀行寄來的原始檔";
+    if (error.startsWith("Unimplemented")) return "沒有 parser 認領這封信：寄件者網域或主旨對不上";
+    if (error.startsWith("FailedPrecondition")) return "PDF 打不開：訊息會寫要設哪個 parser 變數，設好後按「重新解析」";
+    if (error.startsWith("InvalidArgument")) return "不是 e-mail 或讀不出來：上傳銀行寄來的原始信（.eml）";
     if (error.startsWith("Internal")) return "版面跟 parser 認得的不一樣：修好 parser 後按「重新解析」";
     return "按「重新解析」再試一次";
 }
@@ -224,14 +225,14 @@ onKeys({ Enter: () => input?.click() });
         <path d="M7 9l5-5 5 5" />
         <path d="M4 15v5h16v-5" />
     </svg>
-    <div class="text-[16px] font-bold">把 .eml 或 .pdf 拖到這裡</div>
-    <div class="text-dim">一次可以多個檔案 · 單檔上限 32 MB · 同一個檔案重複上傳不會重複入帳</div>
+    <div class="text-[16px] font-bold">把帳單 e-mail（.eml）拖到這裡</div>
+    <div class="text-dim">只收 e-mail，手動轉寄的也行 · 一次可以多個檔案 · 單檔上限 32 MB · 同一個檔案重複上傳不會重複入帳</div>
     <button type="button" class="control min-h-11 border-accent px-4.5" onclick={() => input?.click()}><span class="text-accent">[enter]</span> 選擇檔案</button>
     <input
         bind:this={input}
         type="file"
         multiple
-        accept=".eml, .pdf, message/rfc822, application/pdf"
+        accept=".eml, message/rfc822"
         class="hidden"
         onchange={event => {
             const files = event.currentTarget.files;
@@ -240,6 +241,13 @@ onKeys({ Enter: () => input?.click() });
         }}
     />
 </section>
+
+<p class="text-dim">
+    要自動收帳單：
+    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
+    <a href={MAIL_FILTERS_URL} download data-sveltekit-reload>下載 Gmail 篩選器 ↓</a>
+    ，在 Gmail 設定 → 篩選器和封鎖的地址 → 匯入篩選器。之前自己設的轉寄篩選器要關掉轉寄，不然每封會收到兩次。
+</p>
 
 {#if entries.length > 0}
     <section class="panel px-3.5 pt-1 pb-2.5">

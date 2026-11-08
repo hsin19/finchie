@@ -10,7 +10,10 @@ paths:
   /api/documents:
     post:
       operationId: uploadDocument
-      summary: Upload an e-mail (.eml) or PDF statement and queue it for parsing
+      summary: Upload a statement e-mail (.eml) and queue it for parsing
+      description: |
+        Statements are taken as e-mails only, as the bank sent them or forwarded (ADR 0014); anything
+        else, a bare PDF included, is refused before it is stored.
       requestBody:
         required: true
         content:
@@ -36,6 +39,8 @@ paths:
         "400":
           $ref: "#/components/responses/Problem"
         "413":
+          $ref: "#/components/responses/Problem"
+        "415":
           $ref: "#/components/responses/Problem"
     get:
       operationId: listDocuments
@@ -111,8 +116,8 @@ paths:
       operationId: getDocumentPreview
       summary: The document opened for reading
       description: |
-        An e-mail's headers and attachments, or a bare PDF as its one file. The parser opens the stored
-        original on every request and PDFs come back decrypted; nothing decrypted is stored (ADR 0012),
+        The bank's e-mail, unwrapped from a forward (ADR 0014): its headers and attachments. The parser
+        opens the stored original on every request and PDFs come back decrypted; nothing decrypted is stored (ADR 0012),
         so the PDF, body, and file responses carry `Cache-Control: no-store`.
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -230,6 +235,27 @@ paths:
         "422":
           $ref: "#/components/responses/Problem"
         "503":
+          $ref: "#/components/responses/Problem"
+
+  /api/mail-filters.xml:
+    get:
+      operationId: getMailFilters
+      summary: The Gmail filter that forwards statement e-mails to the mailbox
+      description: |
+        Generated from the parsers' sender domains (ADR 0014), in the format Gmail imports (Settings,
+        Filters, Import filters), forwarding to BACKEND_MAILBOX_ADDRESS. 404 while that is not set.
+      responses:
+        "200":
+          description: The filter
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/xml:
+              schema:
+                type: string
+                format: binary
+        "404":
           $ref: "#/components/responses/Problem"
 
   /api/statements:

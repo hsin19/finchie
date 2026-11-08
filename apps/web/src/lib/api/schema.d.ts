@@ -14,7 +14,11 @@ export interface paths {
         /** Uploaded documents, newest first */
         get: operations["listDocuments"];
         put?: never;
-        /** Upload an e-mail (.eml) or PDF statement and queue it for parsing */
+        /**
+         * Upload a statement e-mail (.eml) and queue it for parsing
+         * @description Statements are taken as e-mails only, as the bank sent them or forwarded (ADR 0014); anything
+         *     else, a bare PDF included, is refused before it is stored.
+         */
         post: operations["uploadDocument"];
         delete?: never;
         options?: never;
@@ -86,8 +90,8 @@ export interface paths {
         };
         /**
          * The document opened for reading
-         * @description An e-mail's headers and attachments, or a bare PDF as its one file. The parser opens the stored
-         *     original on every request and PDFs come back decrypted; nothing decrypted is stored (ADR 0012),
+         * @description The bank's e-mail, unwrapped from a forward (ADR 0014): its headers and attachments. The parser
+         *     opens the stored original on every request and PDFs come back decrypted; nothing decrypted is stored (ADR 0012),
          *     so the PDF, body, and file responses carry `Cache-Control: no-store`.
          */
         get: operations["getDocumentPreview"];
@@ -156,6 +160,27 @@ export interface paths {
          *     downloads (attachment) as application/octet-stream.
          */
         get: operations["getDocumentPreviewFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mail-filters.xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Gmail filter that forwards statement e-mails to the mailbox
+         * @description Generated from the parsers' sender domains (ADR 0014), in the format Gmail imports (Settings,
+         *     Filters, Import filters), forwarding to BACKEND_MAILBOX_ADDRESS. 404 while that is not set.
+         */
+        get: operations["getMailFilters"];
         put?: never;
         post?: never;
         delete?: never;
@@ -489,6 +514,7 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             413: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
         };
     };
     getDocument: {
@@ -671,6 +697,28 @@ export interface operations {
             404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    getMailFilters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The filter */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            404: components["responses"]["Problem"];
         };
     };
     listStatements: {

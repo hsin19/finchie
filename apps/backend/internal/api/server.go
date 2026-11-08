@@ -12,6 +12,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/mail"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -36,10 +37,12 @@ type Server struct {
 	jobs           *river.Client[pgx.Tx]
 	parser         parserv1.ParserServiceClient
 	maxUploadBytes int64
+	// Where the Gmail filter forwards statements; empty when the deployment has not set it.
+	mailboxAddress string
 }
 
-func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv1.ParserServiceClient, maxUploadBytes int64) *Server {
-	return &Server{pool: pool, jobs: jobs, parser: parser, maxUploadBytes: maxUploadBytes}
+func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv1.ParserServiceClient, maxUploadBytes int64, mailboxAddress string) *Server {
+	return &Server{pool: pool, jobs: jobs, parser: parser, maxUploadBytes: maxUploadBytes, mailboxAddress: mailboxAddress}
 }
 
 var _ StrictServerInterface = (*Server)(nil)
@@ -71,6 +74,8 @@ func (s *Server) UploadDocument(ctx context.Context, request UploadDocumentReque
 	switch {
 	case errors.Is(err, errTooLarge):
 		return UploadDocument413JSONResponse{Message: fmt.Sprintf("file is larger than %d MB", s.maxUploadBytes>>20)}, nil
+	case errors.Is(err, errNotEmail):
+		return UploadDocument415JSONResponse{Message: err.Error()}, nil
 	case err != nil:
 		//nolint:nilerr // a bad upload is a 400 response, not a handler failure
 		return UploadDocument400JSONResponse{ProblemJSONResponse{Message: err.Error()}}, nil
@@ -384,9 +389,24 @@ func readFilePart(reader *multipart.Reader, maxBytes int64) (upload, error) {
 		if len(data) == 0 {
 			return upload{}, errors.New("file is empty")
 		}
-		name := filepath.Base(part.FileName())
-		return upload{name: name, contentType: contentType(name, data), data: data}, nil
+		if !isEmail(data) {
+			return upload{}, errNotEmail
+		}
+		return upload{name: filepath.Base(part.FileName()), contentType: contentTypeEmail, data: data}, nil
 	}
+}
+
+var errNotEmail = errors.New("only statement e-mails (.eml) can be uploaded, never a bare PDF (ADR 0014)")
+
+// isEmail reports whether data reads as an e-mail: a header block net/mail accepts. The stored type
+// is decided by this, never by what the browser declares: the original is served back from the
+// app's origin, where a stored "text/html" or "image/svg+xml" would run.
+func isEmail(data []byte) bool {
+	if bytes.HasPrefix(data, []byte("%PDF")) {
+		return false
+	}
+	message, err := mail.ReadMessage(bytes.NewReader(data))
+	return err == nil && len(message.Header) > 0
 }
 
 const (
@@ -394,20 +414,6 @@ const (
 	contentTypeEmail = "message/rfc822"
 	contentTypeOther = "application/octet-stream"
 )
-
-// contentType is decided from the bytes and the file extension only, never from what the browser
-// declares: the original is served back from the app's origin, so a stored "text/html" or
-// "image/svg+xml" would run there. The parser reads only PDFs and e-mails anyway.
-func contentType(name string, data []byte) string {
-	switch {
-	case bytes.HasPrefix(data, []byte("%PDF")):
-		return contentTypePDF
-	case strings.EqualFold(filepath.Ext(name), ".eml"):
-		return contentTypeEmail
-	default:
-		return contentTypeOther
-	}
-}
 
 func limit(requested *Limit) int32 {
 	if requested == nil {

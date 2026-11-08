@@ -367,7 +367,7 @@ type ServerInterface interface {
 	// ListDocuments Uploaded documents, newest first
 	// (GET /api/documents)
 	ListDocuments(ctx *echo.Context, params ListDocumentsParams) error
-	// UploadDocument Upload an e-mail (.eml) or PDF statement and queue it for parsing
+	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
 	// (POST /api/documents)
 	UploadDocument(ctx *echo.Context) error
 
@@ -391,6 +391,9 @@ type ServerInterface interface {
 	// ReparseDocument Parse the stored original again, e.g. after a parser fix
 	// (POST /api/documents/{id}/reparse)
 	ReparseDocument(ctx *echo.Context, id Id) error
+	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
+	// (GET /api/mail-filters.xml)
+	GetMailFilters(ctx *echo.Context) error
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx *echo.Context, params ListStatementsParams) error
@@ -557,6 +560,15 @@ func (w *ServerInterfaceWrapper) ReparseDocument(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ReparseDocument(ctx, id)
+	return err
+}
+
+// GetMailFilters converts echo context to params.
+func (w *ServerInterfaceWrapper) GetMailFilters(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetMailFilters(ctx)
 	return err
 }
 
@@ -777,6 +789,7 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/documents/:id/preview/pdf", wrapper.GetDocumentPreviewPdf, options.OperationMiddlewares["getDocumentPreviewPdf"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/body", wrapper.GetDocumentPreviewBody, options.OperationMiddlewares["getDocumentPreviewBody"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/files/:index", wrapper.GetDocumentPreviewFile, options.OperationMiddlewares["getDocumentPreviewFile"]...)
+	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
 	router.GET(options.BaseURL+"/api/statements/:id", wrapper.GetStatement, options.OperationMiddlewares["getStatement"]...)
 	router.GET(options.BaseURL+"/api/transactions/:id", wrapper.GetTransaction, options.OperationMiddlewares["getTransaction"]...)
@@ -869,6 +882,20 @@ func (response UploadDocument413JSONResponse) VisitUploadDocumentResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadDocument415JSONResponse Problem
+
+func (response UploadDocument415JSONResponse) VisitUploadDocumentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(415)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1328,6 +1355,55 @@ func (response ReparseDocument404JSONResponse) VisitReparseDocumentResponse(w ht
 	return err
 }
 
+type GetMailFiltersRequestObject struct {
+}
+
+type GetMailFiltersResponseObject interface {
+	VisitGetMailFiltersResponse(w http.ResponseWriter) error
+}
+
+type GetMailFilters200ResponseHeaders struct {
+	ContentDisposition *string
+}
+
+type GetMailFilters200ApplicationxmlResponse struct {
+	Body          io.Reader
+	Headers       GetMailFilters200ResponseHeaders
+	ContentLength int64
+}
+
+func (response GetMailFilters200ApplicationxmlResponse) VisitGetMailFiltersResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/xml")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetMailFilters404JSONResponse struct{ ProblemJSONResponse }
+
+func (response GetMailFilters404JSONResponse) VisitGetMailFiltersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListStatementsRequestObject struct {
 	Params ListStatementsParams
 }
@@ -1485,7 +1561,7 @@ type StrictServerInterface interface {
 	// ListDocuments Uploaded documents, newest first
 	// (GET /api/documents)
 	ListDocuments(ctx context.Context, request ListDocumentsRequestObject) (ListDocumentsResponseObject, error)
-	// UploadDocument Upload an e-mail (.eml) or PDF statement and queue it for parsing
+	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
 	// (POST /api/documents)
 	UploadDocument(ctx context.Context, request UploadDocumentRequestObject) (UploadDocumentResponseObject, error)
 
@@ -1509,6 +1585,9 @@ type StrictServerInterface interface {
 	// ReparseDocument Parse the stored original again, e.g. after a parser fix
 	// (POST /api/documents/{id}/reparse)
 	ReparseDocument(ctx context.Context, request ReparseDocumentRequestObject) (ReparseDocumentResponseObject, error)
+	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
+	// (GET /api/mail-filters.xml)
+	GetMailFilters(ctx context.Context, request GetMailFiltersRequestObject) (GetMailFiltersResponseObject, error)
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx context.Context, request ListStatementsRequestObject) (ListStatementsResponseObject, error)
@@ -1762,6 +1841,29 @@ func (sh *strictHandler) ReparseDocument(ctx *echo.Context, id Id) error {
 		return err
 	} else if validResponse, ok := response.(ReparseDocumentResponseObject); ok {
 		return validResponse.VisitReparseDocumentResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetMailFilters operation middleware
+func (sh *strictHandler) GetMailFilters(ctx *echo.Context) error {
+	var request GetMailFiltersRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMailFilters(ctx.Request().Context(), request.(GetMailFiltersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMailFilters")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetMailFiltersResponseObject); ok {
+		return validResponse.VisitGetMailFiltersResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

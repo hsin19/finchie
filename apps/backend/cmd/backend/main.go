@@ -152,7 +152,7 @@ func run() error {
 		}
 		return c.String(http.StatusOK, "ok")
 	})
-	api.Register(e, api.NewServer(pool, jobs, parser, cfg.MaxUploadBytes()))
+	api.Register(e, api.NewServer(pool, jobs, parser, cfg.MaxUploadBytes(), cfg.MailboxAddress))
 	web.Register(e)
 
 	slog.Info("listening", "addr", cfg.HTTPAddr, "parser", cfg.ParserAddr)

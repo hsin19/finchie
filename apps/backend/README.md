@@ -8,15 +8,16 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/api/documents` | Multipart field `file`: an `.eml` or PDF. `201` when new, `200` when the same bytes were uploaded before |
+| `POST` | `/api/documents` | Multipart field `file`: a statement e-mail (`.eml`), as the bank sent it or forwarded. `201` when new, `200` when the same bytes were uploaded before, `415` for anything that is not an e-mail, a bare PDF included ([ADR 0014](../../docs/adr/0014-recognizing-statements.md)) |
 | `GET` | `/api/documents` | Newest first, `?limit=` up to 500 |
 | `GET` | `/api/documents/{id}` | Status, parser, warnings, error |
-| `GET` | `/api/documents/{id}/content` | The original file. Only PDFs open in the browser; anything else downloads as `application/octet-stream`, with `nosniff`. The stored content type comes from the bytes (`%PDF`) or the `.eml` extension, never from what the browser declared, because the file is served from the web app's origin |
-| `GET` | `/api/documents/{id}/preview` | The document opened for reading by the parser: an e-mail's sender, recipient, subject, and date, and its files (the attachments, or the bare PDF). Nothing decrypted is stored ([ADR 0012](../../docs/adr/0012-reading-documents.md)) |
+| `GET` | `/api/documents/{id}/content` | The original file. Only PDFs open in the browser (documents stored as bare PDFs before ADR 0014); anything else downloads as `application/octet-stream`, with `nosniff`. The stored content type comes from the bytes, never from what the browser declared, because the file is served from the web app's origin |
+| `GET` | `/api/documents/{id}/preview` | The document opened for reading by the parser: the bank's sender, recipient, subject, and date (unwrapped from a forward), and its files. Nothing decrypted is stored ([ADR 0012](../../docs/adr/0012-reading-documents.md)) |
 | `GET` | `/api/documents/{id}/preview/pdf` | The statement PDF, decrypted, in the browser: the file the parser marks primary (the PDF whose name a bank parser knows, else the first PDF). `404` without a PDF. `Cache-Control: no-store`, so the decrypted copy stays out of the browser's cache too |
 | `GET` | `/api/documents/{id}/preview/body` | The e-mail's body as a page for an iframe, sandboxed by its own Content-Security-Policy: no scripts, only `data:` and https images, links to a new tab. `Cache-Control: no-store` |
 | `GET` | `/api/documents/{id}/preview/files/{index}` | One file, a PDF decrypted. Only PDFs open in the browser; anything else downloads as `application/octet-stream` with `nosniff`. `Cache-Control: no-store` |
 | `POST` | `/api/documents/{id}/reparse` | Parse the stored original again. The document's statement is replaced, so it gets a new id |
+| `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' sender domains (ADR 0014). `404` while that is not set |
 | `GET` | `/api/statements` | Newest closing date first, with each statement's transaction count |
 | `GET` | `/api/statements/{id}` | One statement |
 | `GET` | `/api/statements/{id}/transactions` | In statement order |
@@ -63,6 +64,7 @@ On `SIGTERM` the backend stops taking jobs and gives a parse in progress 30 seco
 | `BACKEND_LOG_FORMAT` | `json` | `json` or `text` |
 | `BACKEND_ACCESS_TEAM_DOMAIN` | — | Cloudflare Access team domain, `https://<team>.cloudflareaccess.com`. With `BACKEND_ACCESS_AUD`, every request but `/healthz` needs a valid Access token (ADR 0008); a service token's (no e-mail address) may only `POST /api/documents` (ADR 0010). Leave both empty locally |
 | `BACKEND_ACCESS_AUD` | — | The Finchie Access application's AUD tag (not a secret) |
+| `BACKEND_MAILBOX_ADDRESS` | — | The address the mailbox Worker receives statements at; the Gmail filter download forwards to it. The deployment's, never in the repository (ADR 0010) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Where traces, metrics, and logs go over OTLP gRPC, e.g. `http://collector:4317`. Unset: nothing leaves the process, logs go to stdout only (ADR 0011) |
 | `OTEL_SERVICE_NAME` | `finchie-backend` | |
 | `OTEL_RESOURCE_ATTRIBUTES` | — | E.g. `service.namespace=finchie,deployment.environment.name=production`; the other standard `OTEL_*` variables apply too |

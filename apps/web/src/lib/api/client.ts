@@ -79,3 +79,6 @@ export function previewFileUrl(id: number, index: number): string {
 export function previewBodyUrl(id: number): string {
     return `/api/documents/${id}/preview/body`;
 }
+
+/** The Gmail filter that forwards statement e-mails to the mailbox, generated from the parsers (ADR 0014). */
+export const MAIL_FILTERS_URL = "/api/mail-filters.xml";
