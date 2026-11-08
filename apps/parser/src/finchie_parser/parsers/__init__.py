@@ -1,5 +1,6 @@
 from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.cathay import CathayParser
+from finchie_parser.parsers.ctbc_deposit import CtbcDepositParser
 from finchie_parser.parsers.esun import EsunParser
 from finchie_parser.parsers.esun_deposit import EsunDepositParser
 from finchie_parser.parsers.fubon_deposit import FubonDepositParser
@@ -17,6 +18,7 @@ PARSERS: tuple[StatementParser, ...] = (
     HsbcParser(),
     FubonDepositParser(),
     NextBankDepositParser(),
+    CtbcDepositParser(),
 )
 
 __all__ = ["PARSERS", "Parsed", "StatementParser"]

@@ -20,7 +20,7 @@ class OcrLine:
 
 class Ocr(Protocol):
     def read_column(self, document: Document, page_index: int, left: float, right: float) -> list[OcrLine]:
-        """Text in the vertical strip `left`..`right` of a page, in PDF points."""
+        """Text in the vertical strip `left`..`right` of a page, in PDF points; past the page's edge reads to it."""
         ...
 
 
@@ -34,7 +34,8 @@ class RapidOcr:
 
     def read_column(self, document: Document, page_index: int, left: float, right: float) -> list[OcrLine]:
         image = document.render(page_index, self.SCALE)
-        strip = image.crop((int(left * self.SCALE), 0, int(right * self.SCALE), image.height))
+        # Cropping past the page pads it, which the recognizer reads as nothing: a strip ends at the edge.
+        strip = image.crop((int(left * self.SCALE), 0, min(int(right * self.SCALE), image.width), image.height))
         # One engine shared across gRPC worker threads; it is not documented as thread-safe.
         with self._lock:
             result = self._get_engine()(np.asarray(strip))
