@@ -89,6 +89,7 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		Counterpart: lineCounterpart(row.CounterpartID, row.CounterpartStatementID, row.CounterpartDate, row.CounterpartAccountID,
 			row.CounterpartAccountKind, row.CounterpartInstitution, row.CounterpartAccountName,
 			cmp.Or(row.CounterpartFullNumber, row.CounterpartAccountNumber)),
+		Trade: tradeOf(row.TradeCategory, row.TradePrice, row.TradeAmount, row.TradeFee, row.TradeTax, row.TradeNet, row.TradePrepaid),
 	}
 	accountKind := AccountKind(row.AccountKind)
 	tx.AccountKind = &accountKind
@@ -126,6 +127,22 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		tx.Children = &children
 	}
 	return tx, nil
+}
+
+// tradeOf is a trade's money from the trade columns a line query selects (ADR 0017); nil for any other line.
+func tradeOf(category *string, price, amount, fee, tax, net, prepaid pgtype.Numeric) *Trade {
+	if category == nil {
+		return nil
+	}
+	trade := Trade{
+		Category: *category, Price: decimalString(price), Amount: decimalString(amount), Fee: decimalString(fee),
+		Tax: decimalString(tax), Net: decimalString(net),
+	}
+	if prepaid.Valid {
+		value := decimalString(prepaid)
+		trade.Prepaid = &value
+	}
+	return &trade
 }
 
 // lineCounterpart is the other line of a link (ADR 0016), from the counterpart columns a line query

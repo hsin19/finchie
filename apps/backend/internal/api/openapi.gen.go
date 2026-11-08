@@ -40,6 +40,7 @@ func (e AccountContinuity) Valid() bool {
 const (
 	CreditCard AccountKind = "credit_card"
 	Deposit    AccountKind = "deposit"
+	Securities AccountKind = "securities"
 )
 
 // Valid indicates whether the value is a known member of the AccountKind enum.
@@ -48,6 +49,8 @@ func (e AccountKind) Valid() bool {
 	case CreditCard:
 		return true
 	case Deposit:
+		return true
+	case Securities:
 		return true
 	default:
 		return false
@@ -84,6 +87,7 @@ func (e DocumentStatus) Valid() bool {
 // Defines values for TransactionKind.
 const (
 	AnnualFee             TransactionKind = "annual_fee"
+	Buy                   TransactionKind = "buy"
 	Fee                   TransactionKind = "fee"
 	ForeignTransactionFee TransactionKind = "foreign_transaction_fee"
 	Interest              TransactionKind = "interest"
@@ -92,12 +96,15 @@ const (
 	Purchase              TransactionKind = "purchase"
 	Rebate                TransactionKind = "rebate"
 	Refund                TransactionKind = "refund"
+	Sell                  TransactionKind = "sell"
 )
 
 // Valid indicates whether the value is a known member of the TransactionKind enum.
 func (e TransactionKind) Valid() bool {
 	switch e {
 	case AnnualFee:
+		return true
+	case Buy:
 		return true
 	case Fee:
 		return true
@@ -114,6 +121,8 @@ func (e TransactionKind) Valid() bool {
 	case Rebate:
 		return true
 	case Refund:
+		return true
+	case Sell:
 		return true
 	default:
 		return false
@@ -242,7 +251,10 @@ type AccountLine struct {
 	Kind        string  `json:"kind"`
 	Memo        *string `json:"memo,omitempty"`
 	StatementId int64   `json:"statementId"`
-	Unit        string  `json:"unit"`
+
+	// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
+	Trade *Trade `json:"trade,omitempty"`
+	Unit  string `json:"unit"`
 }
 
 // AccountTotal defines model for AccountTotal.
@@ -273,7 +285,15 @@ type Balance struct {
 	// AsOf The end of the day it was held
 	AsOf openapi_types.Date `json:"asOf"`
 
-	// RateDay The day of the rate its worth used; absent for NT$
+	// Code A security's code, from the exchanges' lists (ADR 0017)
+	//
+	// Example: 00878
+	Code *string `json:"code,omitempty"`
+
+	// Price A security's newest close in NT$, which its worth used
+	Price *Decimal `json:"price,omitempty"`
+
+	// RateDay The day of the rate or close its worth used; absent for NT$
 	RateDay *openapi_types.Date `json:"rateDay,omitempty"`
 
 	// StatementId The statement that reported it
@@ -383,7 +403,7 @@ type KindTotal struct {
 	// Flow Seen from the owner
 	Flow Decimal `json:"flow"`
 
-	// Kind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
 	Kind TransactionKind `json:"kind"`
 }
 
@@ -464,6 +484,38 @@ type Statement struct {
 	TransactionCount int     `json:"transactionCount"`
 }
 
+// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
+type Trade struct {
+	// Amount 價金: the shares at the price
+	Amount Decimal `json:"amount"`
+
+	// Category The broker's category as printed
+	//
+	// Example: 集買
+	Category string `json:"category"`
+
+	// Fee Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Fee Decimal `json:"fee"`
+
+	// Net 應收付: received positive, paid negative; zero for a buy paid in advance
+	Net Decimal `json:"net"`
+
+	// Prepaid 預繳金, for a buy paid in advance
+	Prepaid *Decimal `json:"prepaid,omitempty"`
+
+	// Price Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Price Decimal `json:"price"`
+
+	// Tax Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Tax Decimal `json:"tax"`
+}
+
 // Transaction defines model for Transaction.
 type Transaction struct {
 	// AccountId A deposit account; absent for a card line
@@ -501,7 +553,7 @@ type Transaction struct {
 	Id          int64    `json:"id"`
 	Institution string   `json:"institution"`
 
-	// Kind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
 	Kind TransactionKind `json:"kind"`
 	Memo *string         `json:"memo,omitempty"`
 
@@ -512,10 +564,13 @@ type Transaction struct {
 	OriginalCurrency *string  `json:"originalCurrency,omitempty"`
 
 	// Parent Another line, in short, enough to find it and to tell a refund in full
-	Parent          *TransactionLink    `json:"parent,omitempty"`
-	PostingDate     *openapi_types.Date `json:"postingDate,omitempty"`
-	StatementId     int64               `json:"statementId"`
-	TransactionDate openapi_types.Date  `json:"transactionDate"`
+	Parent      *TransactionLink    `json:"parent,omitempty"`
+	PostingDate *openapi_types.Date `json:"postingDate,omitempty"`
+	StatementId int64               `json:"statementId"`
+
+	// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
+	Trade           *Trade             `json:"trade,omitempty"`
+	TransactionDate openapi_types.Date `json:"transactionDate"`
 
 	// Unit ISO 4217, or a points program's code
 	Unit *string `json:"unit,omitempty"`
@@ -528,7 +583,7 @@ type TransactionFamily struct {
 	Transaction Transaction   `json:"transaction"`
 }
 
-// TransactionKind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+// TransactionKind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
 type TransactionKind string
 
 // TransactionLink Another line, in short, enough to find it and to tell a refund in full
@@ -539,7 +594,7 @@ type TransactionLink struct {
 	Amount Decimal `json:"amount"`
 	Id     int64   `json:"id"`
 
-	// Kind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
 	Kind TransactionKind `json:"kind"`
 
 	// OriginalAmount Decimal number as a string, e.g. "-6552.97"

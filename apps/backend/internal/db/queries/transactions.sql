@@ -34,6 +34,9 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
        (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- A trade's money (ADR 0017).
+       tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
+       tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
        -- Where its money went or came from (ADR 0016).
        c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
@@ -43,6 +46,7 @@ FROM matched m
 JOIN transactions t ON t.id = m.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
@@ -83,7 +87,9 @@ WITH lines AS (
                AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)) AS pick_match,
            t.amount + coalesce(kids.amount, 0) AS amount,
            CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS flow,
-           (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer
+           (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer,
+           -- Shares, not money: a trade is neither spent nor received (ADR 0017).
+           a.kind = 'securities' AS shares
     FROM transactions t
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
@@ -103,7 +109,7 @@ WITH lines AS (
 ),
 marked AS (
     SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
-           l.kind_match, l.pick_match, l.amount, l.flow, l.transfer,
+           l.kind_match, l.pick_match, l.amount, l.flow, l.transfer, l.shares,
            (l.counterpart_id IS NOT NULL AND NOT l.outflow
                AND EXISTS (SELECT 1 FROM lines o WHERE o.id = l.counterpart_id AND o.kind_match AND o.pick_match)) AS folded
     FROM lines l
@@ -112,10 +118,10 @@ SELECT kind, account_kind, account_id, account_name, account_number, institution
        kind_match::boolean AS kind_match, pick_match::boolean AS pick_match, folded::boolean AS folded,
        count(*)::integer AS row_count,
        sum(amount)::numeric AS amount,
-       coalesce(sum(flow) FILTER (WHERE flow < 0 AND NOT transfer), 0)::numeric AS spent,
-       coalesce(sum(flow) FILTER (WHERE flow > 0 AND NOT transfer), 0)::numeric AS received,
-       count(*) FILTER (WHERE transfer)::integer AS moved_count,
-       coalesce(sum(abs(flow)) FILTER (WHERE transfer), 0)::numeric AS moved
+       coalesce(sum(flow) FILTER (WHERE flow < 0 AND NOT transfer AND NOT shares), 0)::numeric AS spent,
+       coalesce(sum(flow) FILTER (WHERE flow > 0 AND NOT transfer AND NOT shares), 0)::numeric AS received,
+       count(*) FILTER (WHERE transfer AND NOT shares)::integer AS moved_count,
+       coalesce(sum(abs(flow)) FILTER (WHERE transfer AND NOT shares), 0)::numeric AS moved
 FROM marked
 GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, kind_match, pick_match, folded
 ORDER BY kind, institution, card_last4, account_id, unit;
@@ -156,6 +162,9 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
        (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- A trade's money (ADR 0017).
+       tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
+       tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
        -- Where its money went or came from (ADR 0016).
        c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
@@ -164,6 +173,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,

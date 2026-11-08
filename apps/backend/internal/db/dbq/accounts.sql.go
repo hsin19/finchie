@@ -59,7 +59,7 @@ WITH ordered AS (
            lag(b.amount) OVER w AS prev_amount
     FROM balances b
     JOIN accounts a ON a.id = b.account_id
-    WHERE a.kind = 'deposit'
+    WHERE a.kind IN ('deposit', 'securities')
       AND ($1::bigint IS NULL OR b.account_id = $1::bigint)
     WINDOW w AS (PARTITION BY b.account_id, b.unit ORDER BY b.as_of, b.id)
 )
@@ -85,8 +85,8 @@ type AccountGapsRow struct {
 
 // Where an account's balances do not join up (ADR 0013): two consecutive balances in one unit whose
 // difference the lines dated between them do not account for, so money moved that no report shows.
-// Deposit accounts only: a card bill's lines are dated by purchase, which can fall before the
-// previous bill closed, so dates cannot place them between two bills.
+// Deposit and securities accounts (a security's shares, ADR 0017): a card bill's lines are dated by
+// purchase, which can fall before the previous bill closed, so dates cannot place them between two bills.
 func (q *Queries) AccountGaps(ctx context.Context, accountID *int64) ([]AccountGapsRow, error) {
 	rows, err := q.db.Query(ctx, accountGaps, accountID)
 	if err != nil {
@@ -116,12 +116,16 @@ func (q *Queries) AccountGaps(ctx context.Context, accountID *int64) ([]AccountG
 const accountLines = `-- name: AccountLines :many
 SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, t.unit,
        t.amount, t.balance,
+       -- A trade's money (ADR 0017).
+       tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
+       tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
        -- Where its money went or came from (ADR 0016).
        c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
        coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
        ca.full_number AS counterpart_full_number
 FROM transactions t
+LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
 WHERE t.account_id = $1
@@ -146,6 +150,13 @@ type AccountLinesRow struct {
 	Unit                     string
 	Amount                   pgtype.Numeric
 	Balance                  pgtype.Numeric
+	TradeCategory            *string
+	TradePrice               pgtype.Numeric
+	TradeAmount              pgtype.Numeric
+	TradeFee                 pgtype.Numeric
+	TradeTax                 pgtype.Numeric
+	TradeNet                 pgtype.Numeric
+	TradePrepaid             pgtype.Numeric
 	CounterpartID            *int64
 	CounterpartStatementID   *int64
 	CounterpartDate          pgtype.Date
@@ -179,6 +190,13 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 			&i.Unit,
 			&i.Amount,
 			&i.Balance,
+			&i.TradeCategory,
+			&i.TradePrice,
+			&i.TradeAmount,
+			&i.TradeFee,
+			&i.TradeTax,
+			&i.TradeNet,
+			&i.TradePrepaid,
 			&i.CounterpartID,
 			&i.CounterpartStatementID,
 			&i.CounterpartDate,
@@ -256,14 +274,23 @@ func (q *Queries) InsertBalance(ctx context.Context, arg InsertBalanceParams) er
 
 const latestBalances = `-- name: LatestBalances :many
 SELECT DISTINCT ON (b.account_id, b.unit) b.account_id, b.unit, b.as_of, b.amount, b.statement_id,
-       (CASE WHEN b.unit = 'TWD' THEN b.amount ELSE round(b.amount / rate.per_twd, 2) END)::numeric AS worth,
-       rate.day AS rate_day
+       (CASE WHEN a.kind = 'securities' THEN round(b.amount * quote.close, 2)
+             WHEN b.unit = 'TWD' THEN b.amount
+             ELSE round(b.amount / rate.per_twd, 2) END)::numeric AS worth,
+       coalesce(quote.day, rate.day)::date AS rate_day,
+       coalesce(quote.code, '') AS code, quote.close AS price
 FROM balances b
+JOIN accounts a ON a.id = b.account_id
 LEFT JOIN LATERAL (SELECT r.day, r.per_twd
                    FROM exchange_rates r
-                   WHERE r.unit = b.unit
+                   WHERE a.kind <> 'securities' AND r.unit = b.unit
                    ORDER BY r.day DESC
                    LIMIT 1) rate ON true
+LEFT JOIN LATERAL (SELECT q.day, q.code, q.close
+                   FROM quotes q
+                   WHERE a.kind = 'securities' AND q.name = b.unit
+                   ORDER BY q.day DESC
+                   LIMIT 1) quote ON true
 ORDER BY b.account_id, b.unit, b.as_of DESC, b.id DESC
 `
 
@@ -275,10 +302,13 @@ type LatestBalancesRow struct {
 	StatementID int64
 	Worth       pgtype.Numeric
 	RateDay     pgtype.Date
+	Code        string
+	Price       pgtype.Numeric
 }
 
-// Each account's newest balance in each unit, with its worth in NT$ at the newest rate of the unit
-// (ADR 0015); NT$ is worth itself, a unit without a rate nothing.
+// Each account's newest balance in each unit, with its worth in NT$: money at the newest rate of its
+// unit (ADR 0015), NT$ being worth itself; a security's shares at its newest close (ADR 0017). A unit
+// with neither is worth nothing. rate_day is the day of the rate or close used.
 func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, error) {
 	rows, err := q.db.Query(ctx, latestBalances)
 	if err != nil {
@@ -296,6 +326,8 @@ func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, erro
 			&i.StatementID,
 			&i.Worth,
 			&i.RateDay,
+			&i.Code,
+			&i.Price,
 		); err != nil {
 			return nil, err
 		}

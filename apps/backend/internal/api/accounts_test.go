@@ -325,3 +325,58 @@ func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 		t.Fatalf("bill = %+v", statements)
 	}
 }
+
+func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSpending(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	dec := func(s string) *decimal.Decimal { return &decimal.Decimal{Value: s} }
+	trade := func(day int32, name string, side parserv1.TradeSide, shares, amount, net string) *parserv1.SecuritiesTrade {
+		return &parserv1.SecuritiesTrade{
+			Date: &gdate.Date{Year: 2026, Month: 7, Day: day}, Name: name, Side: side, Shares: dec(shares), Price: dec("50"),
+			Category: "集賣", Amount: dec(amount), Fee: dec("143"), Tax: dec("303"), Net: dec(net),
+		}
+	}
+	// Synthetic (ADR 0006): 範例航運 sold out, so not held.
+	store(t, pool, "skis.eml", &parserv1.ParseDocumentResponse{Parser: "skis.securities", SecuritiesStatement: &parserv1.SecuritiesStatement{
+		Institution: "skis", AccountNumber: "12**345",
+		PeriodStart: &gdate.Date{Year: 2026, Month: 7, Day: 1}, PeriodEnd: &gdate.Date{Year: 2026, Month: 7, Day: 31},
+		HoldingsDate: &gdate.Date{Year: 2026, Month: 8, Day: 4},
+		Holdings:     []*parserv1.SecuritiesHolding{{Name: "範例電子", Shares: dec("3500")}},
+		Trades: []*parserv1.SecuritiesTrade{
+			trade(3, "範例電子", parserv1.TradeSide_TRADE_SIDE_SELL, "2000", "101000", "100554"),
+			trade(15, "範例航運", parserv1.TradeSide_TRADE_SIDE_SELL, "1000", "30000", "29554"),
+		},
+		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: dec("0"), Stated: dec("0"), StatedLabel: "應收付金額"},
+	}})
+	day := func(d int) pgtype.Date {
+		return pgtype.Date{Time: time.Date(2026, 11, d, 0, 0, 0, 0, time.UTC), Valid: true}
+	}
+	price := func(s string) pgtype.Numeric {
+		var n pgtype.Numeric
+		_ = n.Scan(s)
+		return n
+	}
+	if err := dbq.New(pool).UpsertQuotes(t.Context(), dbq.UpsertQuotesParams{
+		Days: []pgtype.Date{day(5), day(6)}, Names: []string{"範例電子", "範例電子"}, Codes: []string{"1234", "1234"},
+		Markets: []string{"twse", "twse"}, Closes: []pgtype.Numeric{price("49.00"), price("50.50")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	account := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), "12**345")
+	if account.Kind != Securities || account.Continuity != Checked || len(account.Balances) != 1 {
+		t.Fatalf("account = %+v", account)
+	}
+	held := account.Balances[0]
+	if held.Unit != "範例電子" || *held.Worth != "176750.00" || *held.Code != "1234" || *held.Price != "50.50" || held.RateDay.String() != "2026-11-06" {
+		t.Fatalf("holding = %+v, worth %v", held, *held.Worth)
+	}
+	lines := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", account.Id)))
+	if len(lines) != 2 || lines[0].Amount != "-1000" || lines[0].Trade == nil || lines[0].Trade.Net != "29554" {
+		t.Fatalf("lines = %+v", lines)
+	}
+	// Shares are not money: listed, but neither spent nor received.
+	search := decode[TransactionSearch](t, get(t, e, "/api/transactions"))
+	if search.Total != 2 || len(search.Flows) != 0 || search.Items[0].Trade == nil {
+		t.Fatalf("search = total %d, flows %+v", search.Total, search.Flows)
+	}
+}

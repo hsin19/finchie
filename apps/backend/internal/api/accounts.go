@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -123,6 +124,7 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 		line.Counterpart = lineCounterpart(r.CounterpartID, r.CounterpartStatementID, r.CounterpartDate, r.CounterpartAccountID,
 			r.CounterpartAccountKind, r.CounterpartInstitution, r.CounterpartAccountName,
 			cmp.Or(r.CounterpartFullNumber, r.CounterpartAccountNumber))
+		line.Trade = tradeOf(r.TradeCategory, r.TradePrice, r.TradeAmount, r.TradeFee, r.TradeTax, r.TradeNet, r.TradePrepaid)
 		lines = append(lines, line)
 	}
 	return lines, nil
@@ -130,8 +132,12 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 
 func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap) Account {
 	continuity := Unknown
-	if row.Kind == ingest.KindDeposit {
+	if row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities {
 		continuity = Checked
+	}
+	if row.Kind == ingest.KindSecurities {
+		// A security at 0 is one the account no longer holds (ADR 0017).
+		balances = slices.DeleteFunc(balances, func(b Balance) bool { return isZero(b.Amount) })
 	}
 	if balances == nil {
 		balances = []Balance{}
@@ -156,7 +162,19 @@ func toLatestBalance(b dbq.LatestBalancesRow) Balance {
 	if b.RateDay.Valid && b.Unit != "TWD" {
 		balance.RateDay = &openapi_types.Date{Time: b.RateDay.Time}
 	}
+	if b.Code != "" {
+		balance.Code = &b.Code
+	}
+	if b.Price.Valid {
+		price := decimalString(b.Price)
+		balance.Price = &price
+	}
 	return balance
+}
+
+func isZero(value Decimal) bool {
+	n, ok := new(big.Rat).SetString(value)
+	return ok && n.Sign() == 0
 }
 
 // worthOf adds up balances' worth exactly; none when a balance has no worth, or there are none.

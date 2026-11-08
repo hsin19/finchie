@@ -50,6 +50,14 @@ type ExchangeRate struct {
 	PerTwd pgtype.Numeric
 }
 
+type Quote struct {
+	Day    pgtype.Date
+	Name   string
+	Code   string
+	Market string
+	Close  pgtype.Numeric
+}
+
 type Statement struct {
 	ID                 int64
 	DocumentID         int64
@@ -66,6 +74,17 @@ type Statement struct {
 	PeriodStart        pgtype.Date
 	PaidOn             pgtype.Date
 	PaidBy             *int64
+}
+
+type Trade struct {
+	TransactionID int64
+	Category      string
+	Price         pgtype.Numeric
+	Amount        pgtype.Numeric
+	Fee           pgtype.Numeric
+	Tax           pgtype.Numeric
+	Net           pgtype.Numeric
+	Prepaid       pgtype.Numeric
 }
 
 type Transaction struct {

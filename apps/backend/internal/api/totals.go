@@ -49,6 +49,9 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 	for _, g := range groups {
 		if g.KindMatch && g.PickMatch && !g.Folded {
 			total.add(g.RowCount, g.Amount)
+		}
+		// Shares, not money: a trade is neither spent nor received (ADR 0017).
+		if g.KindMatch && g.PickMatch && !g.Folded && g.AccountKind != ingest.KindSecurities {
 			if flows[g.Unit] == nil {
 				flows[g.Unit] = &flow{spent: zero(), received: zero(), moved: zero()}
 			}

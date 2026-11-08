@@ -26,10 +26,12 @@ const (
 )
 
 // Kinds of statement, as stored in statements.kind, and of account, in accounts.kind (ADR 0013): a
-// card bill reports a credit card account, a deposit statement deposit accounts.
+// card bill reports a credit card account, a deposit statement deposit accounts, a securities
+// statement a brokerage account (ADR 0017).
 const (
 	KindCreditCard = "credit_card"
 	KindDeposit    = "deposit"
+	KindSecurities = "securities"
 )
 
 // ErrInvalidResponse means the parser returned something that breaks the contract; retrying won't help.
@@ -50,10 +52,12 @@ var depositKinds = map[parserv1.DepositLineKind]string{
 	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_FEE:      "fee",
 }
 
-// stored is a statement of either kind, converted and ready to store.
+// stored is a statement of any kind, converted and ready to store.
 type stored struct {
 	statement dbq.InsertStatementParams
 	accounts  []storedAccount
+	// A securities statement's trades' money, by line number (ADR 0017).
+	trades dbq.InsertTradesParams
 	// Accounts whose lines do not add up, said in words for the document's warnings.
 	unbalanced []string
 }
@@ -119,12 +123,14 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 			return err
 		}
 		var lines []dbq.InsertTransactionsParams
+		var accountIDs []int64
 		for _, reported := range result.accounts {
 			// Found, or created the first time a statement reports it (ADR 0013).
 			accountID, err := queries.UpsertAccount(ctx, reported.account)
 			if err != nil {
 				return fmt.Errorf("find account: %w", err)
 			}
+			accountIDs = append(accountIDs, accountID)
 			for _, line := range reported.lines {
 				line.StatementID, line.AccountID = statementID, accountID
 				lines = append(lines, line)
@@ -138,6 +144,11 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 		}
 		if _, err := queries.InsertTransactions(ctx, lines); err != nil {
 			return err
+		}
+		if statement.Kind == KindSecurities {
+			if err := storeHoldings(ctx, queries, statementID, result.trades, accountIDs); err != nil {
+				return err
+			}
 		}
 		// Its lines may be parents or children of lines on other statements.
 		if _, err := relink(ctx, queries); err != nil {
@@ -158,9 +169,9 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 }
 
 func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse) (stored, error) {
-	bill, deposit := response.GetStatement(), response.GetDepositStatement()
+	bill, deposit, securities := response.GetStatement(), response.GetDepositStatement(), response.GetSecuritiesStatement()
 	switch {
-	case bill != nil && deposit == nil:
+	case bill != nil && deposit == nil && securities == nil:
 		statement, lines, err := convert(documentID, bill)
 		if err != nil {
 			return stored{}, err
@@ -174,10 +185,12 @@ func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse)
 			account: dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindCreditCard},
 			lines:   lines,
 		}}}, nil
-	case deposit != nil && bill == nil:
+	case deposit != nil && bill == nil && securities == nil:
 		return convertDeposit(documentID, deposit)
+	case securities != nil && bill == nil && deposit == nil:
+		return convertSecurities(documentID, securities)
 	default:
-		return stored{}, fmt.Errorf("%w: exactly one of statement and deposit statement must be set", ErrInvalidResponse)
+		return stored{}, fmt.Errorf("%w: exactly one of statement, deposit statement, and securities statement must be set", ErrInvalidResponse)
 	}
 }
 
