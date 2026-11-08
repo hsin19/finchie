@@ -439,7 +439,7 @@ export interface components {
             paidOn?: string;
         };
         /** @enum {string} */
-        AccountKind: "credit_card" | "deposit";
+        AccountKind: "credit_card" | "deposit" | "securities";
         /**
          * @description Whether its balances can be checked against its lines (card bills cannot yet)
          * @enum {string}
@@ -497,9 +497,16 @@ export interface components {
             worth?: components["schemas"]["Decimal"];
             /**
              * Format: date
-             * @description The day of the rate its worth used; absent for NT$
+             * @description The day of the rate or close its worth used; absent for NT$
              */
             rateDay?: string;
+            /**
+             * @description A security's code, from the exchanges' lists (ADR 0017)
+             * @example 00878
+             */
+            code?: string;
+            /** @description A security's newest close in NT$, which its worth used */
+            price?: components["schemas"]["Decimal"];
         };
         /** @description Two consecutive balances in one unit that the lines between them do not join */
         BalanceGap: {
@@ -554,6 +561,24 @@ export interface components {
             /** @description The running balance, when printed */
             balance?: components["schemas"]["Decimal"] | null;
             counterpart?: components["schemas"]["LineCounterpart"];
+            trade?: components["schemas"]["Trade"];
+        };
+        /** @description A trade's money; its line's amount is the shares, its unit the security (ADR 0017) */
+        Trade: {
+            /**
+             * @description The broker's category as printed
+             * @example 集買
+             */
+            category: string;
+            price: components["schemas"]["Decimal"];
+            /** @description 價金: the shares at the price */
+            amount: components["schemas"]["Decimal"];
+            fee: components["schemas"]["Decimal"];
+            tax: components["schemas"]["Decimal"];
+            /** @description 應收付: received positive, paid negative; zero for a buy paid in advance */
+            net: components["schemas"]["Decimal"];
+            /** @description 預繳金, for a buy paid in advance */
+            prepaid?: components["schemas"]["Decimal"];
         };
         Reconciliation: {
             balanced: boolean;
@@ -567,10 +592,10 @@ export interface components {
          */
         TransactionSort: "newest" | "oldest" | "largest" | "smallest";
         /**
-         * @description A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+         * @description A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
          * @enum {string}
          */
-        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment" | "interest" | "fee" | "other";
+        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment" | "interest" | "fee" | "other" | "buy" | "sell";
         Transaction: {
             /** Format: int64 */
             id: number;
@@ -606,6 +631,7 @@ export interface components {
             /** @description Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it */
             flow?: components["schemas"]["Decimal"];
             counterpart?: components["schemas"]["LineCounterpart"];
+            trade?: components["schemas"]["Trade"];
             /** @description The line this one adjusts, such as the purchase a fee or refund belongs to */
             parent?: components["schemas"]["TransactionLink"];
             /** @description Lines that adjust this one, possibly on other statements; absent without any */

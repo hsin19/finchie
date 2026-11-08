@@ -30,6 +30,7 @@ import {
 } from "#lib/filters.js";
 import {
     flowOf,
+    isTrade,
     isTransfer,
     netByUnit,
 } from "#lib/flows.js";
@@ -46,6 +47,7 @@ import {
 import {
     approx,
     formatAmount,
+    negate,
     sign,
     sum,
 } from "#lib/money.js";
@@ -229,6 +231,8 @@ const days = $derived.by(() => {
 // moved between the owner's own lines is muted.
 function amountTone(t: Transaction) {
     if (refundedInFull(t) || isTransfer(t)) return "text-mute";
+    // Shares, not money (ADR 0017).
+    if (isTrade(t)) return "text-ink";
     if (sign(flowOf(t)) > 0) return "text-pos";
     return t.kind === "purchase" || t.kind === "other" ? "text-ink" : tone[kinds[t.kind].tone];
 }
@@ -296,6 +300,7 @@ onKeys({
             <div class="text-[24px] font-bold {amountTone(t)}">{amount(t)} <span class="text-[13px] font-normal text-mute">{t.unit ?? statement?.currency ?? "TWD"}</span></div>
             {#if breakdown(t)}<div class="text-[12px] text-dim">帳單上 {breakdown(t)}{refundedInFull(t) ? " · 已全額刷退" : ""}</div>{/if}
             {#if isTransfer(t)}<div class="text-[12px] text-mute">在自己的帳戶之間移動：不算支出或收入</div>{/if}
+            {#if isTrade(t)}<div class="text-[12px] text-mute">股數：買賣不算支出或收入，手續費和稅算進成本</div>{/if}
         </div>
         <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
             <dt class="text-mute">date</dt>
@@ -312,7 +317,15 @@ onKeys({
                 <dt class="text-mute">country</dt>
                 <dd class="m-0">{t.country}</dd>
             {/if}
-            {#if t.accountKind === "deposit" && t.accountId !== undefined}
+            {#if t.trade}
+                <dt class="text-mute">trade</dt>
+                <dd class="m-0">{t.trade.category} @ {formatAmount(t.trade.price)}</dd>
+                <dt class="text-mute">amount</dt>
+                <dd class="m-0">{formatAmount(t.trade.amount)} <span class="text-mute">手續費 {formatAmount(t.trade.fee)} · 稅 {formatAmount(t.trade.tax)}</span></dd>
+                <dt class="text-mute">{t.trade.prepaid ? "prepaid" : sign(t.trade.net) < 0 ? "paid" : "received"}</dt>
+                <dd class="m-0">{formatAmount(t.trade.prepaid ?? (sign(t.trade.net) < 0 ? negate(t.trade.net) : t.trade.net))} <span class="text-mute">TWD</span></dd>
+            {/if}
+            {#if t.accountKind !== undefined && t.accountKind !== "credit_card" && t.accountId !== undefined}
                 <dt class="text-mute">account</dt>
                 <dd class="m-0">
                     <a href={resolve("/accounts/[id]", { id: String(t.accountId) })}>{institution(t.institution).name} {t.accountName ?? ""}</a>

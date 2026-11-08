@@ -23,7 +23,7 @@ let { data }: PageProps = $props();
 
 // By kind, in a fixed order. Card bills are no accounts the owner has and are not listed (ADR 0013).
 const groups = $derived(
-    (["deposit"] as const)
+    (["deposit", "securities"] as const)
         .map(kind => {
             const accounts = data.accounts.filter(a => a.kind === kind);
             return { kind, accounts: sortAccounts(accounts, data.sort), worth: totalWorth(accounts) };
@@ -36,7 +36,10 @@ const sorts = [
 ] as const;
 const gapped = $derived(data.accounts.filter(a => a.gaps.length > 0));
 // Net of the card bills not yet seen paid (ADR 0016); a paid bill's money already left a deposit account.
-const deposits = $derived(totalWorth(data.accounts));
+const holdings = $derived(totalWorth(data.accounts));
+const deposits = $derived(totalWorth(data.accounts.filter(a => a.kind === "deposit")));
+const brokerages = $derived(data.accounts.filter(a => a.kind === "securities"));
+const securities = $derived(totalWorth(brokerages));
 const unpaid = $derived(unpaidBills(data.statements));
 const owed = $derived(sum(unpaid.map(s => s.totalDue)));
 
@@ -63,12 +66,18 @@ function href(account: Account) {
 <section class="panel flex flex-wrap items-baseline gap-x-8 gap-y-2 px-3.5 py-2.5">
     <div>
         <div class="label">NET · 淨額</div>
-        <div class="text-[20px] font-bold text-ink-bright">≈ NT${formatAmount(subtract(deposits.total, owed))}</div>
+        <div class="text-[20px] font-bold text-ink-bright">≈ NT${formatAmount(subtract(holdings.total, owed))}</div>
     </div>
     <div>
         <div class="label">DEPOSITS · 存款</div>
         <div>≈ NT${formatAmount(deposits.total)}{deposits.missing ? `（${deposits.missing} 個帳戶沒有匯率，不計）` : ""}</div>
     </div>
+    {#if brokerages.length > 0}
+        <div>
+            <div class="label">SECURITIES · 證券市值</div>
+            <div>≈ NT${formatAmount(securities.total)}{securities.missing ? `（${securities.missing} 個帳戶有證券沒有收盤價，不計）` : ""}</div>
+        </div>
+    {/if}
     <div>
         <div class="label">CARDS · 未見繳款的卡費</div>
         <div class={unpaid.length > 0 ? "text-neg" : "text-dim"}>
@@ -124,10 +133,12 @@ function href(account: Account) {
                             <td class="px-2 py-2.5 text-right">
                                 {#each account.balances as balance (balance.unit)}
                                     <div class={sign(balance.amount) < 0 ? "text-neg" : "text-ink"}>
-                                        {formatAmount(balance.amount)} <span class="text-mute">{balance.unit}</span>
+                                        {formatAmount(balance.amount)} <span class="text-mute">{balance.unit}{balance.code ? ` ${balance.code}` : ""}</span>
                                     </div>
                                     {#if balance.unit !== "TWD" && balance.worth !== undefined}
-                                        <div class="text-[12px] text-mute" title={`${balance.rateDay} 的匯率`}>≈ NT${formatAmount(balance.worth)}</div>
+                                        <div class="text-[12px] text-mute" title={balance.price ? `${balance.rateDay} 收盤 ${balance.price}` : `${balance.rateDay} 的匯率`}>
+                                            ≈ NT${formatAmount(balance.worth)}
+                                        </div>
                                     {/if}
                                 {:else}
                                     <span class="text-mute">—</span>

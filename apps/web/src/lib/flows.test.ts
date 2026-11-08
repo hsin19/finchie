@@ -29,6 +29,8 @@ describe("flows", () => {
             { accountKind: "credit_card", kind: "purchase", amount: "289", flow: "-289", unit: "TWD" },
             { accountKind: "deposit", kind: "other", amount: "60000", unit: "TWD" },
             { accountKind: "credit_card", kind: "payment", amount: "-500", flow: "500", unit: "TWD" },
+            // Shares bought: no money.
+            { accountKind: "securities", kind: "buy", amount: "1000", flow: "1000", unit: "範例電子" },
         ])).toEqual([{ unit: "TWD", amount: "59711" }, { unit: "USD", amount: "50" }]);
     });
 });

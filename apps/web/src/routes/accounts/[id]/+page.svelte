@@ -2,6 +2,7 @@
 import {
     api,
     LEDGER,
+    type Trade,
     unwrap,
 } from "#lib/api/client.js";
 import Counterpart from "#lib/components/Counterpart.svelte";
@@ -12,6 +13,7 @@ import {
 } from "#lib/labels.js";
 import {
     formatAmount,
+    negate,
     sign,
 } from "#lib/money.js";
 import { invalidate } from "$app/navigation";
@@ -22,6 +24,19 @@ let { data }: PageProps = $props();
 
 const account = $derived(data.account);
 const bank = $derived(institution(account.institution));
+// A brokerage account holds shares, one unit per security, and its lines are trades (ADR 0017).
+const brokerage = $derived(account.kind === "securities");
+
+/** What a trade paid or received, or what was paid in advance for it. */
+function tradeMoney(trade: Trade): string {
+    if (trade.prepaid) return `預繳 ${formatAmount(trade.prepaid)}`;
+    return sign(trade.net) < 0 ? `付 ${formatAmount(negate(trade.net))}` : `收 ${formatAmount(trade.net)}`;
+}
+
+/** A holding's worth at its newest close, or why it has none. */
+function holdingWorth(worth: string | undefined, price: string | undefined, day: string | undefined): string {
+    return worth !== undefined && price ? `≈ NT$${formatAmount(worth)} · ${day} 收盤 ${price}` : "沒有收盤價";
+}
 
 // The owner's details (ADR 0016): optional, and an empty field clears one.
 let editing = $state(false);
@@ -81,8 +96,9 @@ function amountTone(value: string) {
     <div class="mt-2 flex flex-wrap gap-x-8 gap-y-2">
         {#each account.balances as balance (balance.unit)}
             <div>
-                <div class="label">BALANCE · {balance.unit}</div>
-                <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</div>
+                <div class="label">{brokerage ? "HOLDING" : "BALANCE"} · {balance.unit}{balance.code ? ` ${balance.code}` : ""}</div>
+                <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}{brokerage ? " 股" : ""}</div>
+                {#if brokerage}<div class="text-[12px] text-mute">{holdingWorth(balance.worth, balance.price, balance.rateDay)}</div>{/if}
                 <div class="text-[12px] text-mute">{balance.asOf} 為止</div>
             </div>
         {/each}
@@ -125,7 +141,7 @@ function amountTone(value: string) {
 <section class="panel px-3.5 pt-1 pb-2.5">
     <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
         <h2 class="label">LINES · 明細（{data.lines.length}）</h2>
-        <span class="text-[12px] text-mute">新的在上 · 存入是正數</span>
+        <span class="text-[12px] text-mute">新的在上 · {brokerage ? "買進的股數是正數" : "存入是正數"}</span>
     </div>
     <div class="overflow-x-auto">
         <table class="w-full min-w-[820px] border-collapse">
@@ -133,8 +149,8 @@ function amountTone(value: string) {
                 <tr class="text-left text-mute">
                     <th class="py-2 pr-2 font-medium">DATE</th>
                     <th class="px-2 py-2 font-medium">DESCRIPTION</th>
-                    <th class="px-2 py-2 font-medium">MEMO</th>
-                    <th class="px-2 py-2 font-medium">COUNTERPARTY</th>
+                    <th class="px-2 py-2 font-medium">{brokerage ? "TRADE" : "MEMO"}</th>
+                    <th class="px-2 py-2 font-medium">{brokerage ? "MONEY" : "COUNTERPARTY"}</th>
                     <th class="px-2 py-2 text-right font-medium">AMOUNT</th>
                     <th class="py-2 pl-2 text-right font-medium">BALANCE</th>
                 </tr>
@@ -147,8 +163,15 @@ function amountTone(value: string) {
                             {line.description}
                             {#if line.counterpart}<Counterpart other={line.counterpart} out={sign(line.amount) < 0} class="block text-[12px] text-dim hover:text-ink" />{/if}
                         </td>
-                        <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
-                        <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
+                        {#if line.trade}
+                            <td class="px-2 py-2 text-dim">{line.trade.category} @ {formatAmount(line.trade.price)}</td>
+                            <td class="px-2 py-2 whitespace-nowrap text-mute" title={`價金 ${line.trade.amount} · 手續費 ${line.trade.fee} · 稅 ${line.trade.tax}`}>
+                                {tradeMoney(line.trade)}
+                            </td>
+                        {:else}
+                            <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
+                            <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
+                        {/if}
                         <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
                             {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
                         </td>

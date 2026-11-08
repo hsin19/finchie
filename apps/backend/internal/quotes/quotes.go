@@ -60,7 +60,7 @@ func NewWorker(pool *pgxpool.Pool, client *http.Client, feeds []Feed) *Worker {
 	return &Worker{pool: pool, client: client, feeds: feeds}
 }
 
-func (w *Worker) Timeout(*river.Job[FetchArgs]) time.Duration { return 2 * time.Minute }
+func (w *Worker) Timeout(*river.Job[FetchArgs]) time.Duration { return 5 * time.Minute }
 
 // Work keeps the closes of the securities some account holds or held; with none, it asks for nothing.
 // One exchange failing does not lose the other's closes, but the job fails so River retries it.

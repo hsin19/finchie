@@ -135,8 +135,8 @@ function describe(doc: Document | undefined, upload?: Entry): Row {
         return { tag: "uploading", stage: `uploading ${sent}%`, detail: "上傳中…", tone: "ink", hint: "", percent: sent };
     }
     const statement = statementOf.get(doc.id);
-    // A card bill has a page of its own; a deposit statement's lines are on its accounts' pages.
-    const deposit = doc.statementKind === "deposit";
+    // A card bill has a page of its own; a deposit or securities statement's lines are on its accounts' pages.
+    const deposit = doc.statementKind === "deposit" || doc.statementKind === "securities";
     const link = statement
         ? { href: resolve("/statements/[id]", { id: String(statement.id) }), text: `→ 查看帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}` }
         : deposit

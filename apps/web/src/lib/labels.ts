@@ -33,11 +33,13 @@ const institutions: Record<string, Institution> = {
     esun: { name: "玉山", code: "ESUN", color: "#c98500" },
 };
 
-// Banks Finchie reads deposit statements from only: no card bills, so never in a spending chart.
+// Institutions Finchie reads no card bills from, so never in a spending chart: banks it reads deposit
+// statements from, and brokers (ADR 0017).
 const depositOnly: Record<string, Institution> = {
     fubon: { name: "富邦", code: "TFB", color: "var(--color-mute)" },
     ctbc: { name: "中信", code: "CTBC", color: "var(--color-mute)" },
     nextbank: { name: "將來", code: "NEXT", color: "var(--color-mute)" },
+    skis: { name: "新光證券", code: "SKIS", color: "var(--color-mute)" },
 };
 
 /** Banks in chart order; a bank without a color comes after them. */
@@ -56,6 +58,7 @@ export function cardLabel(institutionId: string, last4?: string | null): string 
 export const accountKinds: Record<AccountKind, { short: string; label: string; }> = {
     deposit: { short: "deposit", label: "存款" },
     credit_card: { short: "card", label: "信用卡" },
+    securities: { short: "securities", label: "證券" },
 };
 
 /** The owner's name for an account, else the bank's ("臺幣活存"), else its kind's. */
@@ -63,10 +66,10 @@ export function accountName(account: Pick<Account, "kind" | "label" | "name">): 
     return account.name ?? account.label ?? accountKinds[account.kind].label;
 }
 
-/** Where a line is: "ESUN··3381" for a card, "ESUN 臺幣活存" for a deposit account. */
+/** Where a line is: "ESUN··3381" for a card, "ESUN 臺幣活存" for a deposit account, "SKIS 證券" for a brokerage. */
 export function lineAccount(t: Pick<Transaction, "institution" | "cardLast4" | "accountKind" | "accountName">): string {
-    if (t.accountKind !== "deposit") return cardLabel(t.institution, t.cardLast4);
-    return `${institution(t.institution).code} ${t.accountName ?? accountKinds.deposit.label}`;
+    if (t.accountKind === undefined || t.accountKind === "credit_card") return cardLabel(t.institution, t.cardLast4);
+    return `${institution(t.institution).code} ${t.accountName ?? accountKinds[t.accountKind].label}`;
 }
 
 interface Kind {
@@ -87,9 +90,12 @@ export const kinds: Record<TransactionKind, Kind> = {
     interest: { short: "interest", label: "利息", tone: "pos" },
     fee: { short: "fee", label: "手續費", tone: "neg" },
     other: { short: "other", label: "存提與轉帳", tone: "ink" },
+    // A trade, in shares (ADR 0017).
+    buy: { short: "buy", label: "買進", tone: "ink" },
+    sell: { short: "sell", label: "賣出", tone: "ink" },
 };
 
-export const kindOrder: TransactionKind[] = ["purchase", "foreign_transaction_fee", "annual_fee", "refund", "rebate", "payment", "interest", "fee", "other"];
+export const kindOrder: TransactionKind[] = ["purchase", "foreign_transaction_fee", "annual_fee", "refund", "rebate", "payment", "interest", "fee", "other", "buy", "sell"];
 
 interface Status {
     tag: string;

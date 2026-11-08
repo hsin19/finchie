@@ -123,7 +123,7 @@ func run() error {
 	parser := parserv1.NewParserServiceClient(conn)
 	river.AddWorker(workers, ingest.NewWorker(pool, parser, cfg.ParseTimeout))
 	river.AddWorker(workers, rates.NewWorker(pool, &http.Client{Timeout: 30 * time.Second}, rates.Feeds))
-	river.AddWorker(workers, quotes.NewWorker(pool, &http.Client{Timeout: time.Minute}, quotes.Feeds))
+	river.AddWorker(workers, quotes.NewWorker(pool, &http.Client{Timeout: 2 * time.Minute}, quotes.Feeds))
 	jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:       map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
 		Workers:      workers,

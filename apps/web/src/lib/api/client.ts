@@ -21,6 +21,7 @@ export type KindTotal = Schemas["KindTotal"];
 export type LineCounterpart = Schemas["LineCounterpart"];
 export type PreviewFile = Schemas["PreviewFile"];
 export type Statement = Schemas["Statement"];
+export type Trade = Schemas["Trade"];
 export type Transaction = Schemas["Transaction"];
 export type TransactionFamily = Schemas["TransactionFamily"];
 export type TransactionKind = Schemas["TransactionKind"];
