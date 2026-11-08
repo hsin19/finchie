@@ -179,7 +179,9 @@ export interface paths {
          * Every account, with its newest balance in each unit and where its balances do not join up
          * @description Accounts are discovered from what their sources report (ADR 0013). A deposit account's
          *     balances are checked for continuity: two consecutive ones join when the lines dated between
-         *     them account for the difference. A card bill's cannot be checked yet.
+         *     them account for the difference. A card bill's cannot be checked yet, nor a deposit account's
+         *     whose balance moved in a unit no statement has listed a line of, as when its statements print
+         *     only its balance.
          */
         get: operations["listAccounts"];
         put?: never;
@@ -441,7 +443,7 @@ export interface components {
         /** @enum {string} */
         AccountKind: "credit_card" | "deposit" | "securities";
         /**
-         * @description Whether its balances can be checked against its lines (card bills cannot yet)
+         * @description Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
          * @enum {string}
          */
         AccountContinuity: "checked" | "unknown";

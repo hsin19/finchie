@@ -16,7 +16,8 @@ func TestAccountGapsCountsAccountsWhoseBalancesDoNotJoin(t *testing.T) {
 	pool := testdb.Pool(t)
 	ctx := t.Context()
 	queries := dbq.New(pool)
-	// Two balances of one deposit account, with no line between them to explain the difference.
+	// Two balances of a deposit account and one line between them that explains only 100 of the 150 (an
+	// account no statement lists a line of is not checked, ADR 0013).
 	doc, err := queries.UpsertDocument(ctx, dbq.UpsertDocumentParams{Sha256: []byte("d"), Filename: "d.eml", ContentType: "message/rfc822", Content: []byte("x")})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +44,16 @@ func TestAccountGapsCountsAccountsWhoseBalancesDoNotJoin(t *testing.T) {
 		if err := queries.InsertBalance(ctx, dbq.InsertBalanceParams{AccountID: account, Unit: "TWD", AsOf: day(asOf), Amount: n, StatementID: statement}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	var hundred pgtype.Numeric
+	if err := hundred.Scan("100"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queries.InsertTransactions(ctx, []dbq.InsertTransactionsParams{{
+		StatementID: statement, AccountID: account, Unit: "TWD", TransactionDate: day("2026-09-10"),
+		Description: "轉入", Kind: "other", Amount: hundred,
+	}}); err != nil {
+		t.Fatal(err)
 	}
 
 	reader := sdkmetric.NewManualReader()

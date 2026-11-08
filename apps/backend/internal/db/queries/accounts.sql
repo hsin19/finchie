@@ -65,8 +65,14 @@ ORDER BY as_of DESC, unit, id DESC;
 -- difference the lines dated between them do not account for, so money moved that no report shows.
 -- Deposit and securities accounts (a security's shares, ADR 0017): a card bill's lines are dated by
 -- purchase, which can fall before the previous bill closed, so dates cannot place them between two bills.
+-- Itemized: some statement has listed a line of the account in the unit. A deposit account's unit none
+-- has may be one whose statements print only its balance (CTBC's passbook savings, 活儲有摺): a move
+-- there is one no source shows, not a gap. A securities statement lists every trade, so a security
+-- never traded is itemized all the same: a stock dividend is a gap.
 WITH ordered AS (
     SELECT b.account_id, b.unit, b.as_of, b.amount,
+           (a.kind = 'securities' OR EXISTS (
+               SELECT 1 FROM transactions t WHERE t.account_id = b.account_id AND t.unit = b.unit))::boolean AS itemized,
            lag(b.as_of) OVER w AS prev_as_of,
            lag(b.amount) OVER w AS prev_amount
     FROM balances b
@@ -76,7 +82,7 @@ WITH ordered AS (
     WINDOW w AS (PARTITION BY b.account_id, b.unit ORDER BY b.as_of, b.id)
 )
 SELECT o.account_id, o.unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
-       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen
+       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen, o.itemized
 FROM ordered o
 LEFT JOIN LATERAL (SELECT sum(t.amount) AS amount
                    FROM transactions t

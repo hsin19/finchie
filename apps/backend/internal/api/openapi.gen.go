@@ -158,7 +158,7 @@ type Account struct {
 	// Balances The newest balance in each unit
 	Balances []Balance `json:"balances"`
 
-	// Continuity Whether its balances can be checked against its lines (card bills cannot yet)
+	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
 
 	// FullNumber Its full number, where the owner gave one (ADR 0016)
@@ -187,7 +187,7 @@ type Account struct {
 	Worth *Decimal `json:"worth,omitempty"`
 }
 
-// AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet)
+// AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 type AccountContinuity string
 
 // AccountDetail defines model for AccountDetail.
@@ -195,7 +195,7 @@ type AccountDetail struct {
 	// Balances The newest balance in each unit
 	Balances []Balance `json:"balances"`
 
-	// Continuity Whether its balances can be checked against its lines (card bills cannot yet)
+	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
 
 	// FullNumber Its full number, where the owner gave one (ADR 0016)

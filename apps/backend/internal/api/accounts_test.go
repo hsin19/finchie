@@ -84,6 +84,45 @@ func TestAMonthSkippedWithoutActivityIsNoGap(t *testing.T) {
 	}
 }
 
+func TestAnAccountItsStatementsListOnlyTheBalanceOfIsNotChecked(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	line := func(month int32, amount string) *parserv1.DepositLine {
+		return &parserv1.DepositLine{
+			Date: &gdate.Date{Year: 2026, Month: month, Day: 1}, Description: "轉入",
+			Amount: &decimal.Decimal{Value: amount}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
+		}
+	}
+	// As CTBC's: a passbook savings account (活儲有摺) by its balance only, beside an account with lines
+	// and one no line has moved yet.
+	statement := func(month int32, passbook, current string, lines ...*parserv1.DepositLine) *parserv1.ParseDocumentResponse {
+		return &parserv1.ParseDocumentResponse{Parser: "ctbc.deposit", DepositStatement: &parserv1.DepositStatement{
+			Institution: "ctbc",
+			PeriodStart: &gdate.Date{Year: 2026, Month: month - 1, Day: 13},
+			PeriodEnd:   &gdate.Date{Year: 2026, Month: month, Day: 12},
+			Accounts: []*parserv1.DepositAccount{
+				{Number: "11111**2222*", Name: "活儲有摺", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: passbook}},
+				{Number: "33333**4444*", Name: "台幣數二", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: current}, Lines: lines},
+				{Number: "55555**6666*", Name: "外幣活期", Currency: "USD", ClosingBalance: &decimal.Decimal{Value: "12.34"}},
+			},
+		}}
+	}
+	store(t, pool, "june.eml", statement(6, "1000", "500", line(6, "500")))
+	// The passbook account earned 26 no statement lists; 100 came into the other one unseen too.
+	store(t, pool, "july.eml", statement(7, "1026", "800", line(7, "200")))
+
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	if passbook := accountNamed(t, accounts, "11111**2222*"); passbook.Continuity != Unknown || len(passbook.Gaps) != 0 {
+		t.Fatalf("passbook account = %+v, want unknown and no gap", passbook)
+	}
+	if current := accountNamed(t, accounts, "33333**4444*"); current.Continuity != Checked || len(current.Gaps) != 1 || current.Gaps[0].Unseen != "100" {
+		t.Fatalf("account with lines = %+v, want checked with a gap of 100", current)
+	}
+	// A balance that never moved joins up whether or not lines would have shown a move.
+	if quiet := accountNamed(t, accounts, "55555**6666*"); quiet.Continuity != Checked || len(quiet.Gaps) != 0 {
+		t.Fatalf("quiet account = %+v, want checked and no gap", quiet)
+	}
+}
+
 func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	storeDeposit(t, pool, 8, "1000", depositLine{day: 5, amount: "1000", after: "1000", description: "薪資"})

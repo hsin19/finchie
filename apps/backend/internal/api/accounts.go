@@ -41,12 +41,17 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], toLatestBalance(b))
 	}
 	gapsOf := map[int64][]BalanceGap{}
+	unshown := map[int64]bool{}
 	for _, g := range gaps {
+		if !g.Itemized {
+			unshown[g.AccountID] = true
+			continue
+		}
 		gapsOf[g.AccountID] = append(gapsOf[g.AccountID], toGap(g))
 	}
 	accounts := make(ListAccounts200JSONResponse, 0, len(rows))
 	for _, row := range rows {
-		accounts = append(accounts, toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID]))
+		accounts = append(accounts, toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID], unshown[row.ID]))
 	}
 	return accounts, nil
 }
@@ -84,7 +89,12 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		}
 	}
 	gaps := make([]BalanceGap, 0, len(gapRows))
+	unshown := false
 	for _, g := range gapRows {
+		if !g.Itemized {
+			unshown = true
+			continue
+		}
 		gaps = append(gaps, toGap(g))
 	}
 	var held *[]Position
@@ -96,7 +106,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		list := positions(trades, rows, gapRows, latest)
 		held = &list
 	}
-	account := toAccount(row, latest, gaps)
+	account := toAccount(row, latest, gaps, unshown)
 	return GetAccount200JSONResponse(AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
@@ -139,9 +149,12 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 	return lines, nil
 }
 
-func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap) Account {
+// toAccount takes the account's gaps, and whether its balance moved in a unit no statement has listed a
+// line of, as one whose statements print only its balance: nothing could show that move, so the account
+// cannot be checked (ADR 0013).
+func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, unshown bool) Account {
 	continuity := Unknown
-	if row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities {
+	if (row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities) && !unshown {
 		continuity = Checked
 	}
 	if row.Kind == ingest.KindSecurities {

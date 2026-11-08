@@ -28,6 +28,10 @@ func ObserveAccountGaps(pool *pgxpool.Pool, meter metric.Meter) error {
 		}
 		accounts := map[int64]bool{}
 		for _, gap := range gaps {
+			// A move in a unit no statement lists a line of is one nothing could show (ADR 0013).
+			if !gap.Itemized {
+				continue
+			}
 			accounts[gap.AccountID] = true
 		}
 		observer.ObserveInt64(gauge, int64(len(accounts)))

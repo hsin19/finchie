@@ -244,7 +244,9 @@ paths:
       description: |
         Accounts are discovered from what their sources report (ADR 0013). A deposit account's
         balances are checked for continuity: two consecutive ones join when the lines dated between
-        them account for the difference. A card bill's cannot be checked yet.
+        them account for the difference. A card bill's cannot be checked yet, nor a deposit account's
+        whose balance moved in a unit no statement has listed a line of, as when its statements print
+        only its balance.
       responses:
         "200":
           description: Accounts by institution
@@ -590,7 +592,7 @@ components:
     AccountContinuity:
       type: string
       enum: [checked, unknown]
-      description: Whether its balances can be checked against its lines (card bills cannot yet)
+      description: Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 
     Account:
       type: object
