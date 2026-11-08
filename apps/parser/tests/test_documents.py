@@ -1,40 +1,73 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from pdfs import blank_pdf, email_with
+from pdfs import OWNER, PNG, attached_forward, blank_pdf, email_with, gmail_forward, statement_email
 
-from finchie_parser.documents import extract_pdfs
-from finchie_parser.errors import InvalidDocumentError, UnsupportedDocumentError
+from finchie_parser.documents import read_mail
+from finchie_parser.errors import InvalidDocumentError
+
+TAIPEI = timezone(timedelta(hours=8))
+BANK = "範例銀行 <statements@bank.example>"
+SUBJECT = "範例銀行 2026年11月 信用卡電子帳單"
 
 
-def test_bare_pdf_is_its_own_attachment() -> None:
-    data = blank_pdf()
-    assert [(a.filename, a.data) for a in extract_pdfs("x.pdf", "application/pdf", data)] == [("x.pdf", data)]
+def test_an_email_has_the_banks_headers() -> None:
+    mail = read_mail(statement_email(blank_pdf()))
+    assert (mail.sender, mail.recipient, mail.subject) == (BANK, "someone@example.com", SUBJECT)
+    assert mail.sender_domain == "bank.example"
+    assert mail.date == datetime(2026, 11, 6, 9, 30, tzinfo=TAIPEI)
 
 
-def test_email_yields_pdf_attachments_including_octet_stream_and_encoded_names() -> None:
+def test_an_email_yields_pdf_attachments_including_octet_stream_and_encoded_names() -> None:
     pdf = blank_pdf()
     content = email_with(
         ("信用卡電子帳單消費明細_11510.pdf", "application/octet-stream", pdf),
         ("eBarCodeFullPay.html", "text/html", b"<html></html>"),
         ("slip.pdf", "application/pdf", pdf),
     )
-    names = [a.filename for a in extract_pdfs("statement.eml", "message/rfc822", content)]
-    assert names == ["信用卡電子帳單消費明細_11510.pdf", "slip.pdf"]
+    assert [a.filename for a in read_mail(content).pdfs()] == ["信用卡電子帳單消費明細_11510.pdf", "slip.pdf"]
 
 
-def test_email_without_pdfs_yields_nothing() -> None:
-    assert extract_pdfs("a.eml", "message/rfc822", email_with()) == []
+def test_an_email_without_pdfs_yields_nothing() -> None:
+    assert read_mail(email_with()).pdfs() == []
 
 
-def test_empty_document_is_invalid() -> None:
-    with pytest.raises(InvalidDocumentError):
-        extract_pdfs("a.pdf", "application/pdf", b"")
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [(b"", "empty"), (blank_pdf(), "bare PDF"), (PNG, "not an e-mail")],
+    ids=["empty", "bare-pdf", "other-bytes"],
+)
+def test_anything_but_an_email_is_invalid(content: bytes, message: str) -> None:
+    with pytest.raises(InvalidDocumentError, match=message):
+        read_mail(content)
 
 
-def test_pdf_content_type_with_other_bytes_is_invalid() -> None:
-    with pytest.raises(InvalidDocumentError):
-        extract_pdfs("a.pdf", "application/pdf", b"not a pdf")
+@pytest.mark.parametrize(
+    "options", [{}, {"english": True}, {"html_only": True}], ids=["zh-labels", "en-labels", "html-only"]
+)
+def test_a_gmail_forward_reads_as_the_banks_email_with_the_forwards_attachments(options: dict[str, bool]) -> None:
+    mail = read_mail(gmail_forward(statement_email(blank_pdf()), **options))
+    assert (mail.sender, mail.subject) == (BANK, SUBJECT)
+    assert mail.recipient == "<someone@example.com>"
+    assert mail.sender_domain == "bank.example"
+    # Written in the forwarder's time zone, which its own Date header carries.
+    assert mail.date == datetime(2026, 11, 6, 21, 30, tzinfo=TAIPEI)
+    assert [a.filename for a in mail.pdfs()] == ["帳單_11511.pdf"]
 
 
-def test_unknown_content_type_is_unsupported() -> None:
-    with pytest.raises(UnsupportedDocumentError):
-        extract_pdfs("a.png", "image/png", b"\x89PNG")
+def test_a_forward_of_a_forward_reads_as_the_innermost() -> None:
+    mail = read_mail(gmail_forward(gmail_forward(statement_email(blank_pdf()))))
+    assert (mail.sender, mail.subject) == (BANK, SUBJECT)
+
+
+def test_a_forward_as_an_attachment_is_the_attached_email() -> None:
+    mail = read_mail(attached_forward(statement_email(blank_pdf())))
+    assert (mail.sender, mail.subject) == (BANK, SUBJECT)
+    assert [a.filename for a in mail.pdfs()] == ["帳單_11511.pdf"]
+
+
+def test_a_body_that_only_mentions_forwarding_is_not_a_forward() -> None:
+    content = email_with(sender=OWNER, subject="Notes")
+    content = content.replace(b"See attachment.", b"---------- Forwarded message ---------\nno headers here")
+    mail = read_mail(content)
+    assert (mail.sender, mail.subject) == (OWNER, "Notes")

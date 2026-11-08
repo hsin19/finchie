@@ -32,6 +32,7 @@ Run from the repository root; `task --list` shows everything.
 
 ```sh
 task proto              # regenerate Go and Python code from proto/ (commit the output)
+task parser:generate    # regenerate the Gmail filter from the parsers' sender domains (commit it)
 task backend:generate   # regenerate sqlc and oapi-codegen output (commit it)
 task parser:test
 task parser:lint
@@ -56,9 +57,10 @@ docker compose up -d    # local Postgres for `task backend:run`
   | `apps/backend/internal/db/dbq/` | `internal/db/queries/*.sql`, migrations | `task backend:generate` |
   | `apps/backend/internal/api/openapi.gen.go` | `apps/backend/api/openapi.yaml` | `task backend:generate` |
   | `apps/web/src/lib/api/schema.d.ts` | `apps/backend/api/openapi.yaml` | `task web:generate` |
+  | `apps/backend/internal/mailfilter/gmail-filters.xml` | the parsers' sender domains | `task parser:generate` |
 
 - `buf breaking` guards the proto contract against incompatible changes once it exists on `main`: CI compares a push to `main` with the commit before it and a PR with `main`; locally `task proto:breaking AGAINST=<ref>` (default `main`).
-- Real-statement regression: put `.eml` / `.pdf` files in `.local/statements/`, PDF passwords in `.local/parser.env`, and run `task parser:test-real`. It asserts that every statement reconciles. These files never leave `.local/` (ADR 0006).
+- Real-statement regression: put statement e-mails (`.eml`, never bare PDFs: ADR 0014) in `.local/statements/`, the details the banks' password rules use (`PARSER_IDENTITY__*`) in `.local/parser.env`, and run `task parser:test-real`. It asserts that every statement reconciles. These files never leave `.local/` (ADR 0006).
 - Integration tests and local Compose need a Docker daemon. On Colima, testcontainers needs `DOCKER_HOST` or `docker context use colima`; the backend Taskfile sets the socket override it also needs.
 - Changed behavior needs a test. When fixing a bug, first make sure the new test fails without the fix.
 

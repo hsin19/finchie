@@ -26,6 +26,11 @@ tasks:
     cmds:
       - uv run pytest {{.CLI_ARGS}}
 
+  generate:
+    desc: Regenerate the Gmail filter from the parsers' sender domains (commit the output, ADR 0014)
+    cmds:
+      - uv run python -m finchie_parser.mail_filter ../backend/internal/mailfilter/gmail-filters.xml
+
   test-real:
     desc: Parse every statement in .local/statements and assert it reconciles (ADR 0006)
     env:

@@ -1,10 +1,17 @@
 """Test doubles. Fixture text is synthetic: invented merchants, amounts, and card numbers (ADR 0006)."""
 
+import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
 
 from PIL.Image import Image
 
-from finchie_parser.ocr import OcrLine
+from finchie_parser.model import Reconciliation, Statement
+from finchie_parser.ocr import Ocr, OcrLine
+from finchie_parser.parsers import Parsed, StatementParser
+from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, TextLine
 
 ROW_HEIGHT = 12.0
@@ -45,3 +52,37 @@ class FakeOcr:
 
 def baseline(line_number: int) -> float:
     return 40 + line_number * ROW_HEIGHT
+
+
+FAKE_STATEMENT = Statement(
+    institution="fake",
+    closing_date=date(2026, 4, 7),
+    due_date=date(2026, 4, 22),
+    currency="TWD",
+    total_due=Decimal(0),
+    transactions=[],
+    reconciliation=Reconciliation(Decimal(0), Decimal(0), "total"),
+)
+
+
+class FakeParser(StatementParser):
+    """Claims bank.example's statements; its password rule is whatever the test gives it."""
+
+    name = "fake.statement"
+    version = "7"
+    institution = "fake"
+    sender_domains = ("bank.example",)
+    subject_pattern = re.compile(r"statement|帳單", re.IGNORECASE)
+    filename_pattern = re.compile(r"^FAKE_\d+\.pdf$")
+    text_marker = "FAKE BANK"
+
+    def __init__(self, rule: Callable[[Identity], list[str]] = lambda _: ["secret"]) -> None:
+        self.rule = rule
+        self.parsed: list[str] = []
+
+    def passwords(self, identity: Identity) -> list[str]:
+        return self.rule(identity)
+
+    def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
+        self.parsed.append(document.filename)
+        return Parsed(FAKE_STATEMENT, ["a warning"])

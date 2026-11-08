@@ -6,7 +6,7 @@ from decimal import Decimal
 import grpc
 import pytest
 from grpc_health.v1 import health_pb2, health_pb2_grpc
-from pdfs import blank_pdf, statement_email
+from pdfs import PNG, blank_pdf, email_with, statement_email
 
 from finchie.parser.v1 import parser_pb2 as pb
 from finchie.parser.v1 import parser_pb2_grpc
@@ -38,17 +38,22 @@ def status_of(channel: grpc.Channel, content: bytes, content_type: str) -> grpc.
 
 
 def test_empty_document_is_invalid_argument(channel: grpc.Channel) -> None:
-    assert status_of(channel, b"", "application/pdf") is grpc.StatusCode.INVALID_ARGUMENT
+    assert status_of(channel, b"", "message/rfc822") is grpc.StatusCode.INVALID_ARGUMENT
 
 
-def test_unknown_content_is_unimplemented(channel: grpc.Channel) -> None:
-    assert status_of(channel, b"\x89PNG", "image/png") is grpc.StatusCode.UNIMPLEMENTED
+def test_anything_but_an_email_is_invalid_argument(channel: grpc.Channel) -> None:
+    assert status_of(channel, PNG, "image/png") is grpc.StatusCode.INVALID_ARGUMENT
+    assert status_of(channel, blank_pdf(), "application/pdf") is grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_an_email_no_parser_claims_is_unimplemented(channel: grpc.Channel) -> None:
+    assert status_of(channel, email_with(), "message/rfc822") is grpc.StatusCode.UNIMPLEMENTED
 
 
 def test_accepts_a_document_at_the_backend_upload_limit(channel: grpc.Channel) -> None:
     # BACKEND_MAX_UPLOAD_MB is 32: the file alone fills it, and the request carries more fields.
-    content = b"\x89PNG" + bytes(32 * 1024 * 1024 - 4)
-    assert status_of(channel, content, "image/png") is grpc.StatusCode.UNIMPLEMENTED
+    content = PNG + bytes(32 * 1024 * 1024 - len(PNG))
+    assert status_of(channel, content, "image/png") is grpc.StatusCode.INVALID_ARGUMENT
 
 
 def test_health_reports_serving(channel: grpc.Channel) -> None:
@@ -72,14 +77,15 @@ def test_health_and_previews_answer_while_the_backend_parses_two_documents(monke
     try:
         with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
             stub = parser_pb2_grpc.ParserServiceStub(channel)
-            request = pb.ParseDocumentRequest(document_id="d1", filename="doc", content_type="application/pdf")
+            request = pb.ParseDocumentRequest(document_id="d1", filename="doc", content_type="message/rfc822")
             parses = [stub.ParseDocument.future(request, timeout=10) for _ in range(2)]
             assert all(started.acquire(timeout=5) for _ in parses)
 
             health = health_pb2_grpc.HealthStub(channel).Check(health_pb2.HealthCheckRequest(), timeout=3)
+            content = email_with(("x.pdf", "application/pdf", blank_pdf()))
             preview = stub.OpenDocument(
                 pb.OpenDocumentRequest(
-                    document_id="d2", filename="x.pdf", content_type="application/pdf", content=blank_pdf()
+                    document_id="d2", filename="x.eml", content_type="message/rfc822", content=content
                 ),
                 timeout=3,
             )
@@ -116,7 +122,7 @@ def test_result_is_converted_to_proto(channel: grpc.Channel, monkeypatch: pytest
         server_module, "parse_document", lambda *_, **__: ParseResult("hsbc.credit_card", "1", statement, [])
     )
 
-    response = parse(channel, b"%PDF", "application/pdf")
+    response = parse(channel, email_with(), "message/rfc822")
 
     assert (response.parser, response.parser_version) == ("hsbc.credit_card", "1")
     assert response.statement.total_due.value == "95730"
@@ -130,8 +136,9 @@ def test_result_is_converted_to_proto(channel: grpc.Channel, monkeypatch: pytest
     assert not payment.HasField("original_amount")
 
 
-def test_open_document_returns_the_email_and_its_decrypted_attachments() -> None:
-    settings = Settings(ocr=False, workers=1, pdf_passwords={"bank": "secret"})
+def test_open_document_returns_the_email_and_its_attachments_decrypted_by_the_banks_rule() -> None:
+    # Synthetic details (ADR 0006); Cathay United's rule is the national ID with a capital letter.
+    settings = Settings(_env_file=None, ocr=False, workers=1, identity={"national_id": "a123456789"})
     server, port = server_module.build_server(settings, None, "127.0.0.1:0")
     server.start()
     try:
@@ -141,12 +148,16 @@ def test_open_document_returns_the_email_and_its_decrypted_attachments() -> None
                 document_id="d1",
                 filename="mail.eml",
                 content_type="message/rfc822",
-                content=statement_email(blank_pdf("secret")),
+                content=statement_email(
+                    blank_pdf("A123456789"),
+                    sender="國泰世華銀行 <service@pxbillrc01.cathaybk.com.tw>",
+                    subject="國泰世華銀行信用卡2026年11月電子帳單",
+                ),
             )
             response = stub.OpenDocument(request, timeout=10)
     finally:
         server.stop(grace=None)
-    assert response.email.subject == "範例銀行 2026年11月 信用卡電子帳單"
+    assert response.email.subject == "國泰世華銀行信用卡2026年11月電子帳單"
     assert response.email.date.ToDatetime(tzinfo=UTC) == datetime(2026, 11, 6, 1, 30, tzinfo=UTC)
     assert "data:image/png;base64," in response.email.html
     assert [(f.filename, f.content_type, f.locked, f.primary) for f in response.files] == [

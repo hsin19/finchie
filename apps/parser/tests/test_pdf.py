@@ -3,26 +3,38 @@ import time
 
 import pypdfium2
 import pytest
+from fakes import FakeParser
 from pdfs import blank_pdf, text_pdf
 from PIL import Image
 
 from finchie_parser.documents import Attachment
 from finchie_parser.errors import InvalidDocumentError, PasswordRequiredError
+from finchie_parser.passwords import Passwords
 from finchie_parser.pdf import PdfSet
 
 
-def one_pdf(data: bytes, passwords: list[str]) -> PdfSet:
-    return PdfSet([Attachment("a.pdf", data)], passwords)
+def one_pdf(data: bytes) -> PdfSet:
+    return PdfSet([Attachment("a.pdf", data)], Passwords())
+
+
+def parser(*rule: str) -> FakeParser:
+    return FakeParser(lambda _: list(rule))
 
 
 def test_unencrypted_pdf_opens_without_passwords() -> None:
-    with one_pdf(blank_pdf(), []) as pdfs:
-        assert pdfs.open(0).page_texts() == [""]
+    with one_pdf(blank_pdf()) as pdfs:
+        assert pdfs.open(0, parser()).page_texts() == [""]
+        assert pdfs.open(0, None).page_texts() == [""]
 
 
-def test_encrypted_pdf_opens_with_any_configured_password() -> None:
-    with one_pdf(blank_pdf("right"), ["wrong", "right"]) as pdfs:
-        assert len(pdfs.open(0).page_texts()) == 1
+def test_encrypted_pdf_opens_with_any_password_of_its_parser() -> None:
+    with one_pdf(blank_pdf("right")) as pdfs:
+        assert len(pdfs.open(0, parser("wrong", "right")).page_texts()) == 1
+
+
+def test_an_encrypted_pdf_no_parser_claims_stays_locked() -> None:
+    with one_pdf(blank_pdf("right")) as pdfs, pytest.raises(PasswordRequiredError):
+        pdfs.open(0, None)
 
 
 @pytest.mark.parametrize(
@@ -31,17 +43,17 @@ def test_encrypted_pdf_opens_with_any_configured_password() -> None:
     ids=["locked", "corrupt"],
 )
 def test_a_pdf_that_cannot_be_opened_says_why_every_time(data: bytes, error: type[Exception]) -> None:
-    with one_pdf(data, ["wrong"]) as pdfs:
+    with one_pdf(data) as pdfs:
         for _ in range(2):
             with pytest.raises(error):
-                pdfs.open(0)
+                pdfs.open(0, parser("wrong"))
             with pytest.raises(error):
-                pdfs.decrypted(0)
+                pdfs.decrypted(0, parser("wrong"))
 
 
 def test_page_texts_reads_every_page_or_the_first_few() -> None:
-    with one_pdf(text_pdf("first", "second", "third"), []) as pdfs:
-        document = pdfs.open(0)
+    with one_pdf(text_pdf("first", "second", "third")) as pdfs:
+        document = pdfs.open(0, None)
         assert document.page_texts(1) == ["first"]
         assert document.page_texts() == ["first", "second", "third"]
         assert document.page_texts(2) == ["first", "second"]
@@ -98,8 +110,8 @@ def test_pdfium_is_never_called_from_two_threads_at_once(monkeypatch: pytest.Mon
     start = threading.Barrier(4)
 
     def parse_one() -> None:
-        with one_pdf(blank_pdf(), []) as pdfs:
-            document = pdfs.open(0)
+        with one_pdf(blank_pdf()) as pdfs:
+            document = pdfs.open(0, None)
             start.wait()
             document.render(0, 1.0)
 

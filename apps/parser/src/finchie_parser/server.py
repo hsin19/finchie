@@ -44,13 +44,7 @@ class ParserService(parser_pb2_grpc.ParserServiceServicer):
     ) -> parser_pb2.ParseDocumentResponse:
         started = time.monotonic()
         try:
-            result = parse_document(
-                request.filename,
-                request.content_type,
-                request.content,
-                passwords=self._passwords,
-                ocr=self._ocr,
-            )
+            result = parse_document(request.content, passwords=self._passwords, ocr=self._ocr)
         except Exception as error:
             _reject(context, request.document_id, error)
             raise
@@ -70,7 +64,7 @@ class ParserService(parser_pb2_grpc.ParserServiceServicer):
         self, request: parser_pb2.OpenDocumentRequest, context: grpc.ServicerContext
     ) -> parser_pb2.OpenDocumentResponse:
         try:
-            opened = open_document(request.filename, request.content_type, request.content, passwords=self._passwords)
+            opened = open_document(request.content, passwords=self._passwords)
         except Exception as error:
             _reject(context, request.document_id, error)
             raise
@@ -113,12 +107,12 @@ def main() -> None:
     server, port = build_server(settings, ocr)
     server.start()
     log.info(
-        "listening on %s:%d (workers=%d, ocr=%s, passwords for: %s)",
+        "listening on %s:%d (workers=%d, ocr=%s, %r)",
         settings.host,
         port,
         settings.workers,
         settings.ocr,
-        ", ".join(sorted(settings.pdf_passwords)) or "none",
+        settings.passwords(),
     )
 
     def stop(signum: int, _frame: FrameType | None) -> None:

@@ -1,8 +1,8 @@
 """Regression against real statements kept outside the repository (ADR 0006).
 
-Set FINCHIE_REAL_STATEMENTS_DIR to a folder of .eml / .pdf files (conventionally
-`.local/statements/`) and PARSER_PDF_PASSWORDS__<INSTITUTION> for encrypted PDFs.
-Skipped when the folder is not set.
+Set FINCHIE_REAL_STATEMENTS_DIR to a folder of .eml files (conventionally `.local/statements/`) and
+PARSER_IDENTITY__* for the details the banks' password rules use (ADR 0014). Skipped when the folder is
+not set.
 """
 
 import os
@@ -16,7 +16,7 @@ from finchie_parser.pipeline import parse_document
 from finchie_parser.settings import Settings
 
 _DIR = os.environ.get("FINCHIE_REAL_STATEMENTS_DIR", "")
-_FILES = sorted(p for p in Path(_DIR).glob("*") if p.suffix.lower() in {".eml", ".pdf"}) if _DIR else []
+_FILES = sorted(Path(_DIR).glob("*.eml")) if _DIR else []
 _OCR = RapidOcr()
 
 pytestmark = pytest.mark.skipif(not _DIR, reason="FINCHIE_REAL_STATEMENTS_DIR is not set")
@@ -24,8 +24,7 @@ pytestmark = pytest.mark.skipif(not _DIR, reason="FINCHIE_REAL_STATEMENTS_DIR is
 
 @pytest.mark.parametrize("path", _FILES, ids=[p.name for p in _FILES])
 def test_real_statement_reconciles(path: Path) -> None:
-    content_type = "application/pdf" if path.suffix.lower() == ".pdf" else "message/rfc822"
-    result = parse_document(path.name, content_type, path.read_bytes(), passwords=Settings().passwords(), ocr=_OCR)
+    result = parse_document(path.read_bytes(), passwords=Settings().passwords(), ocr=_OCR)
     statement = result.statement
     reconciliation = statement.reconciliation
 

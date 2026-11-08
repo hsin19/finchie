@@ -1,5 +1,7 @@
 """Tiny generated PDFs: no real documents in the repository (ADR 0006)."""
 
+import email
+import email.policy
 import io
 from email.message import EmailMessage
 
@@ -34,12 +36,14 @@ def _save(pdf: pikepdf.Pdf, user_password: str | None) -> bytes:
     return buffer.getvalue()
 
 
-def email_with(*attachments: tuple[str, str, bytes]) -> bytes:
+def email_with(
+    *attachments: tuple[str, str, bytes], sender: str = "statements@bank.example", subject: str = "Your statement"
+) -> bytes:
     """attachments: (filename, content type, data)."""
     message = EmailMessage()
-    message["From"] = "statements@bank.example"
+    message["From"] = sender
     message["To"] = "someone@example.com"
-    message["Subject"] = "Your statement"
+    message["Subject"] = subject
     message.set_content("See attachment.")
     for filename, content_type, data in attachments:
         maintype, subtype = content_type.split("/")
@@ -47,11 +51,13 @@ def email_with(*attachments: tuple[str, str, bytes]) -> bytes:
     return message.as_bytes()
 
 
-def statement_email(pdf: bytes) -> bytes:
+def statement_email(
+    pdf: bytes, sender: str = "範例銀行 <statements@bank.example>", subject: str = "範例銀行 2026年11月 信用卡電子帳單"
+) -> bytes:
     message = EmailMessage()
-    message["From"] = "範例銀行 <statements@bank.example>"
+    message["From"] = sender
     message["To"] = "someone@example.com"
-    message["Subject"] = "範例銀行 2026年11月 信用卡電子帳單"
+    message["Subject"] = subject
     message["Date"] = "Fri, 06 Nov 2026 09:30:00 +0800"
     message.set_content("Plain version of the body.")
     message.add_alternative('<p>本期帳單</p><img src="cid:logo@bank.example">', subtype="html")
@@ -61,4 +67,60 @@ def statement_email(pdf: bytes) -> bytes:
     message.add_attachment(pdf, maintype="application", subtype="octet-stream", filename="帳單_11511.pdf")
     message.add_attachment(b"<html>slip</html>", maintype="text", subtype="html", filename="slip.html")
     message.add_attachment(b"signature", maintype="application", subtype="pkcs7-signature", filename="smime.p7s")
+    return message.as_bytes()
+
+
+OWNER = "Owner <owner@mail.example>"
+
+# Gmail's header block for an inline forward, labels as a Chinese-language Gmail writes them.
+_GMAIL_BLOCK_ZH = """---------- Forwarded message ---------
+寄件者： {sender}
+Date: 2026年11月6日週五 下午9:30
+Subject: {subject}
+To: <someone@example.com>
+"""
+_GMAIL_BLOCK_EN = """---------- Forwarded message ---------
+From: {sender}
+Date: Fri, Nov 6, 2026 at 9:30 PM
+Subject: {subject}
+To: <someone@example.com>
+"""
+
+
+def gmail_forward(original: bytes, *, english: bool = False, html_only: bool = False) -> bytes:
+    """As Gmail forwards by hand: the owner's headers, the original's in the body, its attachments copied."""
+    inner = email.message_from_bytes(original, policy=email.policy.default)
+    assert isinstance(inner, EmailMessage)
+    block = (_GMAIL_BLOCK_EN if english else _GMAIL_BLOCK_ZH).format(sender=inner["From"], subject=inner["Subject"])
+    message = EmailMessage()
+    message["From"] = OWNER
+    message["To"] = "finchie@mailbox.example"
+    message["Subject"] = f"Fwd: {inner['Subject']}"
+    message["Date"] = "Fri, 06 Nov 2026 21:31:00 +0800"
+    # Gmail quotes the original's body below the block, its own forwarded headers included.
+    plain = inner.get_body(("plain",))
+    quoted = plain.get_content() if plain is not None else ""
+    markup = '<div class="gmail_attr">' + block.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+    markup += f"</div><div>{quoted.replace(chr(10), '<br>')}</div>"
+    if html_only:
+        message.set_content(markup, subtype="html")
+    else:
+        message.set_content(f"\n\n{block}\n\n{quoted}")
+        message.add_alternative(markup, subtype="html")
+    for part in inner.iter_attachments():
+        data = part.get_payload(decode=True)
+        assert isinstance(data, bytes)
+        maintype, subtype = part.get_content_type().split("/")
+        message.add_attachment(data, maintype=maintype, subtype=subtype, filename=part.get_filename())
+    return message.as_bytes()
+
+
+def attached_forward(original: bytes) -> bytes:
+    """Forwarded as an attachment, as other mail clients can."""
+    inner = email.message_from_bytes(original, policy=email.policy.default)
+    message = EmailMessage()
+    message["From"] = OWNER
+    message["Subject"] = f"Fwd: {inner['Subject']}"
+    message.set_content("Forwarded.")
+    message.add_attachment(inner)
     return message.as_bytes()

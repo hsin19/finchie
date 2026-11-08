@@ -5,6 +5,7 @@ from finchie_parser.errors import LayoutError
 from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser, find, sum_new_charges
+from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import amount, clean, month_day, roc_date
 
@@ -35,8 +36,14 @@ class CathayParser(StatementParser):
     name = "cathay.credit_card"
     version = "4"
     institution = "cathay"
+    sender_domains = ("cathaybk.com.tw",)
+    subject_pattern = re.compile(r"信用卡.*電子帳單")
     filename_pattern = re.compile(r"^信用卡電子帳單消費明細_\d+\.pdf$")
     text_marker = "國泰世華"
+
+    def passwords(self, identity: Identity) -> list[str]:
+        # The e-mail: 電子帳單密碼 (您的身分證字號，英文字母大寫).
+        return [identity.require_national_id().upper()]
 
     def matches_text(self, document: Document) -> bool:
         # The bank's name sits in an image on page 1; the fine print on page 2 names it.

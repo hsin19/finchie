@@ -4,6 +4,7 @@ from decimal import Decimal
 from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser, find, sum_new_charges
+from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import amount, clean, month_day, roc_date
 
@@ -28,8 +29,17 @@ class EsunParser(StatementParser):
     name = "esun.credit_card"
     version = "1"
     institution = "esun"
+    # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
+    # comes from the same address.
+    sender_domains = ("esunbank.com",)
+    subject_pattern = re.compile(r"信用卡電子帳單")
     filename_pattern = re.compile(r"^ESUN_Estatement_\d+\.pdf$", re.IGNORECASE)
     text_marker = "玉山"
+
+    def passwords(self, identity: Identity) -> list[str]:
+        # Neither the e-mail nor the FAQ pages it links state a rule; it only says the password can be
+        # changed or turned off in online banking. The owner's statements open without one.
+        return []
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         texts = document.page_texts()
