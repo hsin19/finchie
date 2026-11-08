@@ -2,7 +2,7 @@
 
 ## Decision
 
-An account is a place where the owner keeps money or owes it: a deposit account, the bill of a bank's credit cards, and later a brokerage account, an exchange (InTheGreenYet), a points program. It exists in its own right. Sources tell Finchie what happens in it: statements are one, an exchange's API another, and more may come; none of them defines it. What an account is for, say that salary arrives in one and rent leaves from another, shows in how its money moves, not in how it is reported.
+An account is anything that holds a value for the owner, or a debt: a deposit account in NT$ or in foreign currencies, the bill of a bank's credit cards, and later a brokerage account, an exchange (InTheGreenYet), a card's points, an airline's miles, a hotel's points. It exists in its own right. Sources tell Finchie what happens in it: statements are one, an exchange's API another, and more may come; none of them defines it. What an account is for, say that salary arrives in one and rent leaves from another, shows in how its money moves, not in how it is reported.
 
 ### Discovered, never set up
 
@@ -13,14 +13,26 @@ There is no account setup. A source that reports an account Finchie has not seen
 | `credit_card` | Institution: one bill | Empty | Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
 | `deposit` | Account number | As the bank prints it, usually masked (`12345**6789*`). The parser normalizes it so one account reads the same every month | One account can hold several currencies; its balance is per currency |
 
+More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one.
+
 An account outlives every report of it: re-parsing or deleting a document never deletes one, so whatever is attached to an account stays.
 
 ### What sources report: lines and balances
 
-- **Lines.** `transactions` gains `account_id` and `currency`; a line keeps its statement as where it came from. Deposit lines also carry `balance`, the running balance where the bank prints one, and `memo`. Their kind is `interest` or `fee` when the bank's own wording says so, else `other`. Telling card payments and transfers between the owner's accounts apart is for the transfer links to come, derived from the lines like ADR 0009's.
-- **Balances.** `balances` holds what an account held in one currency at the end of a day, and which source said so: a statement's closing balance, its opening balance (as the end of the day before its period), an exchange's snapshot. A card bill's balance is −`total_due` on its closing date.
+- **Lines.** `transactions` gains `account_id`, `unit`, and `status`; a line keeps its statement as where it came from. Deposit lines also carry `balance`, the running balance where the bank prints one, and `memo`. Their kind is `interest` or `fee` when the bank's own wording says so, else `other`. Telling card payments and transfers between the owner's accounts apart is for the transfer links to come, derived from the lines like ADR 0009's.
+- **Balances.** `balances` holds what an account held in one unit at the end of a day, and which source said so: a statement's closing balance, its opening balance (as the end of the day before its period), an exchange's snapshot. A card bill's balance is −`total_due` on its closing date.
 
 Balances are seen from the owner's side: money held is positive, money owed negative. Deposit lines follow that (money in is positive). Card lines keep the sign card bills print, a purchase positive, which the bill's arithmetic and ADR 0009 rely on; anything that adds card and deposit lines together, such as cash flow, flips the card lines.
+
+### Units: money, and values that are not
+
+Every amount has a unit (ADR 0004 says a currency): the ISO 4217 code for money, or a program's own code for points and miles, one per program, since one bank's points and an airline's miles never add up. Columns that held a currency as `CHAR(3)` take a unit as `TEXT`. What a point is worth in NT$, for net worth, comes with the first points source.
+
+### Values that expire
+
+Points and miles lapse, by rules of three sorts: rolling (the whole balance stays valid while the account has activity within a period), fixed (each amount earned lapses a set time after it was earned, or on a set date), or never. An account carries its rule, set by the source that knows the program, never by the owner. Only `none` exists for now, and every account has it; rolling and fixed rules, with what they need (the period, the date), come with the first points source.
+
+A line's `status` is `active`, or `expired` when a value it brought lapsed, so expiry can be shown without changing or deleting the line as reported. Every line is `active` for now. A rule that spends the oldest points first may have to split a line partly spent before it lapsed; that too is for the first points source.
 
 ### Statements are one source
 
@@ -31,7 +43,7 @@ Balances are seen from the owner's side: money held is positive, money owed nega
 
 ### Continuity: a gap is reported only when money moved unseen
 
-Sources skip: a combined statement can be missing for a month without activity, and Shin Kong Securities sends a monthly statement only for months with trades. A missing report is therefore normal and never reported by itself. What is checked is that an account's balances join up: two consecutive balances of an account and currency join when the lines between them account for the difference. For statements that comes down to a statement's opening balance equalling the previous statement's closing balance, since a statement's own lines are its reconciliation. Other sources join the same way once they report movements (InTheGreenYet's ADR).
+Sources skip: a combined statement can be missing for a month without activity, and Shin Kong Securities sends a monthly statement only for months with trades. A missing report is therefore normal and never reported by itself. What is checked is that an account's balances join up: two consecutive balances of an account and unit join when the lines between them account for the difference. For statements that comes down to a statement's opening balance equalling the previous statement's closing balance, since a statement's own lines are its reconciliation. Other sources join the same way once they report movements (InTheGreenYet's ADR).
 
 | Result | Meaning | Shown |
 |---|---|---|
@@ -43,7 +55,7 @@ Like links (ADR 0009), continuity is derived, not kept by hand: reports arrive i
 
 ### Existing data
 
-A migration creates one `credit_card` account per institution that has statements, sets every line's account and its statement's currency, and records each bill's −`total_due` as its account's balance on its closing date.
+A migration creates one `credit_card` account per institution that has statements, sets every line's account, unit (its statement's currency), and status (`active`), and records each bill's −`total_due` as its account's balance on its closing date.
 
 ## Alternatives considered
 
@@ -56,7 +68,8 @@ A migration creates one `credit_card` account per institution that has statement
 
 ## Consequences
 
-- The web app gets an accounts page (latest balance per account and currency, flagged gaps), and search an account facet.
+- The web app gets an accounts page (latest balance per account and unit, flagged gaps), and search an account facet.
 - The statements' uniqueness key changes; existing statements become `credit_card`.
-- Net worth is the latest balance of every account and currency, whatever reported it; it needs exchange rates, which come with InTheGreenYet's ADR.
+- ADR 0004 gets a note: a points program's unit counts as an amount's currency.
+- Net worth is the latest balance of every account and unit, whatever reported it; it needs exchange rates, which come with InTheGreenYet's ADR, and for points their worth.
 - What an account is for can later be read from its lines instead of being told: a salary that arrives every month, rent that leaves every month. One that stops is the kind of thing worth a notification (`AGENTS.md`, no work for the owner).
