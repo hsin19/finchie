@@ -77,7 +77,7 @@ class FakeParser(StatementParser):
     version = "7"
     institution = "fake"
     sender_domains = ("bank.example",)
-    subject_pattern = re.compile(r"statement|帳單", re.IGNORECASE)
+    subject_terms = ("帳單",)
     filename_pattern = re.compile(r"^FAKE_\d+\.pdf$")
     text_marker = "FAKE BANK"
 

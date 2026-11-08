@@ -52,11 +52,11 @@ def test_a_subdomain_is_claimed_but_a_lookalike_domain_is_not() -> None:
 def test_the_subject_tells_two_kinds_of_statement_from_one_sender_apart() -> None:
     class CardParser(FakeParser):
         name = "fake.credit_card"
-        subject_pattern = re.compile("信用卡電子帳單")
+        subject_terms = ("信用卡電子帳單",)
 
     class DepositParser(FakeParser):
         name = "fake.deposit"
-        subject_pattern = re.compile("綜合對帳單")
+        subject_terms = ("綜合對帳單",)
 
     parsers: list[StatementParser] = [CardParser(), DepositParser()]
     content = email_with(pdf("FAKE_1.pdf", STATEMENT_PDF), subject="範例銀行2026年09月綜合對帳單")

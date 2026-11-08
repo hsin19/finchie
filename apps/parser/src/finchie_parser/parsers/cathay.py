@@ -37,7 +37,7 @@ class CathayParser(StatementParser):
     version = "4"
     institution = "cathay"
     sender_domains = ("cathaybk.com.tw",)
-    subject_pattern = re.compile(r"信用卡.*電子帳單")
+    subject_terms = ("信用卡", "電子帳單")
     filename_pattern = re.compile(r"^信用卡電子帳單消費明細_\d+\.pdf$")
     text_marker = "國泰世華"
 

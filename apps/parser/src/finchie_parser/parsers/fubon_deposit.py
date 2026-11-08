@@ -48,7 +48,7 @@ class FubonDepositParser(StatementParser):
     institution = "fubon"
     # 台北富邦銀行2026年10月 銀行對帳單
     sender_domains = ("taipeifubon.com.tw",)
-    subject_pattern = re.compile(r"銀行對帳單")
+    subject_terms = ("銀行對帳單",)
     filename_pattern = re.compile(r"^銀行對帳單\.pdf$", re.IGNORECASE)
     text_marker = "對帳單期間"
 

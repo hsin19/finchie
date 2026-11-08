@@ -31,7 +31,7 @@ class EsunDepositParser(StatementParser):
     institution = "esun"
     # 玉山銀行2026年09月綜合對帳單; the card bill comes from the same address.
     sender_domains = ("esunbank.com",)
-    subject_pattern = re.compile(r"綜合對帳單")
+    subject_terms = ("綜合對帳單",)
     filename_pattern = re.compile(r"^玉山銀行綜合對帳單\.pdf$")
     text_marker = "對帳單期間"
 

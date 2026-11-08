@@ -33,7 +33,7 @@ class TaishinParser(StatementParser):
     # 台新信用卡電子帳單 2026年10月; the combined (deposit) statement, 台新銀行綜合對帳單 2026年9月份,
     # comes from the same address.
     sender_domains = ("taishinbank.com.tw",)
-    subject_pattern = re.compile(r"信用卡電子帳單")
+    subject_terms = ("信用卡電子帳單",)
     filename_pattern = re.compile(r"^TSB_Creditcard_Estatement_\d+\.pdf$", re.IGNORECASE)
     text_marker = "台新"
 

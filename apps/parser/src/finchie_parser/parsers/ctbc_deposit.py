@@ -53,7 +53,7 @@ class CtbcDepositParser(StatementParser):
     institution = "ctbc"
     # 中國信託銀行電子對帳單 11510, from ebill@estats.ctbcbank.com.
     sender_domains = ("ctbcbank.com",)
-    subject_pattern = re.compile(r"電子對帳單")
+    subject_terms = ("電子對帳單",)
     filename_pattern = re.compile(r"^CTBC_Bank_Estatement_\d+\.pdf$", re.IGNORECASE)
     # The only words of page 1 the text layer can spell: the bank's address.
     text_marker = "ctbcbank.com"

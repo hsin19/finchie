@@ -60,7 +60,7 @@ class NextBankDepositParser(StatementParser):
     # 【將來銀行通知】2026年9月綜合對帳單, from no_reply@eblsdr.nextbank.com.tw (the e-mail asks to trust
     # eStatement@nextbank.com.tw).
     sender_domains = ("nextbank.com.tw",)
-    subject_pattern = re.compile(r"綜合對帳單")
+    subject_terms = ("綜合對帳單",)
     filename_pattern = re.compile(r"^(NEXTBANK_)?綜合對帳單_\d{4}_\d{1,2}\.pdf$")
     text_marker = "帳單期間"
 

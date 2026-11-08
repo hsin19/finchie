@@ -21,7 +21,7 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 | `GET` | `/api/accounts/{id}` | One account, plus `history`, every balance its statements reported |
 | `PATCH` | `/api/accounts/{id}` | The owner's details (ADR 0016): `name`, and `fullNumber`, which must fit the masked number digit for digit. A field left out stays, an empty one clears it; links are worked out again after. `204` |
 | `GET` | `/api/accounts/{id}/lines` | Its lines, newest first, `?limit=` up to 500 and `offset`, each linked line with its `counterpart`: the other account, or the card bill it paid (ADR 0016). Amounts as the source reports them: money in is positive on a deposit account, a purchase on a card bill |
-| `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' sender domains (ADR 0014). `404` while that is not set |
+| `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' claims (ADR 0014). `404` while that is not set |
 | `GET` | `/api/statements` | Card bills, newest closing date first, with each statement's transaction count and `paidOn`, once a deposit account or a later bill shows it paid (ADR 0016). Deposit statements are stored but get views of their own later (ADR 0013); this and the two endpoints after it show card bills and their lines only |
 | `GET` | `/api/statements/{id}` | One statement |
 | `GET` | `/api/statements/{id}/transactions` | In statement order |

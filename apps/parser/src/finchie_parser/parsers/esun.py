@@ -32,7 +32,7 @@ class EsunParser(StatementParser):
     # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
     # comes from the same address.
     sender_domains = ("esunbank.com",)
-    subject_pattern = re.compile(r"信用卡電子帳單")
+    subject_terms = ("信用卡電子帳單",)
     filename_pattern = re.compile(r"^ESUN_Estatement_\d+\.pdf$", re.IGNORECASE)
     text_marker = "玉山"
 

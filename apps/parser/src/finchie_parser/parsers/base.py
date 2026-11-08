@@ -29,9 +29,10 @@ class StatementParser(ABC):
     # Bump when the output for the same input can change, so the backend knows what to re-parse.
     version: ClassVar[str]
     institution: ClassVar[str]
-    # The e-mails it claims: from one of these domains or a subdomain of one, with a subject that matches.
+    # The e-mails it claims: from one of these domains or a subdomain of one, with every one of these
+    # terms in the subject. Terms, not a pattern: the Gmail filter searches for the same ones (ADR 0014).
     sender_domains: ClassVar[tuple[str, ...]]
-    subject_pattern: ClassVar[re.Pattern[str]]
+    subject_terms: ClassVar[tuple[str, ...]]
     # Its statement among the e-mail's attachments, tried before the others.
     filename_pattern: ClassVar[re.Pattern[str]]
     # Text that only this bank's statements contain on the first page.
@@ -40,7 +41,9 @@ class StatementParser(ABC):
     def claims(self, mail: Mail) -> bool:
         domain = mail.sender_domain
         from_bank = any(domain == d or domain.endswith(f".{d}") for d in self.sender_domains)
-        return from_bank and bool(self.subject_pattern.search(mail.subject))
+        # Case aside, as Gmail searches.
+        subject = mail.subject.casefold()
+        return from_bank and all(term.casefold() in subject for term in self.subject_terms)
 
     def matches_filename(self, filename: str) -> bool:
         return bool(self.filename_pattern.search(filename))

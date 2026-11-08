@@ -55,7 +55,7 @@ class TaishinDepositParser(StatementParser):
     institution = "taishin"
     # 台新銀行綜合對帳單 2026年9月份; the card bill comes from the same address.
     sender_domains = ("taishinbank.com.tw",)
-    subject_pattern = re.compile(r"綜合對帳單")
+    subject_terms = ("綜合對帳單",)
     filename_pattern = re.compile(r"^電子對帳單\.pdf$")
     text_marker = "資料期間"
 

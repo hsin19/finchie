@@ -47,7 +47,7 @@ Which e-mails reach Finchie is decided by the Gmail filter that forwards them (A
 
 | Filter part | Value |
 |---|---|
-| Matches | From any domain a parser claims, with an attachment. Coarse on purpose: the parser's claim is the precise test |
+| Matches | From any domain a parser claims, with an attachment. Coarse on purpose: the parser's claim is the precise test (corrected: the banks send sign-in alerts, card applications, and campaigns from the same domains, with images attached, and a domain forwarded them all. The filter now searches for each claim, a parser's domains together with its subject terms, the same test the parser makes) |
 | Label | `Finchie`, so that "apply to matching conversations" also labels the statements already in Gmail, and a Takeout export of that label backfills them |
 | Forwards to | A placeholder in the repository; the download puts in the deployment's mailbox address (`BACKEND_MAILBOX_ADDRESS`), which is not published (ADR 0010) |
 
@@ -65,7 +65,7 @@ It is a filter of its own, next to whatever filters the owner keeps for themselv
 
 ## Consequences
 
-- `StatementParser` gains sender and subject patterns and a password rule; `filename_pattern` stays, now only choosing among an e-mail's attachments. Unwrapping goes where e-mails are read (`documents.py`), used by both parsing and previews.
+- `StatementParser` gains sender and subject patterns (subject terms, which Gmail can search for) and a password rule; `filename_pattern` stays, now only choosing among an e-mail's attachments. Unwrapping goes where e-mails are read (`documents.py`), used by both parsing and previews.
 - Previews open PDFs with the passwords of the parser that claims the e-mail. A PDF in an e-mail nothing claims is shown as received, marked locked.
 - Deployments set `PARSER_IDENTITY__NATIONAL_ID`. A `PARSER_PDF_PASSWORDS__<INSTITUTION>` that only held the national ID can go; one that holds a password the owner chose stays, now used for its bank only.
 - The real-statement test (ADR 0006) takes `.eml` files only. The bare PDFs kept for it need their e-mails, fetched once from Gmail like the deployment's.

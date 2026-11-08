@@ -37,7 +37,7 @@ def _save(pdf: pikepdf.Pdf, user_password: str | None) -> bytes:
 
 
 def email_with(
-    *attachments: tuple[str, str, bytes], sender: str = "statements@bank.example", subject: str = "Your statement"
+    *attachments: tuple[str, str, bytes], sender: str = "statements@bank.example", subject: str = "範例銀行 電子帳單"
 ) -> bytes:
     """attachments: (filename, content type, data)."""
     message = EmailMessage()

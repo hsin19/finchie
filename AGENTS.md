@@ -32,7 +32,7 @@ Run from the repository root; `task --list` shows everything.
 
 ```sh
 task proto              # regenerate Go and Python code from proto/ (commit the output)
-task parser:generate    # regenerate the Gmail filter from the parsers' sender domains (commit it)
+task parser:generate    # regenerate the Gmail filter from the parsers' claims (commit it)
 task backend:generate   # regenerate sqlc and oapi-codegen output (commit it)
 task parser:test
 task parser:lint
@@ -57,7 +57,7 @@ docker compose up -d    # local Postgres for `task backend:run`
   | `apps/backend/internal/db/dbq/` | `internal/db/queries/*.sql`, migrations | `task backend:generate` |
   | `apps/backend/internal/api/openapi.gen.go` | `apps/backend/api/openapi.yaml` | `task backend:generate` |
   | `apps/web/src/lib/api/schema.d.ts` | `apps/backend/api/openapi.yaml` | `task web:generate` |
-  | `apps/backend/internal/mailfilter/gmail-filters.xml` | the parsers' sender domains | `task parser:generate` |
+  | `apps/backend/internal/mailfilter/gmail-filters.xml` | the parsers' claims (sender domains, subject terms) | `task parser:generate` |
 
 - `buf breaking` guards the proto contract against incompatible changes once it exists on `main`: CI compares a push to `main` with the commit before it and a PR with `main`; locally `task proto:breaking AGAINST=<ref>` (default `main`).
 - Real-statement regression: put statement e-mails (`.eml`, never bare PDFs: ADR 0014) in `.local/statements/`, the details the banks' password rules use (`PARSER_IDENTITY__*`) in `.local/parser.env`, and run `task parser:test-real`. It asserts that every statement reconciles. These files never leave `.local/` (ADR 0006).

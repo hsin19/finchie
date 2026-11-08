@@ -6,7 +6,7 @@ import pytest
 from pdfs import email_with
 
 from finchie_parser.documents import read_mail
-from finchie_parser.mail_filter import LABEL, MAILBOX_PLACEHOLDER, gmail_filter
+from finchie_parser.mail_filter import LABEL, MAILBOX_PLACEHOLDER, gmail_filter, gmail_query
 from finchie_parser.parsers import PARSERS, StatementParser
 from finchie_parser.passwords import Identity, MissingDetailError
 from finchie_parser.pipeline import claimants
@@ -28,6 +28,10 @@ IDENTITY = Identity(national_id="a123456789", birth_date=date(2000, 1, 2))
         ("no_reply@eblsdr.nextbank.com.tw", "【將來銀行通知】2026年9月綜合對帳單", "nextbank.deposit"),
         ("ebill@estats.ctbcbank.com", "中國信託銀行電子對帳單 11510", "ctbc.deposit"),
         ("estatement@esunbank.com.example", "玉山銀行2026年09月信用卡電子帳單", None),
+        # The banks' notices, from the same domains.
+        ("webmaster@taishinbank.com.tw", "台新網路銀行/行動銀行登入成功通知", None),
+        ("CCAPP@taishinbank.com.tw", "「Richart Life」活動參與通知", None),
+        ("cards@hsbc.com.tw", "滙豐_信用卡完成申請<送件審理中>", None),
         ("statements@bank.example", "範例銀行 2026年11月 信用卡電子帳單", None),
     ],
 )
@@ -64,10 +68,18 @@ def test_a_rule_without_its_detail_names_the_variable() -> None:
     assert error.value.variable == "PARSER_IDENTITY__BIRTH_DATE"
 
 
-def test_the_gmail_filter_forwards_every_claimed_domain_to_the_placeholder() -> None:
+def test_the_gmail_filter_forwards_every_claim_to_the_placeholder() -> None:
     xml = gmail_filter()
-    for parser in PARSERS:
-        for domain in parser.sender_domains:
-            assert domain in xml
     assert f'value="{MAILBOX_PLACEHOLDER}"' in xml
     assert f'value="{LABEL}"' in xml
+    query = gmail_query()
+    for parser in PARSERS:
+        terms = " ".join(f'"{term}"' for term in parser.subject_terms)
+        assert f"(from:({' OR '.join(sorted(parser.sender_domains))}) subject:({terms}))" in query
+
+
+def test_the_gmail_filter_searches_a_claims_domain_with_its_subject_terms_together() -> None:
+    assert (
+        gmail_query(PARSERS[:2])
+        == '(from:(esunbank.com) subject:("信用卡電子帳單")) OR (from:(esunbank.com) subject:("綜合對帳單"))'
+    )

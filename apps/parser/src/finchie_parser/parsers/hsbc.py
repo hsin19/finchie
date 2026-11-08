@@ -52,7 +52,7 @@ class HsbcParser(StatementParser):
     institution = "hsbc"
     # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
     sender_domains = ("hsbc.com.tw",)
-    subject_pattern = re.compile(r"信用卡帳單")
+    subject_terms = ("信用卡帳單",)
     filename_pattern = re.compile(r"^eStatement_\d{6}\.pdf$", re.IGNORECASE)
     text_marker = "HSBC"
 

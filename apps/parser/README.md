@@ -5,7 +5,7 @@ Stateless gRPC service that turns a statement e-mail into structured data: a car
 ## How a document is parsed
 
 1. **Read the bank's e-mail** (`documents.py`). One the owner forwarded by hand is unwrapped first: the message attached to it, or the header block of Gmail's inline forward (`---------- Forwarded message ---------`, labels in English or Chinese), innermost first. The parsers then see the bank's sender, subject, and date.
-2. **Claim it** (`claimants` in `pipeline.py`). Each parser declares the sender domains (a subdomain counts) and the subject of its e-mail; the subject also tells a bank's card bill from its deposit statement. An e-mail nobody claims is unsupported and never opened.
+2. **Claim it** (`claimants` in `pipeline.py`). Each parser declares the sender domains (a subdomain counts) and the terms its e-mail's subject carries, all of them, case aside; the subject also tells a bank's card bill from its deposit statement. Terms, not a pattern: the Gmail filter searches for the same claims. An e-mail nobody claims is unsupported and never opened.
 3. **Pick the statement** (`select_statement`). The claiming parser opens the PDFs with its own passwords only (`pdf.py`, `passwords.py`): none, then one the owner chose (`PARSER_PDF_PASSWORDS__<INSTITUTION>`), then the bank's rule built from the owner's details. It takes the PDF whose name it knows (`TSB_Creditcard_Estatement_*.pdf`) and whose first page names its bank, so payment slips are ignored; a known name that none of its passwords opens fails the document for its password; otherwise any other PDF whose first page names the bank. A rule whose detail is not set fails naming the variable to set.
 4. **Parse** (`parsers/<bank>.py`). Read the statement fields and every line, classify each line (purchase, foreign transaction fee, annual fee, refund, rebate, payment), and add up the new charges to compare with the amount the statement prints.
 
@@ -21,7 +21,7 @@ Stateless gRPC service that turns a statement e-mail into structured data: a car
 | `cathay.credit_card` | National ID | Due date taken from the auto-debit notice, which already accounts for holidays. Payments are checked against 繳款小計; a mismatch is a warning, since payments are not part of the reconciled new charges |
 | `hsbc.credit_card` | National ID | Labels and descriptions are images. Rows come from the text layer, descriptions from OCR of the description column, matched by baseline. The new-charges subtotal and total due are the 4th and 5th unlabelled amounts on the transaction pages. Rows without a country or currency are classified by words in their description (年費, 回饋/折抵, 國外交易手續費; interest and other charges count as purchases, as at the other banks); without one, a payment in the payments section and a foreign transaction fee among the new charges |
 
-Adding a kind of statement: subclass `StatementParser` with its sender domains, subject, and password rule (quote where the bank's e-mail states it), register it in `parsers/__init__.py`, write a synthetic fixture test and a case in `test_claims.py`, run `task parser:generate` for the Gmail filter, and run `task parser:test-real` against real e-mails.
+Adding a kind of statement: subclass `StatementParser` with its sender domains, subject terms, and password rule (quote where the bank's e-mail states it), register it in `parsers/__init__.py`, write a synthetic fixture test and a case in `test_claims.py`, run `task parser:generate` for the Gmail filter, and run `task parser:test-real` against real e-mails.
 
 ## Errors
 
@@ -57,7 +57,7 @@ task parser:test        # synthetic fixtures
 task parser:test-real   # every .eml in .local/statements must reconcile
 task parser:lint
 task parser:run         # gRPC on :50051, with health checking and reflection
-task parser:generate    # the Gmail filter, from the parsers' sender domains
+task parser:generate    # the Gmail filter, from the parsers' claims
 ```
 
 Code under `src/finchie/` is generated from `proto/` (`task proto`); don't edit it. `task parser:generate` writes the Gmail filter to [`../backend/internal/mailfilter/gmail-filters.xml`](../backend/internal/mailfilter/gmail-filters.xml), which the backend serves (ADR 0014); commit it with the parser change.
