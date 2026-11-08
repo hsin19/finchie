@@ -237,6 +237,62 @@ paths:
         "503":
           $ref: "#/components/responses/Problem"
 
+  /api/accounts:
+    get:
+      operationId: listAccounts
+      summary: Every account, with its newest balance in each unit and where its balances do not join up
+      description: |
+        Accounts are discovered from what their sources report (ADR 0013). A deposit account's
+        balances are checked for continuity: two consecutive ones join when the lines dated between
+        them account for the difference. A card bill's cannot be checked yet.
+      responses:
+        "200":
+          description: Accounts by institution
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Account" }
+
+  /api/accounts/{id}:
+    get:
+      operationId: getAccount
+      summary: One account with every balance its sources reported
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDetail" }
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /api/accounts/{id}/lines:
+    get:
+      operationId: listAccountLines
+      summary: An account's lines, newest first
+      description: |
+        Amounts as the source reports them: on a deposit account money in is positive, on a card bill
+        a purchase is.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/Limit"
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Lines
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AccountLine" }
+        "404":
+          $ref: "#/components/responses/Problem"
+
   /api/mail-filters.xml:
     get:
       operationId: getMailFilters
@@ -468,7 +524,7 @@ components:
         filename: { type: string }
         contentType: { type: string, description: '"application/pdf" when the bytes are a PDF, else as the e-mail declares it' }
         sizeBytes: { type: integer }
-        locked: { type: boolean, description: A PDF none of the parser's passwords opens, served as received }
+        locked: { type: boolean, description: "A PDF none of the parser's passwords opens, served as received" }
         primary: { type: boolean, description: The one file /preview/pdf serves }
 
     Statement:
@@ -484,6 +540,79 @@ components:
         totalDue: { $ref: "#/components/schemas/Decimal" }
         reconciliation: { $ref: "#/components/schemas/Reconciliation" }
         transactionCount: { type: integer }
+
+    AccountKind:
+      type: string
+      enum: [credit_card, deposit]
+
+    AccountContinuity:
+      type: string
+      enum: [checked, unknown]
+      description: Whether its balances can be checked against its lines (card bills cannot yet)
+
+    Account:
+      type: object
+      required: [id, institution, kind, number, balances, continuity, gaps]
+      properties:
+        id: { type: integer, format: int64 }
+        institution: { type: string, example: esun }
+        kind: { $ref: "#/components/schemas/AccountKind" }
+        number: { type: string, description: "As printed, usually masked; empty for a card bill", example: "1234567***890" }
+        label: { type: string, nullable: true, description: The source's name for it, example: 臺幣活存 }
+        name: { type: string, nullable: true, description: The owner's name for it }
+        balances:
+          type: array
+          description: The newest balance in each unit
+          items: { $ref: "#/components/schemas/Balance" }
+        continuity: { $ref: "#/components/schemas/AccountContinuity" }
+        gaps:
+          type: array
+          items: { $ref: "#/components/schemas/BalanceGap" }
+
+    AccountDetail:
+      allOf:
+        - $ref: "#/components/schemas/Account"
+        - type: object
+          required: [history]
+          properties:
+            history:
+              type: array
+              description: Every balance, newest first
+              items: { $ref: "#/components/schemas/Balance" }
+
+    Balance:
+      type: object
+      required: [unit, asOf, amount, statementId]
+      properties:
+        unit: { type: string, description: "ISO 4217, or a points program's code", example: TWD }
+        asOf: { type: string, format: date, description: The end of the day it was held }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        statementId: { type: integer, format: int64, description: The statement that reported it }
+
+    BalanceGap:
+      type: object
+      description: Two consecutive balances in one unit that the lines between them do not join
+      required: [unit, from, to, unseen]
+      properties:
+        unit: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        unseen: { $ref: "#/components/schemas/Decimal", description: Money that moved between them that no line shows }
+
+    AccountLine:
+      type: object
+      required: [id, statementId, date, description, kind, unit, amount]
+      properties:
+        id: { type: integer, format: int64 }
+        statementId: { type: integer, format: int64 }
+        date: { type: string, format: date }
+        description: { type: string }
+        memo: { type: string, nullable: true }
+        counterparty: { type: string, nullable: true }
+        kind: { type: string, description: "A card line's kind, or interest, fee, or other on a deposit account" }
+        unit: { type: string }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        balance: { allOf: [{ $ref: "#/components/schemas/Decimal" }], nullable: true, description: "The running balance, when printed" }
 
     Reconciliation:
       type: object

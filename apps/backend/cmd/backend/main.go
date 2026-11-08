@@ -98,6 +98,9 @@ func run() error {
 	if err := telemetry.ObserveDocuments(pool, otel.Meter(telemetry.Scope)); err != nil {
 		return err
 	}
+	if err := telemetry.ObserveAccountGaps(pool, otel.Meter(telemetry.Scope)); err != nil {
+		return err
+	}
 
 	// The parser is internal and stateless (ADR 0002): plaintext on the private network. A request
 	// carries a whole document; an opened one comes back no larger (ADR 0012).

@@ -7,6 +7,12 @@ import type {
 
 // Generated from apps/backend/api/openapi.yaml by `task web:generate`.
 type Schemas = components["schemas"];
+export type Account = Schemas["Account"];
+export type AccountDetail = Schemas["AccountDetail"];
+export type AccountKind = Schemas["AccountKind"];
+export type AccountLine = Schemas["AccountLine"];
+export type Balance = Schemas["Balance"];
+export type BalanceGap = Schemas["BalanceGap"];
 export type CardTotal = Schemas["CardTotal"];
 export type Document = Schemas["Document"];
 export type DocumentPreview = Schemas["DocumentPreview"];

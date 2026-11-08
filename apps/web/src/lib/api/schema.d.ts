@@ -168,6 +168,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every account, with its newest balance in each unit and where its balances do not join up
+         * @description Accounts are discovered from what their sources report (ADR 0013). A deposit account's
+         *     balances are checked for continuity: two consecutive ones join when the lines dated between
+         *     them account for the difference. A card bill's cannot be checked yet.
+         */
+        get: operations["listAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One account with every balance its sources reported */
+        get: operations["getAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's lines, newest first
+         * @description Amounts as the source reports them: on a deposit account money in is positive, on a card bill
+         *     a purchase is.
+         */
+        get: operations["listAccountLines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mail-filters.xml": {
         parameters: {
             query?: never;
@@ -336,7 +396,7 @@ export interface components {
             /** @description "application/pdf" when the bytes are a PDF, else as the e-mail declares it */
             contentType: string;
             sizeBytes: number;
-            /** @description A PDF none of the parser's passwords opens */
+            /** @description A PDF none of the parser's passwords opens, served as received */
             locked: boolean;
             /** @description The one file /preview/pdf serves */
             primary: boolean;
@@ -357,6 +417,85 @@ export interface components {
             totalDue: components["schemas"]["Decimal"];
             reconciliation: components["schemas"]["Reconciliation"];
             transactionCount: number;
+        };
+        /** @enum {string} */
+        AccountKind: "credit_card" | "deposit";
+        /**
+         * @description Whether its balances can be checked against its lines (card bills cannot yet)
+         * @enum {string}
+         */
+        AccountContinuity: "checked" | "unknown";
+        Account: {
+            /** Format: int64 */
+            id: number;
+            /** @example esun */
+            institution: string;
+            kind: components["schemas"]["AccountKind"];
+            /**
+             * @description As printed, usually masked; empty for a card bill
+             * @example 1234567***890
+             */
+            number: string;
+            /**
+             * @description The source's name for it
+             * @example 臺幣活存
+             */
+            label?: string | null;
+            /** @description The owner's name for it */
+            name?: string | null;
+            /** @description The newest balance in each unit */
+            balances: components["schemas"]["Balance"][];
+            continuity: components["schemas"]["AccountContinuity"];
+            gaps: components["schemas"]["BalanceGap"][];
+        };
+        AccountDetail: components["schemas"]["Account"] & {
+            /** @description Every balance, newest first */
+            history: components["schemas"]["Balance"][];
+        };
+        Balance: {
+            /**
+             * @description ISO 4217, or a points program's code
+             * @example TWD
+             */
+            unit: string;
+            /**
+             * Format: date
+             * @description The end of the day it was held
+             */
+            asOf: string;
+            amount: components["schemas"]["Decimal"];
+            /**
+             * Format: int64
+             * @description The statement that reported it
+             */
+            statementId: number;
+        };
+        /** @description Two consecutive balances in one unit that the lines between them do not join */
+        BalanceGap: {
+            unit: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** @description Money that moved between them that no line shows */
+            unseen: components["schemas"]["Decimal"];
+        };
+        AccountLine: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            statementId: number;
+            /** Format: date */
+            date: string;
+            description: string;
+            memo?: string | null;
+            counterparty?: string | null;
+            /** @description A card line's kind, or interest, fee, or other on a deposit account */
+            kind: string;
+            unit: string;
+            amount: components["schemas"]["Decimal"];
+            /** @description The running balance, when printed */
+            balance?: components["schemas"]["Decimal"] | null;
         };
         Reconciliation: {
             balanced: boolean;
@@ -697,6 +836,75 @@ export interface operations {
             404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    listAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accounts by institution */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Account"][];
+                };
+            };
+        };
+    };
+    getAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDetail"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    listAccountLines: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lines */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLine"][];
+                };
+            };
+            404: components["responses"]["Problem"];
         };
     };
     getMailFilters: {

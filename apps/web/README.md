@@ -9,9 +9,11 @@ The browser app (ADR 0007): a SvelteKit single-page app, embedded in the backend
 | `/statements/{id}` | One statement: metadata, reconciliation by kind, its lines in statement order, processing log, re-parse; `?line=` scrolls to a line |
 | `/documents/{id}` | One document opened for reading (ADR 0012): an e-mail's headers, attachments, and body; the original to download even when the parser cannot open it |
 | `/transactions` | Search across statements: period, card, kinds, overseas, text; totals for the whole match |
+| `/accounts` | Every account (ADR 0013): its newest balance in each unit, and whether its balances join up; accounts with gaps first, where money moved that no statement shows |
+| `/accounts/{id}` | One account: balances, gaps, its lines with running balances (deposit accounts), every balance it has had |
 | `/upload` | Drop statement e-mails (`.eml`) and follow each through parsing; links the Gmail filter download |
 
-Keys: `o` `s` `t` `u` switch pages, `/` searches, `j` `k` `Enter` `n` `p` move through transactions, `f` opens a statement's PDF, `1`–`9` a document's attachments, `?` lists everything, `⌘K` opens the command palette.
+Keys: `o` `s` `t` `b` `u` switch pages, `/` searches, `j` `k` `Enter` `n` `p` move through transactions, `f` opens a statement's PDF, `1`–`9` a document's attachments, `?` lists everything, `⌘K` opens the command palette.
 
 A document opens in a new tab (`FileLink`, `openUrl` in `src/lib/documents.ts`): a PDF, or an e-mail a parser recognized (parsed, needs review, duplicate), as its statement PDF decrypted (`/api/documents/{id}/preview/pdf`); an e-mail that failed, was skipped, or is still parsing on `/documents/{id}`, to see what it is; anything else as the original download (`/api/documents/{id}/content`).
 

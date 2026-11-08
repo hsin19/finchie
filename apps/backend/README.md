@@ -17,6 +17,9 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 | `GET` | `/api/documents/{id}/preview/body` | The e-mail's body as a page for an iframe, sandboxed by its own Content-Security-Policy: no scripts, only `data:` and https images, links to a new tab. `Cache-Control: no-store` |
 | `GET` | `/api/documents/{id}/preview/files/{index}` | One file, a PDF decrypted. Only PDFs open in the browser; anything else downloads as `application/octet-stream` with `nosniff`. `Cache-Control: no-store` |
 | `POST` | `/api/documents/{id}/reparse` | Parse the stored original again. The document's statement is replaced, so it gets a new id |
+| `GET` | `/api/accounts` | Every account (ADR 0013), with its newest balance in each unit, `continuity` (`checked` for deposit accounts, `unknown` for card bills), and its `gaps`: two consecutive balances in one unit whose difference the lines dated between them do not account for, with the `unseen` amount. Worked out on every read, never stored |
+| `GET` | `/api/accounts/{id}` | One account, plus `history`, every balance its statements reported |
+| `GET` | `/api/accounts/{id}/lines` | Its lines, newest first, `?limit=` up to 500 and `offset`. Amounts as the source reports them: money in is positive on a deposit account, a purchase on a card bill |
 | `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' sender domains (ADR 0014). `404` while that is not set |
 | `GET` | `/api/statements` | Card bills, newest closing date first, with each statement's transaction count. Deposit statements are stored but get views of their own later (ADR 0013); this and the endpoints below show card bills and their lines only |
 | `GET` | `/api/statements/{id}` | One statement |

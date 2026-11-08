@@ -1,4 +1,6 @@
 import type {
+    Account,
+    AccountKind,
     Document,
     DocumentStatus,
     TransactionKind,
@@ -41,6 +43,16 @@ export function institution(id: string): Institution {
 export function cardLabel(institutionId: string, last4?: string | null): string {
     const { code } = institution(institutionId);
     return last4 ? `${code}··${last4}` : code;
+}
+
+export const accountKinds: Record<AccountKind, { short: string; label: string; }> = {
+    deposit: { short: "deposit", label: "存款" },
+    credit_card: { short: "card", label: "信用卡" },
+};
+
+/** The owner's name for an account, else the bank's ("臺幣活存"), else its kind's. */
+export function accountName(account: Pick<Account, "kind" | "label" | "name">): string {
+    return account.name ?? account.label ?? accountKinds[account.kind].label;
 }
 
 interface Kind {

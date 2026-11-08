@@ -11,6 +11,198 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const accountBalances = `-- name: AccountBalances :many
+SELECT account_id, unit, as_of, amount, statement_id
+FROM balances
+WHERE account_id = $1
+ORDER BY as_of DESC, unit, id DESC
+`
+
+type AccountBalancesRow struct {
+	AccountID   int64
+	Unit        string
+	AsOf        pgtype.Date
+	Amount      pgtype.Numeric
+	StatementID int64
+}
+
+func (q *Queries) AccountBalances(ctx context.Context, accountID int64) ([]AccountBalancesRow, error) {
+	rows, err := q.db.Query(ctx, accountBalances, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountBalancesRow
+	for rows.Next() {
+		var i AccountBalancesRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Unit,
+			&i.AsOf,
+			&i.Amount,
+			&i.StatementID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const accountGaps = `-- name: AccountGaps :many
+WITH ordered AS (
+    SELECT b.account_id, b.unit, b.as_of, b.amount,
+           lag(b.as_of) OVER w AS prev_as_of,
+           lag(b.amount) OVER w AS prev_amount
+    FROM balances b
+    JOIN accounts a ON a.id = b.account_id
+    WHERE a.kind = 'deposit'
+      AND ($1::bigint IS NULL OR b.account_id = $1::bigint)
+    WINDOW w AS (PARTITION BY b.account_id, b.unit ORDER BY b.as_of, b.id)
+)
+SELECT o.account_id, o.unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
+       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen
+FROM ordered o
+LEFT JOIN LATERAL (SELECT sum(t.amount) AS amount
+                   FROM transactions t
+                   WHERE t.account_id = o.account_id AND t.unit = o.unit
+                     AND t.transaction_date > o.prev_as_of AND t.transaction_date <= o.as_of) seen ON true
+WHERE o.prev_as_of IS NOT NULL
+  AND o.amount - o.prev_amount <> coalesce(seen.amount, 0)
+ORDER BY o.account_id, o.unit, o.as_of
+`
+
+type AccountGapsRow struct {
+	AccountID int64
+	Unit      string
+	FromDate  pgtype.Date
+	ToDate    pgtype.Date
+	Unseen    pgtype.Numeric
+}
+
+// Where an account's balances do not join up (ADR 0013): two consecutive balances in one unit whose
+// difference the lines dated between them do not account for, so money moved that no report shows.
+// Deposit accounts only: a card bill's lines are dated by purchase, which can fall before the
+// previous bill closed, so dates cannot place them between two bills.
+func (q *Queries) AccountGaps(ctx context.Context, accountID *int64) ([]AccountGapsRow, error) {
+	rows, err := q.db.Query(ctx, accountGaps, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountGapsRow
+	for rows.Next() {
+		var i AccountGapsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Unit,
+			&i.FromDate,
+			&i.ToDate,
+			&i.Unseen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const accountLines = `-- name: AccountLines :many
+SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, t.unit,
+       t.amount, t.balance
+FROM transactions t
+WHERE t.account_id = $1
+ORDER BY t.transaction_date DESC, t.statement_id DESC, t.line_no DESC
+LIMIT $3 OFFSET $2
+`
+
+type AccountLinesParams struct {
+	AccountID int64
+	RowOffset int32
+	RowLimit  int32
+}
+
+type AccountLinesRow struct {
+	ID              int64
+	StatementID     int64
+	TransactionDate pgtype.Date
+	Description     string
+	Memo            *string
+	Counterparty    *string
+	Kind            string
+	Unit            string
+	Amount          pgtype.Numeric
+	Balance         pgtype.Numeric
+}
+
+// Newest first. Amounts as the source reports them: money in is positive on a deposit account, a
+// purchase is positive on a card bill.
+func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]AccountLinesRow, error) {
+	rows, err := q.db.Query(ctx, accountLines, arg.AccountID, arg.RowOffset, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountLinesRow
+	for rows.Next() {
+		var i AccountLinesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StatementID,
+			&i.TransactionDate,
+			&i.Description,
+			&i.Memo,
+			&i.Counterparty,
+			&i.Kind,
+			&i.Unit,
+			&i.Amount,
+			&i.Balance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAccount = `-- name: GetAccount :one
+SELECT id, institution, kind, number, label, name
+FROM accounts
+WHERE id = $1
+`
+
+type GetAccountRow struct {
+	ID          int64
+	Institution string
+	Kind        string
+	Number      string
+	Label       *string
+	Name        *string
+}
+
+func (q *Queries) GetAccount(ctx context.Context, id int64) (GetAccountRow, error) {
+	row := q.db.QueryRow(ctx, getAccount, id)
+	var i GetAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Institution,
+		&i.Kind,
+		&i.Number,
+		&i.Label,
+		&i.Name,
+	)
+	return i, err
+}
+
 const insertBalance = `-- name: InsertBalance :exec
 INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
 VALUES ($1, $2, $3, $4, $5)
@@ -33,6 +225,89 @@ func (q *Queries) InsertBalance(ctx context.Context, arg InsertBalanceParams) er
 		arg.StatementID,
 	)
 	return err
+}
+
+const latestBalances = `-- name: LatestBalances :many
+SELECT DISTINCT ON (account_id, unit) account_id, unit, as_of, amount, statement_id
+FROM balances
+ORDER BY account_id, unit, as_of DESC, id DESC
+`
+
+type LatestBalancesRow struct {
+	AccountID   int64
+	Unit        string
+	AsOf        pgtype.Date
+	Amount      pgtype.Numeric
+	StatementID int64
+}
+
+// Each account's newest balance in each unit.
+func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, error) {
+	rows, err := q.db.Query(ctx, latestBalances)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LatestBalancesRow
+	for rows.Next() {
+		var i LatestBalancesRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Unit,
+			&i.AsOf,
+			&i.Amount,
+			&i.StatementID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAccounts = `-- name: ListAccounts :many
+SELECT id, institution, kind, number, label, name
+FROM accounts
+ORDER BY institution, kind DESC, number
+`
+
+type ListAccountsRow struct {
+	ID          int64
+	Institution string
+	Kind        string
+	Number      string
+	Label       *string
+	Name        *string
+}
+
+func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccountsRow
+	for rows.Next() {
+		var i ListAccountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Institution,
+			&i.Kind,
+			&i.Number,
+			&i.Label,
+			&i.Name,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertAccount = `-- name: UpsertAccount :one

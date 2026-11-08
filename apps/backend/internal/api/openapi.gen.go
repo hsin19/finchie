@@ -18,6 +18,42 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AccountContinuity.
+const (
+	Checked AccountContinuity = "checked"
+	Unknown AccountContinuity = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AccountContinuity enum.
+func (e AccountContinuity) Valid() bool {
+	switch e {
+	case Checked:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountKind.
+const (
+	CreditCard AccountKind = "credit_card"
+	Deposit    AccountKind = "deposit"
+)
+
+// Valid indicates whether the value is a known member of the AccountKind enum.
+func (e AccountKind) Valid() bool {
+	switch e {
+	case CreditCard:
+		return true
+	case Deposit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DocumentStatus.
 const (
 	Duplicate   DocumentStatus = "duplicate"
@@ -97,6 +133,123 @@ func (e TransactionSort) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// Account defines model for Account.
+type Account struct {
+	// Balances The newest balance in each unit
+	Balances []Balance `json:"balances"`
+
+	// Continuity Whether its balances can be checked against its lines (card bills cannot yet)
+	Continuity AccountContinuity `json:"continuity"`
+	Gaps       []BalanceGap      `json:"gaps"`
+	Id         int64             `json:"id"`
+
+	// Institution Example: esun
+	Institution string      `json:"institution"`
+	Kind        AccountKind `json:"kind"`
+
+	// Label The source's name for it
+	//
+	// Example: 臺幣活存
+	Label *string `json:"label,omitempty"`
+
+	// Name The owner's name for it
+	Name *string `json:"name,omitempty"`
+
+	// Number As printed, usually masked; empty for a card bill
+	//
+	// Example: 1234567***890
+	Number string `json:"number"`
+}
+
+// AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet)
+type AccountContinuity string
+
+// AccountDetail defines model for AccountDetail.
+type AccountDetail struct {
+	// Balances The newest balance in each unit
+	Balances []Balance `json:"balances"`
+
+	// Continuity Whether its balances can be checked against its lines (card bills cannot yet)
+	Continuity AccountContinuity `json:"continuity"`
+	Gaps       []BalanceGap      `json:"gaps"`
+
+	// History Every balance, newest first
+	History []Balance `json:"history"`
+	Id      int64     `json:"id"`
+
+	// Institution Example: esun
+	Institution string      `json:"institution"`
+	Kind        AccountKind `json:"kind"`
+
+	// Label The source's name for it
+	//
+	// Example: 臺幣活存
+	Label *string `json:"label,omitempty"`
+
+	// Name The owner's name for it
+	Name *string `json:"name,omitempty"`
+
+	// Number As printed, usually masked; empty for a card bill
+	//
+	// Example: 1234567***890
+	Number string `json:"number"`
+}
+
+// AccountKind defines model for AccountKind.
+type AccountKind string
+
+// AccountLine defines model for AccountLine.
+type AccountLine struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal `json:"amount"`
+
+	// Balance The running balance, when printed
+	Balance      *Decimal           `json:"balance,omitempty"`
+	Counterparty *string            `json:"counterparty,omitempty"`
+	Date         openapi_types.Date `json:"date"`
+	Description  string             `json:"description"`
+	Id           int64              `json:"id"`
+
+	// Kind A card line's kind, or interest, fee, or other on a deposit account
+	Kind        string  `json:"kind"`
+	Memo        *string `json:"memo,omitempty"`
+	StatementId int64   `json:"statementId"`
+	Unit        string  `json:"unit"`
+}
+
+// Balance defines model for Balance.
+type Balance struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal `json:"amount"`
+
+	// AsOf The end of the day it was held
+	AsOf openapi_types.Date `json:"asOf"`
+
+	// StatementId The statement that reported it
+	StatementId int64 `json:"statementId"`
+
+	// Unit ISO 4217, or a points program's code
+	//
+	// Example: TWD
+	Unit string `json:"unit"`
+}
+
+// BalanceGap Two consecutive balances in one unit that the lines between them do not join
+type BalanceGap struct {
+	From openapi_types.Date `json:"from"`
+	To   openapi_types.Date `json:"to"`
+	Unit string             `json:"unit"`
+
+	// Unseen Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Unseen Decimal `json:"unseen"`
 }
 
 // CardTotal defines model for CardTotal.
@@ -180,7 +333,7 @@ type PreviewFile struct {
 	Filename    string `json:"filename"`
 	Index       int    `json:"index"`
 
-	// Locked A PDF none of the parser's passwords opens
+	// Locked A PDF none of the parser's passwords opens, served as received
 	Locked bool `json:"locked"`
 
 	// Primary The one file /preview/pdf serves
@@ -311,6 +464,12 @@ type Id = int64
 // Limit defines model for Limit.
 type Limit = int
 
+// ListAccountLinesParams defines parameters for ListAccountLines.
+type ListAccountLinesParams struct {
+	Limit  *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int   `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListDocumentsParams defines parameters for ListDocuments.
 type ListDocumentsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -364,6 +523,15 @@ type UploadDocumentMultipartRequestBody UploadDocumentMultipartBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAccounts Every account, with its newest balance in each unit and where its balances do not join up
+	// (GET /api/accounts)
+	ListAccounts(ctx *echo.Context) error
+	// GetAccount One account with every balance its sources reported
+	// (GET /api/accounts/{id})
+	GetAccount(ctx *echo.Context, id Id) error
+	// ListAccountLines An account's lines, newest first
+	// (GET /api/accounts/{id}/lines)
+	ListAccountLines(ctx *echo.Context, id Id, params ListAccountLinesParams) error
 	// ListDocuments Uploaded documents, newest first
 	// (GET /api/documents)
 	ListDocuments(ctx *echo.Context, params ListDocumentsParams) error
@@ -414,6 +582,63 @@ type ServerInterface interface {
 // ServerInterfaceWrapper converts echo contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler ServerInterface
+}
+
+// ListAccounts converts echo context to params.
+func (w *ServerInterfaceWrapper) ListAccounts(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListAccounts(ctx)
+	return err
+}
+
+// GetAccount converts echo context to params.
+func (w *ServerInterfaceWrapper) GetAccount(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetAccount(ctx, id)
+	return err
+}
+
+// ListAccountLines converts echo context to params.
+func (w *ServerInterfaceWrapper) ListAccountLines(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAccountLinesParams
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", ctx.QueryParams(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter limit: %s", err))
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", ctx.QueryParams(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter offset: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListAccountLines(ctx, id, params)
+	return err
 }
 
 // ListDocuments converts echo context to params.
@@ -789,6 +1014,9 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/documents/:id/preview/pdf", wrapper.GetDocumentPreviewPdf, options.OperationMiddlewares["getDocumentPreviewPdf"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/body", wrapper.GetDocumentPreviewBody, options.OperationMiddlewares["getDocumentPreviewBody"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/files/:index", wrapper.GetDocumentPreviewFile, options.OperationMiddlewares["getDocumentPreviewFile"]...)
+	router.GET(options.BaseURL+"/api/accounts", wrapper.ListAccounts, options.OperationMiddlewares["listAccounts"]...)
+	router.GET(options.BaseURL+"/api/accounts/:id", wrapper.GetAccount, options.OperationMiddlewares["getAccount"]...)
+	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
 	router.GET(options.BaseURL+"/api/statements/:id", wrapper.GetStatement, options.OperationMiddlewares["getStatement"]...)
@@ -799,6 +1027,100 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 }
 
 type ProblemJSONResponse Problem
+
+type ListAccountsRequestObject struct {
+}
+
+type ListAccountsResponseObject interface {
+	VisitListAccountsResponse(w http.ResponseWriter) error
+}
+
+type ListAccounts200JSONResponse []Account
+
+func (response ListAccounts200JSONResponse) VisitListAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAccountRequestObject struct {
+	Id Id `json:"id"`
+}
+
+type GetAccountResponseObject interface {
+	VisitGetAccountResponse(w http.ResponseWriter) error
+}
+
+type GetAccount200JSONResponse AccountDetail
+
+func (response GetAccount200JSONResponse) VisitGetAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAccount404JSONResponse struct{ ProblemJSONResponse }
+
+func (response GetAccount404JSONResponse) VisitGetAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAccountLinesRequestObject struct {
+	Id     Id `json:"id"`
+	Params ListAccountLinesParams
+}
+
+type ListAccountLinesResponseObject interface {
+	VisitListAccountLinesResponse(w http.ResponseWriter) error
+}
+
+type ListAccountLines200JSONResponse []AccountLine
+
+func (response ListAccountLines200JSONResponse) VisitListAccountLinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAccountLines404JSONResponse struct{ ProblemJSONResponse }
+
+func (response ListAccountLines404JSONResponse) VisitListAccountLinesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListDocumentsRequestObject struct {
 	Params ListDocumentsParams
@@ -1558,6 +1880,15 @@ func (response GetTransaction404JSONResponse) VisitGetTransactionResponse(w http
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAccounts Every account, with its newest balance in each unit and where its balances do not join up
+	// (GET /api/accounts)
+	ListAccounts(ctx context.Context, request ListAccountsRequestObject) (ListAccountsResponseObject, error)
+	// GetAccount One account with every balance its sources reported
+	// (GET /api/accounts/{id})
+	GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error)
+	// ListAccountLines An account's lines, newest first
+	// (GET /api/accounts/{id}/lines)
+	ListAccountLines(ctx context.Context, request ListAccountLinesRequestObject) (ListAccountLinesResponseObject, error)
 	// ListDocuments Uploaded documents, newest first
 	// (GET /api/documents)
 	ListDocuments(ctx context.Context, request ListDocumentsRequestObject) (ListDocumentsResponseObject, error)
@@ -1615,6 +1946,80 @@ func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareF
 type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
+}
+
+// ListAccounts operation middleware
+func (sh *strictHandler) ListAccounts(ctx *echo.Context) error {
+	var request ListAccountsRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAccounts(ctx.Request().Context(), request.(ListAccountsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAccounts")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListAccountsResponseObject); ok {
+		return validResponse.VisitListAccountsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetAccount operation middleware
+func (sh *strictHandler) GetAccount(ctx *echo.Context, id Id) error {
+	var request GetAccountRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAccount(ctx.Request().Context(), request.(GetAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAccount")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetAccountResponseObject); ok {
+		return validResponse.VisitGetAccountResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListAccountLines operation middleware
+func (sh *strictHandler) ListAccountLines(ctx *echo.Context, id Id, params ListAccountLinesParams) error {
+	var request ListAccountLinesRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAccountLines(ctx.Request().Context(), request.(ListAccountLinesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAccountLines")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListAccountLinesResponseObject); ok {
+		return validResponse.VisitListAccountLinesResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
 }
 
 // ListDocuments operation middleware
