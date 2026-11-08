@@ -24,11 +24,12 @@ func (q *Queries) DeleteStatementsForDocument(ctx context.Context, documentID in
 const findStatementByKey = `-- name: FindStatementByKey :one
 SELECT id, document_id
 FROM statements
-WHERE institution = $1 AND closing_date = $2
+WHERE institution = $1 AND kind = $2 AND closing_date = $3
 `
 
 type FindStatementByKeyParams struct {
 	Institution string
+	Kind        string
 	ClosingDate pgtype.Date
 }
 
@@ -38,7 +39,7 @@ type FindStatementByKeyRow struct {
 }
 
 func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKeyParams) (FindStatementByKeyRow, error) {
-	row := q.db.QueryRow(ctx, findStatementByKey, arg.Institution, arg.ClosingDate)
+	row := q.db.QueryRow(ctx, findStatementByKey, arg.Institution, arg.Kind, arg.ClosingDate)
 	var i FindStatementByKeyRow
 	err := row.Scan(&i.ID, &i.DocumentID)
 	return i, err
@@ -49,7 +50,7 @@ SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currenc
        s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
-WHERE s.id = $1
+WHERE s.id = $1 AND s.kind = 'credit_card'
 `
 
 type GetStatementRow struct {
@@ -58,11 +59,11 @@ type GetStatementRow struct {
 	Institution        string
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
 	TransactionCount   int32
 }
@@ -88,30 +89,35 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 }
 
 const insertStatement = `-- name: InsertStatement :one
-INSERT INTO statements (document_id, institution, closing_date, due_date, currency, total_due,
+INSERT INTO statements (document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
                         computed_new_charges, stated_new_charges, stated_label, balanced)
-VALUES ($1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12)
 RETURNING id
 `
 
 type InsertStatementParams struct {
 	DocumentID         int64
 	Institution        string
+	Kind               string
+	PeriodStart        pgtype.Date
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
 }
 
+// The bill's columns are null for a deposit statement (ADR 0013).
 func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertStatement,
 		arg.DocumentID,
 		arg.Institution,
+		arg.Kind,
+		arg.PeriodStart,
 		arg.ClosingDate,
 		arg.DueDate,
 		arg.Currency,
@@ -140,6 +146,9 @@ type InsertTransactionsParams struct {
 	OriginalCurrency *string
 	Country          *string
 	CardLast4        *string
+	Memo             *string
+	Counterparty     *string
+	Balance          pgtype.Numeric
 }
 
 const listStatements = `-- name: ListStatements :many
@@ -147,6 +156,7 @@ SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currenc
        s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
+WHERE s.kind = 'credit_card'
 ORDER BY s.closing_date DESC, s.id DESC
 LIMIT $1
 `
@@ -157,15 +167,16 @@ type ListStatementsRow struct {
 	Institution        string
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
 	TransactionCount   int32
 }
 
+// Card bills only, until deposit statements get views of their own (ADR 0013).
 func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListStatementsRow, error) {
 	rows, err := q.db.Query(ctx, listStatements, rowLimit)
 	if err != nil {
@@ -276,7 +287,7 @@ func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]Li
 }
 
 const statementExists = `-- name: StatementExists :one
-SELECT EXISTS (SELECT 1 FROM statements WHERE id = $1)
+SELECT EXISTS (SELECT 1 FROM statements WHERE id = $1 AND kind = 'credit_card')
 `
 
 func (q *Queries) StatementExists(ctx context.Context, id int64) (bool, error) {

@@ -26,7 +26,8 @@ SELECT t.kind,
        sum(t.amount)::numeric AS amount
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
-WHERE ($1::date IS NULL OR t.transaction_date >= $1::date)
+WHERE s.kind = 'credit_card'
+  AND ($1::date IS NULL OR t.transaction_date >= $1::date)
   AND ($2::date IS NULL OR t.transaction_date <= $2::date)
   AND ($3::date IS NULL OR s.closing_date >= $3::date)
   AND ($4::date IS NULL OR s.closing_date <= $4::date)
@@ -171,6 +172,8 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
                    FROM transactions c
                    WHERE $1::boolean AND c.parent_id = t.id) kids ON true
 WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
+  -- Card lines only: deposit lines count money in as positive (ADR 0013) and get views of their own.
+  AND s.kind = 'credit_card'
   AND ($2::date IS NULL OR t.transaction_date >= $2::date)
   AND ($3::date IS NULL OR t.transaction_date <= $3::date)
   AND ($4::date IS NULL OR s.closing_date >= $4::date)
@@ -386,6 +389,8 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                    FROM transactions c
                    WHERE $4::boolean AND c.parent_id = t.id) kids ON true
 WHERE NOT ($4::boolean AND t.parent_id IS NOT NULL)
+  -- Card lines only: deposit lines count money in as positive (ADR 0013) and get views of their own.
+  AND s.kind = 'credit_card'
   AND ($5::date IS NULL OR t.transaction_date >= $5::date)
   AND ($6::date IS NULL OR t.transaction_date <= $6::date)
   AND ($7::date IS NULL OR s.closing_date >= $7::date)

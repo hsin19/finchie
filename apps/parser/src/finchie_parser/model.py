@@ -48,9 +48,56 @@ class Statement:
     reconciliation: Reconciliation
 
 
+class DepositKind(StrEnum):
+    """Only what the bank's own wording says (ADR 0013)."""
+
+    OTHER = "other"
+    INTEREST = "interest"
+    FEE = "fee"
+
+
+@dataclass(frozen=True)
+class DepositLine:
+    date: date
+    description: str
+    # Seen from the account: money in is positive.
+    amount: Decimal
+    kind: DepositKind = DepositKind.OTHER
+    memo: str = ""
+    counterparty: str = ""
+    # The running balance after the line, when printed.
+    balance: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class DepositAccount:
+    """One account in one currency, as a deposit statement shows it."""
+
+    number: str
+    name: str
+    currency: str
+    closing_balance: Decimal
+    lines: list[DepositLine]
+    # None when there is nothing to add up: no opening balance and no running balance printed.
+    reconciliation: Reconciliation | None
+    opening_balance: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class DepositStatement:
+    institution: str
+    period_start: date
+    period_end: date
+    accounts: list[DepositAccount]
+
+    @property
+    def balanced(self) -> bool:
+        return all(a.reconciliation is None or a.reconciliation.balanced for a in self.accounts)
+
+
 @dataclass(frozen=True)
 class ParseResult:
     parser: str
     parser_version: str
-    statement: Statement
+    statement: Statement | DepositStatement
     warnings: list[str] = field(default_factory=list)

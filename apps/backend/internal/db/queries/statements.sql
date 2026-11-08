@@ -5,26 +5,29 @@ WHERE document_id = @document_id;
 -- name: FindStatementByKey :one
 SELECT id, document_id
 FROM statements
-WHERE institution = @institution AND closing_date = @closing_date;
+WHERE institution = @institution AND kind = @kind AND closing_date = @closing_date;
 
 -- name: InsertStatement :one
-INSERT INTO statements (document_id, institution, closing_date, due_date, currency, total_due,
+-- The bill's columns are null for a deposit statement (ADR 0013).
+INSERT INTO statements (document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
                         computed_new_charges, stated_new_charges, stated_label, balanced)
-VALUES (@document_id, @institution, @closing_date, @due_date, @currency, @total_due,
+VALUES (@document_id, @institution, @kind, @period_start, @closing_date, @due_date, @currency, @total_due,
         @computed_new_charges, @stated_new_charges, @stated_label, @balanced)
 RETURNING id;
 
 -- name: InsertTransactions :copyfrom
 INSERT INTO transactions (statement_id, account_id, unit, line_no, transaction_date, posting_date, description, kind,
-                          amount, original_amount, original_currency, country, card_last4)
+                          amount, original_amount, original_currency, country, card_last4, memo, counterparty, balance)
 VALUES (@statement_id, @account_id, @unit, @line_no, @transaction_date, @posting_date, @description, @kind,
-        @amount, @original_amount, @original_currency, @country, @card_last4);
+        @amount, @original_amount, @original_currency, @country, @card_last4, @memo, @counterparty, @balance);
 
 -- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
        s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
+-- Card bills only, until deposit statements get views of their own (ADR 0013).
+WHERE s.kind = 'credit_card'
 ORDER BY s.closing_date DESC, s.id DESC
 LIMIT @row_limit;
 
@@ -33,10 +36,10 @@ SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currenc
        s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
-WHERE s.id = @id;
+WHERE s.id = @id AND s.kind = 'credit_card';
 
 -- name: StatementExists :one
-SELECT EXISTS (SELECT 1 FROM statements WHERE id = @id);
+SELECT EXISTS (SELECT 1 FROM statements WHERE id = @id AND kind = 'credit_card');
 
 -- name: ListTransactions :many
 -- The lines as printed, each with its parent (parent_id) and its children, which may be on other

@@ -87,6 +87,60 @@ func (TransactionKind) EnumDescriptor() ([]byte, []int) {
 	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{0}
 }
 
+// Only what the bank's own wording says; card payments and transfers between
+// the owner's accounts are worked out by the backend.
+type DepositLineKind int32
+
+const (
+	DepositLineKind_DEPOSIT_LINE_KIND_UNSPECIFIED DepositLineKind = 0
+	DepositLineKind_DEPOSIT_LINE_KIND_OTHER       DepositLineKind = 1
+	DepositLineKind_DEPOSIT_LINE_KIND_INTEREST    DepositLineKind = 2
+	DepositLineKind_DEPOSIT_LINE_KIND_FEE         DepositLineKind = 3
+)
+
+// Enum value maps for DepositLineKind.
+var (
+	DepositLineKind_name = map[int32]string{
+		0: "DEPOSIT_LINE_KIND_UNSPECIFIED",
+		1: "DEPOSIT_LINE_KIND_OTHER",
+		2: "DEPOSIT_LINE_KIND_INTEREST",
+		3: "DEPOSIT_LINE_KIND_FEE",
+	}
+	DepositLineKind_value = map[string]int32{
+		"DEPOSIT_LINE_KIND_UNSPECIFIED": 0,
+		"DEPOSIT_LINE_KIND_OTHER":       1,
+		"DEPOSIT_LINE_KIND_INTEREST":    2,
+		"DEPOSIT_LINE_KIND_FEE":         3,
+	}
+)
+
+func (x DepositLineKind) Enum() *DepositLineKind {
+	p := new(DepositLineKind)
+	*p = x
+	return p
+}
+
+func (x DepositLineKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DepositLineKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_finchie_parser_v1_parser_proto_enumTypes[1].Descriptor()
+}
+
+func (DepositLineKind) Type() protoreflect.EnumType {
+	return &file_finchie_parser_v1_parser_proto_enumTypes[1]
+}
+
+func (x DepositLineKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DepositLineKind.Descriptor instead.
+func (DepositLineKind) EnumDescriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{1}
+}
+
 type ParseDocumentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The caller's document ID, echoed in logs and traces on both sides.
@@ -458,12 +512,15 @@ type ParseDocumentResponse struct {
 	Parser string `protobuf:"bytes,1,opt,name=parser,proto3" json:"parser,omitempty"`
 	// Bumped whenever the parser's output for the same input can change, so the
 	// caller knows what to re-parse.
-	ParserVersion string     `protobuf:"bytes,2,opt,name=parser_version,json=parserVersion,proto3" json:"parser_version,omitempty"`
-	Statement     *Statement `protobuf:"bytes,3,opt,name=statement,proto3" json:"statement,omitempty"`
+	ParserVersion string `protobuf:"bytes,2,opt,name=parser_version,json=parserVersion,proto3" json:"parser_version,omitempty"`
+	// A credit card bill. Exactly one of statement and deposit_statement is set
+	// (ADR 0013).
+	Statement *Statement `protobuf:"bytes,3,opt,name=statement,proto3" json:"statement,omitempty"`
 	// Problems that did not stop parsing, e.g. OCR text that could not be read.
-	Warnings      []string `protobuf:"bytes,4,rep,name=warnings,proto3" json:"warnings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Warnings         []string          `protobuf:"bytes,4,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	DepositStatement *DepositStatement `protobuf:"bytes,5,opt,name=deposit_statement,json=depositStatement,proto3" json:"deposit_statement,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ParseDocumentResponse) Reset() {
@@ -524,6 +581,14 @@ func (x *ParseDocumentResponse) GetWarnings() []string {
 	return nil
 }
 
+func (x *ParseDocumentResponse) GetDepositStatement() *DepositStatement {
+	if x != nil {
+		return x.DepositStatement
+	}
+	return nil
+}
+
+// A credit card bill.
 type Statement struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Stable institution ID: "esun", "taishin", "cathay", "hsbc".
@@ -805,6 +870,276 @@ func (x *Reconciliation) GetStatedLabel() string {
 	return ""
 }
 
+// A deposit statement: the balances and lines of every account one statement
+// covers, a combined statement (綜合對帳單) several (ADR 0013).
+type DepositStatement struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Stable institution ID, as for Statement.
+	Institution string     `protobuf:"bytes,1,opt,name=institution,proto3" json:"institution,omitempty"`
+	PeriodStart *date.Date `protobuf:"bytes,2,opt,name=period_start,json=periodStart,proto3" json:"period_start,omitempty"`
+	// The day its closing balances are as of.
+	PeriodEnd *date.Date `protobuf:"bytes,3,opt,name=period_end,json=periodEnd,proto3" json:"period_end,omitempty"`
+	// One per account and currency.
+	Accounts      []*DepositAccount `protobuf:"bytes,4,rep,name=accounts,proto3" json:"accounts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DepositStatement) Reset() {
+	*x = DepositStatement{}
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositStatement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositStatement) ProtoMessage() {}
+
+func (x *DepositStatement) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositStatement.ProtoReflect.Descriptor instead.
+func (*DepositStatement) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DepositStatement) GetInstitution() string {
+	if x != nil {
+		return x.Institution
+	}
+	return ""
+}
+
+func (x *DepositStatement) GetPeriodStart() *date.Date {
+	if x != nil {
+		return x.PeriodStart
+	}
+	return nil
+}
+
+func (x *DepositStatement) GetPeriodEnd() *date.Date {
+	if x != nil {
+		return x.PeriodEnd
+	}
+	return nil
+}
+
+func (x *DepositStatement) GetAccounts() []*DepositAccount {
+	if x != nil {
+		return x.Accounts
+	}
+	return nil
+}
+
+type DepositAccount struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// As printed, usually masked by the bank, and normalized by the parser so
+	// one account reads the same every month.
+	Number string `protobuf:"bytes,1,opt,name=number,proto3" json:"number,omitempty"`
+	// The bank's name for it, e.g. "臺幣活存".
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// ISO 4217 code of this part of the account.
+	Currency string `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	// Unset when the statement does not print one.
+	OpeningBalance *decimal.Decimal `protobuf:"bytes,4,opt,name=opening_balance,json=openingBalance,proto3" json:"opening_balance,omitempty"`
+	ClosingBalance *decimal.Decimal `protobuf:"bytes,5,opt,name=closing_balance,json=closingBalance,proto3" json:"closing_balance,omitempty"`
+	Lines          []*DepositLine   `protobuf:"bytes,6,rep,name=lines,proto3" json:"lines,omitempty"`
+	// Whether the lines account for the closing balance: from the opening
+	// balance, and through each printed running balance. Unset when there is
+	// nothing to add up.
+	Reconciliation *Reconciliation `protobuf:"bytes,7,opt,name=reconciliation,proto3" json:"reconciliation,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DepositAccount) Reset() {
+	*x = DepositAccount{}
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositAccount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositAccount) ProtoMessage() {}
+
+func (x *DepositAccount) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositAccount.ProtoReflect.Descriptor instead.
+func (*DepositAccount) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DepositAccount) GetNumber() string {
+	if x != nil {
+		return x.Number
+	}
+	return ""
+}
+
+func (x *DepositAccount) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DepositAccount) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+func (x *DepositAccount) GetOpeningBalance() *decimal.Decimal {
+	if x != nil {
+		return x.OpeningBalance
+	}
+	return nil
+}
+
+func (x *DepositAccount) GetClosingBalance() *decimal.Decimal {
+	if x != nil {
+		return x.ClosingBalance
+	}
+	return nil
+}
+
+func (x *DepositAccount) GetLines() []*DepositLine {
+	if x != nil {
+		return x.Lines
+	}
+	return nil
+}
+
+func (x *DepositAccount) GetReconciliation() *Reconciliation {
+	if x != nil {
+		return x.Reconciliation
+	}
+	return nil
+}
+
+// Seen from the account: money in is positive (ADR 0013).
+type DepositLine struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Date  *date.Date             `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
+	// The bank's summary of the line, e.g. "ＡＴＭ跨行轉".
+	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	// The bank's note on it, e.g. who a transfer came from.
+	Memo string `protobuf:"bytes,3,opt,name=memo,proto3" json:"memo,omitempty"`
+	// The other side's bank and account, when printed.
+	Counterparty string           `protobuf:"bytes,4,opt,name=counterparty,proto3" json:"counterparty,omitempty"`
+	Amount       *decimal.Decimal `protobuf:"bytes,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	// The running balance after the line, when printed.
+	Balance       *decimal.Decimal `protobuf:"bytes,6,opt,name=balance,proto3" json:"balance,omitempty"`
+	Kind          DepositLineKind  `protobuf:"varint,7,opt,name=kind,proto3,enum=finchie.parser.v1.DepositLineKind" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DepositLine) Reset() {
+	*x = DepositLine{}
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositLine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositLine) ProtoMessage() {}
+
+func (x *DepositLine) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositLine.ProtoReflect.Descriptor instead.
+func (*DepositLine) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DepositLine) GetDate() *date.Date {
+	if x != nil {
+		return x.Date
+	}
+	return nil
+}
+
+func (x *DepositLine) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *DepositLine) GetMemo() string {
+	if x != nil {
+		return x.Memo
+	}
+	return ""
+}
+
+func (x *DepositLine) GetCounterparty() string {
+	if x != nil {
+		return x.Counterparty
+	}
+	return ""
+}
+
+func (x *DepositLine) GetAmount() *decimal.Decimal {
+	if x != nil {
+		return x.Amount
+	}
+	return nil
+}
+
+func (x *DepositLine) GetBalance() *decimal.Decimal {
+	if x != nil {
+		return x.Balance
+	}
+	return nil
+}
+
+func (x *DepositLine) GetKind() DepositLineKind {
+	if x != nil {
+		return x.Kind
+	}
+	return DepositLineKind_DEPOSIT_LINE_KIND_UNSPECIFIED
+}
+
 var File_finchie_parser_v1_parser_proto protoreflect.FileDescriptor
 
 const file_finchie_parser_v1_parser_proto_rawDesc = "" +
@@ -837,12 +1172,13 @@ const file_finchie_parser_v1_parser_proto_rawDesc = "" +
 	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x18\n" +
 	"\acontent\x18\x03 \x01(\fR\acontent\x12\x16\n" +
 	"\x06locked\x18\x04 \x01(\bR\x06locked\x12\x18\n" +
-	"\aprimary\x18\x05 \x01(\bR\aprimary\"\xae\x01\n" +
+	"\aprimary\x18\x05 \x01(\bR\aprimary\"\x80\x02\n" +
 	"\x15ParseDocumentResponse\x12\x16\n" +
 	"\x06parser\x18\x01 \x01(\tR\x06parser\x12%\n" +
 	"\x0eparser_version\x18\x02 \x01(\tR\rparserVersion\x12:\n" +
 	"\tstatement\x18\x03 \x01(\v2\x1c.finchie.parser.v1.StatementR\tstatement\x12\x1a\n" +
-	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xef\x02\n" +
+	"\bwarnings\x18\x04 \x03(\tR\bwarnings\x12P\n" +
+	"\x11deposit_statement\x18\x05 \x01(\v2#.finchie.parser.v1.DepositStatementR\x10depositStatement\"\xef\x02\n" +
 	"\tStatement\x12 \n" +
 	"\vinstitution\x18\x01 \x01(\tR\vinstitution\x124\n" +
 	"\fclosing_date\x18\x02 \x01(\v2\x11.google.type.DateR\vclosingDate\x12,\n" +
@@ -866,7 +1202,29 @@ const file_finchie_parser_v1_parser_proto_rawDesc = "" +
 	"\bbalanced\x18\x01 \x01(\bR\bbalanced\x120\n" +
 	"\bcomputed\x18\x02 \x01(\v2\x14.google.type.DecimalR\bcomputed\x12,\n" +
 	"\x06stated\x18\x03 \x01(\v2\x14.google.type.DecimalR\x06stated\x12!\n" +
-	"\fstated_label\x18\x04 \x01(\tR\vstatedLabel*\xf9\x01\n" +
+	"\fstated_label\x18\x04 \x01(\tR\vstatedLabel\"\xdb\x01\n" +
+	"\x10DepositStatement\x12 \n" +
+	"\vinstitution\x18\x01 \x01(\tR\vinstitution\x124\n" +
+	"\fperiod_start\x18\x02 \x01(\v2\x11.google.type.DateR\vperiodStart\x120\n" +
+	"\n" +
+	"period_end\x18\x03 \x01(\v2\x11.google.type.DateR\tperiodEnd\x12=\n" +
+	"\baccounts\x18\x04 \x03(\v2!.finchie.parser.v1.DepositAccountR\baccounts\"\xd7\x02\n" +
+	"\x0eDepositAccount\x12\x16\n" +
+	"\x06number\x18\x01 \x01(\tR\x06number\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\x12=\n" +
+	"\x0fopening_balance\x18\x04 \x01(\v2\x14.google.type.DecimalR\x0eopeningBalance\x12=\n" +
+	"\x0fclosing_balance\x18\x05 \x01(\v2\x14.google.type.DecimalR\x0eclosingBalance\x124\n" +
+	"\x05lines\x18\x06 \x03(\v2\x1e.finchie.parser.v1.DepositLineR\x05lines\x12I\n" +
+	"\x0ereconciliation\x18\a \x01(\v2!.finchie.parser.v1.ReconciliationR\x0ereconciliation\"\xa4\x02\n" +
+	"\vDepositLine\x12%\n" +
+	"\x04date\x18\x01 \x01(\v2\x11.google.type.DateR\x04date\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x12\n" +
+	"\x04memo\x18\x03 \x01(\tR\x04memo\x12\"\n" +
+	"\fcounterparty\x18\x04 \x01(\tR\fcounterparty\x12,\n" +
+	"\x06amount\x18\x05 \x01(\v2\x14.google.type.DecimalR\x06amount\x12.\n" +
+	"\abalance\x18\x06 \x01(\v2\x14.google.type.DecimalR\abalance\x126\n" +
+	"\x04kind\x18\a \x01(\x0e2\".finchie.parser.v1.DepositLineKindR\x04kind*\xf9\x01\n" +
 	"\x0fTransactionKind\x12 \n" +
 	"\x1cTRANSACTION_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19TRANSACTION_KIND_PURCHASE\x10\x01\x12,\n" +
@@ -874,7 +1232,12 @@ const file_finchie_parser_v1_parser_proto_rawDesc = "" +
 	"\x1bTRANSACTION_KIND_ANNUAL_FEE\x10\x03\x12\x1b\n" +
 	"\x17TRANSACTION_KIND_REFUND\x10\x04\x12\x1b\n" +
 	"\x17TRANSACTION_KIND_REBATE\x10\x05\x12\x1c\n" +
-	"\x18TRANSACTION_KIND_PAYMENT\x10\x062\xd4\x01\n" +
+	"\x18TRANSACTION_KIND_PAYMENT\x10\x06*\x8c\x01\n" +
+	"\x0fDepositLineKind\x12!\n" +
+	"\x1dDEPOSIT_LINE_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17DEPOSIT_LINE_KIND_OTHER\x10\x01\x12\x1e\n" +
+	"\x1aDEPOSIT_LINE_KIND_INTEREST\x10\x02\x12\x19\n" +
+	"\x15DEPOSIT_LINE_KIND_FEE\x10\x032\xd4\x01\n" +
 	"\rParserService\x12b\n" +
 	"\rParseDocument\x12'.finchie.parser.v1.ParseDocumentRequest\x1a(.finchie.parser.v1.ParseDocumentResponse\x12_\n" +
 	"\fOpenDocument\x12&.finchie.parser.v1.OpenDocumentRequest\x1a'.finchie.parser.v1.OpenDocumentResponseB\xda\x01\n" +
@@ -892,49 +1255,65 @@ func file_finchie_parser_v1_parser_proto_rawDescGZIP() []byte {
 	return file_finchie_parser_v1_parser_proto_rawDescData
 }
 
-var file_finchie_parser_v1_parser_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_finchie_parser_v1_parser_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_finchie_parser_v1_parser_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_finchie_parser_v1_parser_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_finchie_parser_v1_parser_proto_goTypes = []any{
 	(TransactionKind)(0),          // 0: finchie.parser.v1.TransactionKind
-	(*ParseDocumentRequest)(nil),  // 1: finchie.parser.v1.ParseDocumentRequest
-	(*OpenDocumentRequest)(nil),   // 2: finchie.parser.v1.OpenDocumentRequest
-	(*OpenDocumentResponse)(nil),  // 3: finchie.parser.v1.OpenDocumentResponse
-	(*Email)(nil),                 // 4: finchie.parser.v1.Email
-	(*File)(nil),                  // 5: finchie.parser.v1.File
-	(*ParseDocumentResponse)(nil), // 6: finchie.parser.v1.ParseDocumentResponse
-	(*Statement)(nil),             // 7: finchie.parser.v1.Statement
-	(*Transaction)(nil),           // 8: finchie.parser.v1.Transaction
-	(*Reconciliation)(nil),        // 9: finchie.parser.v1.Reconciliation
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
-	(*date.Date)(nil),             // 11: google.type.Date
-	(*decimal.Decimal)(nil),       // 12: google.type.Decimal
+	(DepositLineKind)(0),          // 1: finchie.parser.v1.DepositLineKind
+	(*ParseDocumentRequest)(nil),  // 2: finchie.parser.v1.ParseDocumentRequest
+	(*OpenDocumentRequest)(nil),   // 3: finchie.parser.v1.OpenDocumentRequest
+	(*OpenDocumentResponse)(nil),  // 4: finchie.parser.v1.OpenDocumentResponse
+	(*Email)(nil),                 // 5: finchie.parser.v1.Email
+	(*File)(nil),                  // 6: finchie.parser.v1.File
+	(*ParseDocumentResponse)(nil), // 7: finchie.parser.v1.ParseDocumentResponse
+	(*Statement)(nil),             // 8: finchie.parser.v1.Statement
+	(*Transaction)(nil),           // 9: finchie.parser.v1.Transaction
+	(*Reconciliation)(nil),        // 10: finchie.parser.v1.Reconciliation
+	(*DepositStatement)(nil),      // 11: finchie.parser.v1.DepositStatement
+	(*DepositAccount)(nil),        // 12: finchie.parser.v1.DepositAccount
+	(*DepositLine)(nil),           // 13: finchie.parser.v1.DepositLine
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*date.Date)(nil),             // 15: google.type.Date
+	(*decimal.Decimal)(nil),       // 16: google.type.Decimal
 }
 var file_finchie_parser_v1_parser_proto_depIdxs = []int32{
-	4,  // 0: finchie.parser.v1.OpenDocumentResponse.email:type_name -> finchie.parser.v1.Email
-	5,  // 1: finchie.parser.v1.OpenDocumentResponse.files:type_name -> finchie.parser.v1.File
-	10, // 2: finchie.parser.v1.Email.date:type_name -> google.protobuf.Timestamp
-	7,  // 3: finchie.parser.v1.ParseDocumentResponse.statement:type_name -> finchie.parser.v1.Statement
-	11, // 4: finchie.parser.v1.Statement.closing_date:type_name -> google.type.Date
-	11, // 5: finchie.parser.v1.Statement.due_date:type_name -> google.type.Date
-	12, // 6: finchie.parser.v1.Statement.total_due:type_name -> google.type.Decimal
-	8,  // 7: finchie.parser.v1.Statement.transactions:type_name -> finchie.parser.v1.Transaction
-	9,  // 8: finchie.parser.v1.Statement.reconciliation:type_name -> finchie.parser.v1.Reconciliation
-	11, // 9: finchie.parser.v1.Transaction.transaction_date:type_name -> google.type.Date
-	11, // 10: finchie.parser.v1.Transaction.posting_date:type_name -> google.type.Date
-	0,  // 11: finchie.parser.v1.Transaction.kind:type_name -> finchie.parser.v1.TransactionKind
-	12, // 12: finchie.parser.v1.Transaction.amount:type_name -> google.type.Decimal
-	12, // 13: finchie.parser.v1.Transaction.original_amount:type_name -> google.type.Decimal
-	12, // 14: finchie.parser.v1.Reconciliation.computed:type_name -> google.type.Decimal
-	12, // 15: finchie.parser.v1.Reconciliation.stated:type_name -> google.type.Decimal
-	1,  // 16: finchie.parser.v1.ParserService.ParseDocument:input_type -> finchie.parser.v1.ParseDocumentRequest
-	2,  // 17: finchie.parser.v1.ParserService.OpenDocument:input_type -> finchie.parser.v1.OpenDocumentRequest
-	6,  // 18: finchie.parser.v1.ParserService.ParseDocument:output_type -> finchie.parser.v1.ParseDocumentResponse
-	3,  // 19: finchie.parser.v1.ParserService.OpenDocument:output_type -> finchie.parser.v1.OpenDocumentResponse
-	18, // [18:20] is the sub-list for method output_type
-	16, // [16:18] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	5,  // 0: finchie.parser.v1.OpenDocumentResponse.email:type_name -> finchie.parser.v1.Email
+	6,  // 1: finchie.parser.v1.OpenDocumentResponse.files:type_name -> finchie.parser.v1.File
+	14, // 2: finchie.parser.v1.Email.date:type_name -> google.protobuf.Timestamp
+	8,  // 3: finchie.parser.v1.ParseDocumentResponse.statement:type_name -> finchie.parser.v1.Statement
+	11, // 4: finchie.parser.v1.ParseDocumentResponse.deposit_statement:type_name -> finchie.parser.v1.DepositStatement
+	15, // 5: finchie.parser.v1.Statement.closing_date:type_name -> google.type.Date
+	15, // 6: finchie.parser.v1.Statement.due_date:type_name -> google.type.Date
+	16, // 7: finchie.parser.v1.Statement.total_due:type_name -> google.type.Decimal
+	9,  // 8: finchie.parser.v1.Statement.transactions:type_name -> finchie.parser.v1.Transaction
+	10, // 9: finchie.parser.v1.Statement.reconciliation:type_name -> finchie.parser.v1.Reconciliation
+	15, // 10: finchie.parser.v1.Transaction.transaction_date:type_name -> google.type.Date
+	15, // 11: finchie.parser.v1.Transaction.posting_date:type_name -> google.type.Date
+	0,  // 12: finchie.parser.v1.Transaction.kind:type_name -> finchie.parser.v1.TransactionKind
+	16, // 13: finchie.parser.v1.Transaction.amount:type_name -> google.type.Decimal
+	16, // 14: finchie.parser.v1.Transaction.original_amount:type_name -> google.type.Decimal
+	16, // 15: finchie.parser.v1.Reconciliation.computed:type_name -> google.type.Decimal
+	16, // 16: finchie.parser.v1.Reconciliation.stated:type_name -> google.type.Decimal
+	15, // 17: finchie.parser.v1.DepositStatement.period_start:type_name -> google.type.Date
+	15, // 18: finchie.parser.v1.DepositStatement.period_end:type_name -> google.type.Date
+	12, // 19: finchie.parser.v1.DepositStatement.accounts:type_name -> finchie.parser.v1.DepositAccount
+	16, // 20: finchie.parser.v1.DepositAccount.opening_balance:type_name -> google.type.Decimal
+	16, // 21: finchie.parser.v1.DepositAccount.closing_balance:type_name -> google.type.Decimal
+	13, // 22: finchie.parser.v1.DepositAccount.lines:type_name -> finchie.parser.v1.DepositLine
+	10, // 23: finchie.parser.v1.DepositAccount.reconciliation:type_name -> finchie.parser.v1.Reconciliation
+	15, // 24: finchie.parser.v1.DepositLine.date:type_name -> google.type.Date
+	16, // 25: finchie.parser.v1.DepositLine.amount:type_name -> google.type.Decimal
+	16, // 26: finchie.parser.v1.DepositLine.balance:type_name -> google.type.Decimal
+	1,  // 27: finchie.parser.v1.DepositLine.kind:type_name -> finchie.parser.v1.DepositLineKind
+	2,  // 28: finchie.parser.v1.ParserService.ParseDocument:input_type -> finchie.parser.v1.ParseDocumentRequest
+	3,  // 29: finchie.parser.v1.ParserService.OpenDocument:input_type -> finchie.parser.v1.OpenDocumentRequest
+	7,  // 30: finchie.parser.v1.ParserService.ParseDocument:output_type -> finchie.parser.v1.ParseDocumentResponse
+	4,  // 31: finchie.parser.v1.ParserService.OpenDocument:output_type -> finchie.parser.v1.OpenDocumentResponse
+	30, // [30:32] is the sub-list for method output_type
+	28, // [28:30] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_finchie_parser_v1_parser_proto_init() }
@@ -947,8 +1326,8 @@ func file_finchie_parser_v1_parser_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_finchie_parser_v1_parser_proto_rawDesc), len(file_finchie_parser_v1_parser_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

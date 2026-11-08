@@ -42,6 +42,9 @@ func (r iteratorForInsertTransactions) Values() ([]interface{}, error) {
 		r.rows[0].OriginalCurrency,
 		r.rows[0].Country,
 		r.rows[0].CardLast4,
+		r.rows[0].Memo,
+		r.rows[0].Counterparty,
+		r.rows[0].Balance,
 	}, nil
 }
 
@@ -50,5 +53,5 @@ func (r iteratorForInsertTransactions) Err() error {
 }
 
 func (q *Queries) InsertTransactions(ctx context.Context, arg []InsertTransactionsParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"transactions"}, []string{"statement_id", "account_id", "unit", "line_no", "transaction_date", "posting_date", "description", "kind", "amount", "original_amount", "original_currency", "country", "card_last4"}, &iteratorForInsertTransactions{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"transactions"}, []string{"statement_id", "account_id", "unit", "line_no", "transaction_date", "posting_date", "description", "kind", "amount", "original_amount", "original_currency", "country", "card_last4", "memo", "counterparty", "balance"}, &iteratorForInsertTransactions{rows: arg})
 }

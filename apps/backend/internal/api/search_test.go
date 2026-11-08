@@ -8,8 +8,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	gdate "google.golang.org/genproto/googleapis/type/date"
+	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 )
 
@@ -30,14 +33,14 @@ func seedStatement(t *testing.T, pool *pgxpool.Pool, institution, closing string
 		t.Fatal(err)
 	}
 	id, err := queries.InsertStatement(ctx, dbq.InsertStatementParams{
-		DocumentID: doc.ID, Institution: institution, ClosingDate: pgDate(t, closing), DueDate: pgDate(t, closing),
-		Currency: "TWD", TotalDue: numeric(t, "0"), ComputedNewCharges: numeric(t, "0"), StatedNewCharges: numeric(t, "0"),
-		StatedLabel: "total", Balanced: true,
+		DocumentID: doc.ID, Institution: institution, Kind: ingest.KindCreditCard, ClosingDate: pgDate(t, closing), DueDate: pgDate(t, closing),
+		Currency: optional("TWD"), TotalDue: numeric(t, "0"), ComputedNewCharges: numeric(t, "0"), StatedNewCharges: numeric(t, "0"),
+		StatedLabel: optional("total"), Balanced: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	account, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{Institution: institution, Kind: ingest.AccountCreditCard})
+	account, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{Institution: institution, Kind: ingest.KindCreditCard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,4 +234,38 @@ func TestStatementAndDocumentContent(t *testing.T) {
 
 func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
+}
+
+func TestDepositStatementsStayOutOfTheCardViewsUntilTheyHaveTheirOwn(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	seedStatement(t, pool, "esun", "2026-09-07", []line{{date: "2026-09-01", description: "SHOP", kind: "purchase", amount: "100"}})
+	doc, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
+		Sha256: []byte("deposit"), Filename: "deposit.eml", ContentType: "message/rfc822", Content: []byte("From: bank"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Synthetic (ADR 0006); money in is positive on a deposit account, so its lines would distort card totals.
+	deposit := &parserv1.DepositStatement{
+		Institution: "esun",
+		PeriodStart: &gdate.Date{Year: 2026, Month: 9, Day: 1},
+		PeriodEnd:   &gdate.Date{Year: 2026, Month: 9, Day: 30},
+		Accounts: []*parserv1.DepositAccount{{
+			Number: "1234567***890", Name: "臺幣活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: "60000"},
+			Lines: []*parserv1.DepositLine{{
+				Date: &gdate.Date{Year: 2026, Month: 9, Day: 5}, Description: "薪資", Amount: &decimal.Decimal{Value: "60000"},
+				Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
+			}},
+		}},
+	}
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: deposit}); err != nil {
+		t.Fatal(err)
+	}
+
+	if statements := decode[[]Statement](t, get(t, e, "/api/statements")); len(statements) != 1 || statements[0].Institution != "esun" {
+		t.Fatalf("statements = %+v", statements)
+	}
+	if search := decode[TransactionSearch](t, get(t, e, "/api/transactions")); search.Total != 1 || search.Sum != "100" {
+		t.Fatalf("search = total %d, sum %s", search.Total, search.Sum)
+	}
 }

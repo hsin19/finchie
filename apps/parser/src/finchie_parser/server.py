@@ -16,6 +16,7 @@ from finchie_parser.errors import (
     PasswordRequiredError,
     UnsupportedDocumentError,
 )
+from finchie_parser.model import DepositStatement
 from finchie_parser.ocr import Ocr, RapidOcr
 from finchie_parser.pipeline import parse_document
 from finchie_parser.reading import open_document
@@ -49,13 +50,17 @@ class ParserService(parser_pb2_grpc.ParserServiceServicer):
             _reject(context, request.document_id, error)
             raise
         statement = result.statement
+        if isinstance(statement, DepositStatement):
+            lines, balanced = sum(len(a.lines) for a in statement.accounts), statement.balanced
+        else:
+            lines, balanced = len(statement.transactions), statement.reconciliation.balanced
         log.info(
-            "document %s parsed by %s v%s: %d transactions, balanced=%s, %.1fs",
+            "document %s parsed by %s v%s: %d lines, balanced=%s, %.1fs",
             request.document_id,
             result.parser,
             result.parser_version,
-            len(statement.transactions),
-            statement.reconciliation.balanced,
+            lines,
+            balanced,
             time.monotonic() - started,
         )
         return to_response(result)

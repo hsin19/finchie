@@ -21,6 +21,13 @@ class TransactionKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     TRANSACTION_KIND_REFUND: _ClassVar[TransactionKind]
     TRANSACTION_KIND_REBATE: _ClassVar[TransactionKind]
     TRANSACTION_KIND_PAYMENT: _ClassVar[TransactionKind]
+
+class DepositLineKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    DEPOSIT_LINE_KIND_UNSPECIFIED: _ClassVar[DepositLineKind]
+    DEPOSIT_LINE_KIND_OTHER: _ClassVar[DepositLineKind]
+    DEPOSIT_LINE_KIND_INTEREST: _ClassVar[DepositLineKind]
+    DEPOSIT_LINE_KIND_FEE: _ClassVar[DepositLineKind]
 TRANSACTION_KIND_UNSPECIFIED: TransactionKind
 TRANSACTION_KIND_PURCHASE: TransactionKind
 TRANSACTION_KIND_FOREIGN_TRANSACTION_FEE: TransactionKind
@@ -28,6 +35,10 @@ TRANSACTION_KIND_ANNUAL_FEE: TransactionKind
 TRANSACTION_KIND_REFUND: TransactionKind
 TRANSACTION_KIND_REBATE: TransactionKind
 TRANSACTION_KIND_PAYMENT: TransactionKind
+DEPOSIT_LINE_KIND_UNSPECIFIED: DepositLineKind
+DEPOSIT_LINE_KIND_OTHER: DepositLineKind
+DEPOSIT_LINE_KIND_INTEREST: DepositLineKind
+DEPOSIT_LINE_KIND_FEE: DepositLineKind
 
 class ParseDocumentRequest(_message.Message):
     __slots__ = ("document_id", "filename", "content_type", "content")
@@ -92,16 +103,18 @@ class File(_message.Message):
     def __init__(self, filename: _Optional[str] = ..., content_type: _Optional[str] = ..., content: _Optional[bytes] = ..., locked: _Optional[bool] = ..., primary: _Optional[bool] = ...) -> None: ...
 
 class ParseDocumentResponse(_message.Message):
-    __slots__ = ("parser", "parser_version", "statement", "warnings")
+    __slots__ = ("parser", "parser_version", "statement", "warnings", "deposit_statement")
     PARSER_FIELD_NUMBER: _ClassVar[int]
     PARSER_VERSION_FIELD_NUMBER: _ClassVar[int]
     STATEMENT_FIELD_NUMBER: _ClassVar[int]
     WARNINGS_FIELD_NUMBER: _ClassVar[int]
+    DEPOSIT_STATEMENT_FIELD_NUMBER: _ClassVar[int]
     parser: str
     parser_version: str
     statement: Statement
     warnings: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, parser: _Optional[str] = ..., parser_version: _Optional[str] = ..., statement: _Optional[_Union[Statement, _Mapping]] = ..., warnings: _Optional[_Iterable[str]] = ...) -> None: ...
+    deposit_statement: DepositStatement
+    def __init__(self, parser: _Optional[str] = ..., parser_version: _Optional[str] = ..., statement: _Optional[_Union[Statement, _Mapping]] = ..., warnings: _Optional[_Iterable[str]] = ..., deposit_statement: _Optional[_Union[DepositStatement, _Mapping]] = ...) -> None: ...
 
 class Statement(_message.Message):
     __slots__ = ("institution", "closing_date", "due_date", "currency", "total_due", "transactions", "reconciliation")
@@ -154,3 +167,51 @@ class Reconciliation(_message.Message):
     stated: _decimal_pb2.Decimal
     stated_label: str
     def __init__(self, balanced: _Optional[bool] = ..., computed: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., stated: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., stated_label: _Optional[str] = ...) -> None: ...
+
+class DepositStatement(_message.Message):
+    __slots__ = ("institution", "period_start", "period_end", "accounts")
+    INSTITUTION_FIELD_NUMBER: _ClassVar[int]
+    PERIOD_START_FIELD_NUMBER: _ClassVar[int]
+    PERIOD_END_FIELD_NUMBER: _ClassVar[int]
+    ACCOUNTS_FIELD_NUMBER: _ClassVar[int]
+    institution: str
+    period_start: _date_pb2.Date
+    period_end: _date_pb2.Date
+    accounts: _containers.RepeatedCompositeFieldContainer[DepositAccount]
+    def __init__(self, institution: _Optional[str] = ..., period_start: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., period_end: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., accounts: _Optional[_Iterable[_Union[DepositAccount, _Mapping]]] = ...) -> None: ...
+
+class DepositAccount(_message.Message):
+    __slots__ = ("number", "name", "currency", "opening_balance", "closing_balance", "lines", "reconciliation")
+    NUMBER_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    OPENING_BALANCE_FIELD_NUMBER: _ClassVar[int]
+    CLOSING_BALANCE_FIELD_NUMBER: _ClassVar[int]
+    LINES_FIELD_NUMBER: _ClassVar[int]
+    RECONCILIATION_FIELD_NUMBER: _ClassVar[int]
+    number: str
+    name: str
+    currency: str
+    opening_balance: _decimal_pb2.Decimal
+    closing_balance: _decimal_pb2.Decimal
+    lines: _containers.RepeatedCompositeFieldContainer[DepositLine]
+    reconciliation: Reconciliation
+    def __init__(self, number: _Optional[str] = ..., name: _Optional[str] = ..., currency: _Optional[str] = ..., opening_balance: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., closing_balance: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., lines: _Optional[_Iterable[_Union[DepositLine, _Mapping]]] = ..., reconciliation: _Optional[_Union[Reconciliation, _Mapping]] = ...) -> None: ...
+
+class DepositLine(_message.Message):
+    __slots__ = ("date", "description", "memo", "counterparty", "amount", "balance", "kind")
+    DATE_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    MEMO_FIELD_NUMBER: _ClassVar[int]
+    COUNTERPARTY_FIELD_NUMBER: _ClassVar[int]
+    AMOUNT_FIELD_NUMBER: _ClassVar[int]
+    BALANCE_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    date: _date_pb2.Date
+    description: str
+    memo: str
+    counterparty: str
+    amount: _decimal_pb2.Decimal
+    balance: _decimal_pb2.Decimal
+    kind: DepositLineKind
+    def __init__(self, date: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., description: _Optional[str] = ..., memo: _Optional[str] = ..., counterparty: _Optional[str] = ..., amount: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., balance: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., kind: _Optional[_Union[DepositLineKind, str]] = ...) -> None: ...

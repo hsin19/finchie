@@ -34,6 +34,8 @@ func toDocument(row dbq.GetDocumentRow) Document {
 	return doc
 }
 
+// toStatement takes a card bill: the statement endpoints list no other kind yet, and a bill's columns
+// are never null (statements_card_bill_check).
 func toStatement(row dbq.ListStatementsRow) Statement {
 	return Statement{
 		Id:          row.ID,
@@ -41,13 +43,13 @@ func toStatement(row dbq.ListStatementsRow) Statement {
 		Institution: row.Institution,
 		ClosingDate: openapi_types.Date{Time: row.ClosingDate.Time},
 		DueDate:     openapi_types.Date{Time: row.DueDate.Time},
-		Currency:    row.Currency,
+		Currency:    deref(row.Currency),
 		TotalDue:    decimalString(row.TotalDue),
 		Reconciliation: Reconciliation{
 			Balanced:    row.Balanced,
 			Computed:    decimalString(row.ComputedNewCharges),
 			Stated:      decimalString(row.StatedNewCharges),
-			StatedLabel: row.StatedLabel,
+			StatedLabel: deref(row.StatedLabel),
 		},
 		TransactionCount: int(row.TransactionCount),
 	}
@@ -98,4 +100,11 @@ func decimalString(n pgtype.Numeric) string {
 	}
 	s, _ := value.(string)
 	return s
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

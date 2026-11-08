@@ -7,30 +7,38 @@ package dbq
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const insertCardBillBalance = `-- name: InsertCardBillBalance :exec
+const insertBalance = `-- name: InsertBalance :exec
 INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
-SELECT $1, s.currency, s.closing_date, -s.total_due, s.id
-FROM statements s
-WHERE s.id = $2
+VALUES ($1, $2, $3, $4, $5)
 `
 
-type InsertCardBillBalanceParams struct {
+type InsertBalanceParams struct {
 	AccountID   int64
+	Unit        string
+	AsOf        pgtype.Date
+	Amount      pgtype.Numeric
 	StatementID int64
 }
 
-// A card bill's balance is what it says is owed, on its closing date.
-func (q *Queries) InsertCardBillBalance(ctx context.Context, arg InsertCardBillBalanceParams) error {
-	_, err := q.db.Exec(ctx, insertCardBillBalance, arg.AccountID, arg.StatementID)
+func (q *Queries) InsertBalance(ctx context.Context, arg InsertBalanceParams) error {
+	_, err := q.db.Exec(ctx, insertBalance,
+		arg.AccountID,
+		arg.Unit,
+		arg.AsOf,
+		arg.Amount,
+		arg.StatementID,
+	)
 	return err
 }
 
 const upsertAccount = `-- name: UpsertAccount :one
-INSERT INTO accounts (institution, kind, number)
-VALUES ($1, $2, $3)
-ON CONFLICT (institution, kind, number) DO UPDATE SET number = EXCLUDED.number
+INSERT INTO accounts (institution, kind, number, label)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (institution, kind, number) DO UPDATE SET label = coalesce(EXCLUDED.label, accounts.label)
 RETURNING id
 `
 
@@ -38,11 +46,18 @@ type UpsertAccountParams struct {
 	Institution string
 	Kind        string
 	Number      string
+	Label       *string
 }
 
-// The account a source reports, created the first time it appears (ADR 0013).
+// The account a source reports, created the first time it appears (ADR 0013); the source's name for
+// it is kept as last reported.
 func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (int64, error) {
-	row := q.db.QueryRow(ctx, upsertAccount, arg.Institution, arg.Kind, arg.Number)
+	row := q.db.QueryRow(ctx, upsertAccount,
+		arg.Institution,
+		arg.Kind,
+		arg.Number,
+		arg.Label,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err

@@ -124,7 +124,7 @@ func TestABillIsStoredInItsBanksCardAccountWithWhatItSaysIsOwed(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), "SELECT id, kind, number FROM accounts WHERE institution = 'hsbc'").Scan(&account, &kind, &number); err != nil {
 		t.Fatal(err)
 	}
-	if kind != AccountCreditCard || number != "" {
+	if kind != KindCreditCard || number != "" {
 		t.Fatalf("account = %s %q", kind, number)
 	}
 	var lines int

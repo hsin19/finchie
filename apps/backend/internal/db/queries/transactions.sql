@@ -20,6 +20,8 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
                    FROM transactions c
                    WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
 WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
+  -- Card lines only: deposit lines count money in as positive (ADR 0013) and get views of their own.
+  AND s.kind = 'credit_card'
   AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
   AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
   AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
@@ -56,6 +58,8 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                    FROM transactions c
                    WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
 WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
+  -- Card lines only: deposit lines count money in as positive (ADR 0013) and get views of their own.
+  AND s.kind = 'credit_card'
   AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
   AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
   AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
@@ -73,7 +77,8 @@ SELECT t.kind,
        sum(t.amount)::numeric AS amount
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
-WHERE (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
+WHERE s.kind = 'credit_card'
+  AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
   AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
   AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
   AND (sqlc.narg(closing_to)::date IS NULL OR s.closing_date <= sqlc.narg(closing_to)::date)

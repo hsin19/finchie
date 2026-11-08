@@ -18,7 +18,7 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 | `GET` | `/api/documents/{id}/preview/files/{index}` | One file, a PDF decrypted. Only PDFs open in the browser; anything else downloads as `application/octet-stream` with `nosniff`. `Cache-Control: no-store` |
 | `POST` | `/api/documents/{id}/reparse` | Parse the stored original again. The document's statement is replaced, so it gets a new id |
 | `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' sender domains (ADR 0014). `404` while that is not set |
-| `GET` | `/api/statements` | Newest closing date first, with each statement's transaction count |
+| `GET` | `/api/statements` | Card bills, newest closing date first, with each statement's transaction count. Deposit statements are stored but get views of their own later (ADR 0013); this and the endpoints below show card bills and their lines only |
 | `GET` | `/api/statements/{id}` | One statement |
 | `GET` | `/api/statements/{id}/transactions` | In statement order |
 | `GET` | `/api/transactions` | Across all statements. Filters: `from`, `to` (transaction date), `closingFrom`, `closingTo` (the statement's closing date), `kind` (repeatable), `institution`, `card`, `overseas`, `q`; `sort` (`newest`, `oldest`, `largest`, `smallest`); `limit` 0–500 and `offset`. Returns the page plus `total` and `sum` for the whole match, and `byKind` / `byCard` facets that each ignore their own filter. While purchases are included, fees and refunds linked to a purchase fold into it as its `children` and amounts are net of them ([ADR 0009](../../docs/adr/0009-transaction-parents.md)) |
@@ -31,7 +31,7 @@ Amounts are decimal strings; statement dates are `YYYY-MM-DD` (ADR 0004).
 ## Ingestion
 
 1. Upload: the document is stored with its SHA-256 and a `parse_document` River job is inserted **in the same transaction**, so every stored document has a job.
-2. The job calls the parser over gRPC (`BACKEND_PARSE_TIMEOUT`) and, in one transaction, replaces whatever the document produced before. The statement's account is found or created as it reports it, a bank's card bill being one account (ADR 0013); its lines go into that account, and the bill's balance (−total due, on the closing date) into `balances`. Accounts are never deleted with a document.
+2. The job calls the parser over gRPC (`BACKEND_PARSE_TIMEOUT`) and, in one transaction, replaces whatever the document produced before. Each account the statement reports is found or created (ADR 0013): a bank's card bill is one account, a deposit statement covers an account per number. The lines go into their accounts, and the balances into `balances`: a card bill's −total due on its closing date, a deposit account's closing balance per currency, and its opening balance, where printed, on the day before the period. A deposit account whose lines do not add up makes the statement `needs_review` and is named in the document's warnings. Accounts are never deleted with a document.
 3. The document ends up as:
 
 | Status | Meaning |
@@ -39,7 +39,7 @@ Amounts are decimal strings; statement dates are `YYYY-MM-DD` (ADR 0004).
 | `pending` | Queued, being parsed, or waiting to retry |
 | `parsed` | Stored; transactions add up to the statement |
 | `needs_review` | Stored, but the transactions do not add up |
-| `duplicate` | Another document already holds this statement (same institution and closing date) |
+| `duplicate` | Another document already holds this statement (same institution, kind, and closing date) |
 | `failed` | The parser rejected it (`error` says why), or every attempt failed: the parser stayed unreachable, or the database refused the result |
 
 Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, and `RESOURCE_EXHAUSTED` from the parser are retried (6 attempts with River's back-off); everything else it returns fails at once (ADR 0005). Database errors are retried too.

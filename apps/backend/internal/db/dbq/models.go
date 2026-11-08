@@ -16,6 +16,7 @@ type Account struct {
 	Name        *string
 	Expiry      string
 	CreatedAt   pgtype.Timestamptz
+	Label       *string
 }
 
 type Balance struct {
@@ -48,12 +49,14 @@ type Statement struct {
 	Institution        string
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
-	Currency           string
+	Currency           *string
 	TotalDue           pgtype.Numeric
 	ComputedNewCharges pgtype.Numeric
 	StatedNewCharges   pgtype.Numeric
-	StatedLabel        string
+	StatedLabel        *string
 	Balanced           bool
+	Kind               string
+	PeriodStart        pgtype.Date
 }
 
 type Transaction struct {
@@ -73,4 +76,7 @@ type Transaction struct {
 	AccountID        int64
 	Unit             string
 	Status           string
+	Memo             *string
+	Counterparty     *string
+	Balance          pgtype.Numeric
 }
