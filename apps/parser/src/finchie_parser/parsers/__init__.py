@@ -1,5 +1,6 @@
 from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.cathay import CathayParser
+from finchie_parser.parsers.cathay_deposit import CathayDepositParser
 from finchie_parser.parsers.ctbc_deposit import CtbcDepositParser
 from finchie_parser.parsers.esun import EsunParser
 from finchie_parser.parsers.esun_deposit import EsunDepositParser
@@ -16,6 +17,7 @@ PARSERS: tuple[StatementParser, ...] = (
     TaishinParser(),
     TaishinDepositParser(),
     CathayParser(),
+    CathayDepositParser(),
     HsbcParser(),
     FubonDepositParser(),
     NextBankDepositParser(),

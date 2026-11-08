@@ -23,6 +23,9 @@ IDENTITY = Identity(national_id="a123456789", birth_date=date(2000, 1, 2))
         ("webmaster@bhurecv.taishinbank.com.tw", "台新信用卡電子帳單 2026年10月", "taishin.credit_card"),
         ("webmaster@bhurecv.taishinbank.com.tw", "台新銀行綜合對帳單 2026年9月份", "taishin.deposit"),
         ("service@pxbillrc01.cathaybk.com.tw", "國泰世華銀行信用卡2026年11月電子帳單", "cathay.credit_card"),
+        ("service@pxbillrc01.cathaybk.com.tw", "【國泰世華銀行】電子存摺", "cathay.deposit"),
+        # Its monthly combined statement e-mail has only a login link and no PDF.
+        ("service@pxbillrc01.cathaybk.com.tw", "國泰世華銀行綜合對帳單", None),
         ("cards@estatements.hsbc.com.tw", "115年10月滙豐某某卡信用卡帳單", "hsbc.credit_card"),
         ("service@bhu.taipeifubon.com.tw", "台北富邦銀行2026年10月 銀行對帳單", "fubon.deposit"),
         ("no_reply@eblsdr.nextbank.com.tw", "【將來銀行通知】2026年9月綜合對帳單", "nextbank.deposit"),
@@ -55,6 +58,7 @@ def by_name(name: str) -> StatementParser:
         ("taishin.credit_card", ["890102", "A123456789"]),
         ("taishin.deposit", ["A123456789"]),
         ("cathay.credit_card", ["A123456789"]),
+        ("cathay.deposit", ["A123456789"]),
         ("hsbc.credit_card", ["A123456789"]),
         ("fubon.deposit", ["A123456789"]),
         ("nextbank.deposit", ["A123456789"]),
