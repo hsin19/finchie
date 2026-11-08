@@ -258,12 +258,19 @@ func (s *Server) SearchTransactions(ctx context.Context, request SearchTransacti
 		CardLast4:   blankAsNil(params.Card),
 		Overseas:    params.Overseas != nil && *params.Overseas,
 		Query:       blankAsNil(params.Q),
-		Sort:        string(Newest),
-		RowLimit:    clamp(params.Limit, defaultLimit, 0, 500),
-		RowOffset:   clamp(params.Offset, 0, 0, math.MaxInt32),
+		AccountID:   params.Account,
+		// A transfer between the owner's lines is neither spent nor received (ADR 0016).
+		HideTransfers: params.HideTransfers != nil && *params.HideTransfers,
+		Sort:          string(Newest),
+		RowLimit:      clamp(params.Limit, defaultLimit, 0, 500),
+		RowOffset:     clamp(params.Offset, 0, 0, math.MaxInt32),
 	}
 	if params.Sort != nil && params.Sort.Valid() {
 		filter.Sort = string(*params.Sort)
+	}
+	if params.AccountKind != nil && params.AccountKind.Valid() {
+		kind := string(*params.AccountKind)
+		filter.AccountKind = &kind
 	}
 	if params.Kind != nil {
 		filter.Kinds = make([]string, 0, len(*params.Kind))
@@ -290,37 +297,42 @@ func (s *Server) SearchTransactions(ctx context.Context, request SearchTransacti
 		}
 	}
 	groups, err := queries.TransactionTotals(ctx, dbq.TransactionTotalsParams{
-		Fold:        filter.Fold,
-		Kinds:       filter.Kinds,
-		Institution: filter.Institution,
-		CardLast4:   filter.CardLast4,
-		FromDate:    filter.FromDate,
-		ToDate:      filter.ToDate,
-		ClosingFrom: filter.ClosingFrom,
-		ClosingTo:   filter.ClosingTo,
-		Overseas:    filter.Overseas,
-		Query:       filter.Query,
+		Fold:          filter.Fold,
+		Kinds:         filter.Kinds,
+		Institution:   filter.Institution,
+		CardLast4:     filter.CardLast4,
+		AccountID:     filter.AccountID,
+		AccountKind:   filter.AccountKind,
+		HideTransfers: filter.HideTransfers,
+		FromDate:      filter.FromDate,
+		ToDate:        filter.ToDate,
+		ClosingFrom:   filter.ClosingFrom,
+		ClosingTo:     filter.ClosingTo,
+		Overseas:      filter.Overseas,
+		Query:         filter.Query,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("total transactions: %w", err)
 	}
 	kinds, err := queries.KindTotals(ctx, dbq.KindTotalsParams{
-		Institution: filter.Institution,
-		CardLast4:   filter.CardLast4,
-		FromDate:    filter.FromDate,
-		ToDate:      filter.ToDate,
-		ClosingFrom: filter.ClosingFrom,
-		ClosingTo:   filter.ClosingTo,
-		Overseas:    filter.Overseas,
-		Query:       filter.Query,
+		Institution:   filter.Institution,
+		CardLast4:     filter.CardLast4,
+		AccountID:     filter.AccountID,
+		AccountKind:   filter.AccountKind,
+		HideTransfers: filter.HideTransfers,
+		FromDate:      filter.FromDate,
+		ToDate:        filter.ToDate,
+		ClosingFrom:   filter.ClosingFrom,
+		ClosingTo:     filter.ClosingTo,
+		Overseas:      filter.Overseas,
+		Query:         filter.Query,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("total transactions by kind: %w", err)
 	}
-	total, byCard := summarize(groups)
-	byKind := kindTotals(kinds)
-	result.Total, result.Sum = total.count, decimalString(total.amount)
-	result.ByKind, result.ByCard = byKind, byCard
+	summary := summarize(groups)
+	result.Total, result.Sum, result.Flows = summary.total.count, decimalString(summary.total.amount), summary.flows
+	result.ByKind, result.ByCard, result.ByAccount = kindTotals(kinds), summary.byCard, summary.byAccount
 	return SearchTransactions200JSONResponse(result), nil
 }
 

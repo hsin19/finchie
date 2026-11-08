@@ -14,18 +14,22 @@ const filters = (query: string) => readFilters(new URLSearchParams(query));
 
 describe("filters", () => {
     it("reads every filter from the URL, ignoring values it does not know", () => {
-        expect(filters("m=2026-10&kind=purchase&kind=bogus&card=hsbc:4417&q=uber&overseas=1&sort=largest&page=2")).toEqual({
+        expect(filters("m=2026-10&kind=purchase&kind=bogus&card=hsbc:4417&q=uber&overseas=1&hide=transfers&sort=largest&page=2")).toEqual({
             period: "2026-10",
             closing: undefined,
             kinds: ["purchase"],
             institution: "hsbc",
             card: "4417",
+            account: "",
             q: "uber",
             overseas: true,
+            hideTransfers: true,
             sort: "largest",
             page: 2,
         });
         expect(filters("m=2026-13&sort=random&page=-3")).toMatchObject({ period: undefined, sort: "newest", page: 1 });
+        expect(filters("account=7&hide=bogus")).toMatchObject({ account: "7", hideTransfers: false });
+        expect(filters("account=7x")).toMatchObject({ account: "" });
     });
 
     it("searches every month for a closing month unless a period is asked for", () => {

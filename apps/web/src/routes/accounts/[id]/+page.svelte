@@ -1,10 +1,10 @@
 <script lang="ts">
 import {
-    type AccountLine,
     api,
     LEDGER,
     unwrap,
 } from "#lib/api/client.js";
+import Counterpart from "#lib/components/Counterpart.svelte";
 import {
     accountKinds,
     accountName,
@@ -45,17 +45,6 @@ async function save(event: SubmitEvent) {
     } catch (error) {
         saveError = (error as Error).message;
     }
-}
-
-/** Where a linked line's money went or came from: another account, or a card bill it paid. */
-function counterpart(line: AccountLine): { href: string; text: string; } | undefined {
-    const other = line.counterpart;
-    if (!other) return undefined;
-    const bankName = institution(other.institution).name;
-    if (other.accountId !== undefined) {
-        return { href: resolve("/accounts/[id]", { id: String(other.accountId) }), text: `${bankName} ${other.accountName ?? ""} ${other.accountNumber ?? ""}` };
-    }
-    return { href: resolve("/statements/[id]", { id: String(other.statementId) }), text: `${bankName} 信用卡帳單` };
 }
 
 function amountTone(value: string) {
@@ -156,11 +145,7 @@ function amountTone(value: string) {
                         <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
                         <td class="px-2 py-2">
                             {line.description}
-                            {#if counterpart(line)}
-                                {@const other = counterpart(line)}
-                                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved in counterpart() -->
-                                <a href={other?.href} class="block text-[12px] text-dim hover:text-ink">↔ {other?.text}</a>
-                            {/if}
+                            {#if line.counterpart}<Counterpart other={line.counterpart} class="block text-[12px] text-dim hover:text-ink" />{/if}
                         </td>
                         <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
                         <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>

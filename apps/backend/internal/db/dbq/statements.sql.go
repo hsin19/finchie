@@ -216,15 +216,29 @@ func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListSta
 
 const listTransactions = `-- name: ListTransactions :many
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
+LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
+                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
                                                        'transactionDate', c.transaction_date, 'amount', c.amount::text,
                                              'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
@@ -235,21 +249,39 @@ ORDER BY t.line_no
 `
 
 type ListTransactionsRow struct {
-	ID               int64
-	StatementID      int64
-	Institution      string
-	TransactionDate  pgtype.Date
-	PostingDate      pgtype.Date
-	Description      string
-	Kind             string
-	Amount           pgtype.Numeric
-	OriginalAmount   pgtype.Numeric
-	OriginalCurrency *string
-	Country          *string
-	CardLast4        *string
-	ParentID         *int64
-	Parent           []byte
-	Children         []byte
+	ID                       int64
+	StatementID              int64
+	Institution              string
+	TransactionDate          pgtype.Date
+	PostingDate              pgtype.Date
+	Description              string
+	Kind                     string
+	Amount                   pgtype.Numeric
+	OriginalAmount           pgtype.Numeric
+	OriginalCurrency         *string
+	Country                  *string
+	CardLast4                *string
+	ParentID                 *int64
+	Parent                   []byte
+	Children                 []byte
+	AccountKind              string
+	AccountID                int64
+	AccountName              *string
+	AccountNumber            string
+	Unit                     string
+	Memo                     *string
+	Counterparty             *string
+	Balance                  pgtype.Numeric
+	Flow                     pgtype.Numeric
+	CounterpartID            *int64
+	CounterpartStatementID   *int64
+	CounterpartDate          pgtype.Date
+	CounterpartAccountID     *int64
+	CounterpartAccountKind   *string
+	CounterpartInstitution   *string
+	CounterpartAccountName   *string
+	CounterpartAccountNumber *string
+	CounterpartFullNumber    *string
 }
 
 // The lines as printed, each with its parent (parent_id) and its children, which may be on other
@@ -279,6 +311,24 @@ func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]Li
 			&i.ParentID,
 			&i.Parent,
 			&i.Children,
+			&i.AccountKind,
+			&i.AccountID,
+			&i.AccountName,
+			&i.AccountNumber,
+			&i.Unit,
+			&i.Memo,
+			&i.Counterparty,
+			&i.Balance,
+			&i.Flow,
+			&i.CounterpartID,
+			&i.CounterpartStatementID,
+			&i.CounterpartDate,
+			&i.CounterpartAccountID,
+			&i.CounterpartAccountKind,
+			&i.CounterpartInstitution,
+			&i.CounterpartAccountName,
+			&i.CounterpartAccountNumber,
+			&i.CounterpartFullNumber,
 		); err != nil {
 			return nil, err
 		}

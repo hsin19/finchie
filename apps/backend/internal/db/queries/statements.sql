@@ -45,15 +45,29 @@ SELECT EXISTS (SELECT 1 FROM statements WHERE id = @id AND kind = 'credit_card')
 -- The lines as printed, each with its parent (parent_id) and its children, which may be on other
 -- statements.
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
+LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
+                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
                                                        'transactionDate', c.transaction_date, 'amount', c.amount::text,
                                              'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list

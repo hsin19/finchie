@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -81,6 +82,27 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		OriginalCurrency: row.OriginalCurrency,
 		Country:          row.Country,
 		CardLast4:        row.CardLast4,
+		AccountName:      row.AccountName,
+		Unit:             &row.Unit,
+		Memo:             row.Memo,
+		Counterparty:     row.Counterparty,
+		Counterpart: lineCounterpart(row.CounterpartID, row.CounterpartStatementID, row.CounterpartDate, row.CounterpartAccountID,
+			row.CounterpartAccountKind, row.CounterpartInstitution, row.CounterpartAccountName,
+			cmp.Or(row.CounterpartFullNumber, row.CounterpartAccountNumber)),
+	}
+	accountKind := AccountKind(row.AccountKind)
+	tx.AccountKind = &accountKind
+	// A card bill's container is no account the owner has (ADR 0013): a card line names its card instead.
+	if accountKind != CreditCard {
+		tx.AccountId, tx.AccountNumber = &row.AccountID, &row.AccountNumber
+	}
+	if row.Balance.Valid {
+		balance := decimalString(row.Balance)
+		tx.Balance = &balance
+	}
+	if row.Flow.Valid {
+		flow := decimalString(row.Flow)
+		tx.Flow = &flow
 	}
 	if row.PostingDate.Valid {
 		tx.PostingDate = &openapi_types.Date{Time: row.PostingDate.Time}
@@ -104,6 +126,23 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		tx.Children = &children
 	}
 	return tx, nil
+}
+
+// lineCounterpart is the other line of a link (ADR 0016), from the counterpart columns a line query
+// selects; nil when the line has none.
+func lineCounterpart(id, statementID *int64, date pgtype.Date, accountID *int64, kind, institution, name, number *string) *LineCounterpart {
+	if id == nil {
+		return nil
+	}
+	counterpart := LineCounterpart{
+		Id: *id, StatementId: *statementID, Date: openapi_types.Date{Time: date.Time},
+		AccountKind: AccountKind(*kind), Institution: *institution, AccountName: name,
+	}
+	// A card bill's container is no account to point at (ADR 0013).
+	if counterpart.AccountKind != CreditCard {
+		counterpart.AccountId, counterpart.AccountNumber = accountID, number
+	}
+	return &counterpart
 }
 
 // decimalString renders NUMERIC exactly as Postgres stores it ("780.00", "-6553").

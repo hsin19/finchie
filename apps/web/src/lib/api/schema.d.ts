@@ -331,8 +331,11 @@ export interface paths {
         /**
          * Transactions across every statement, newest first, with totals for the whole match
          * @description Filters combine with AND. `total` and `sum` cover every matching row, not just this page.
-         *     `byKind` and `byCard` are facets: each ignores its own filter (byKind ignores `kind`, byCard
-         *     ignores `institution` and `card`), so a picker can show the options it would switch to.
+         *     `byKind`, `byCard`, and `byAccount` are facets: each ignores its own filter (byKind ignores
+         *     `kind`; byCard and byAccount, the account picker's, ignore `institution`, `card`, and
+         *     `account`), so a picker can show the options it would switch to. Card and deposit lines come
+         *     together unless `accountKind` picks one (ADR 0013); `sum` adds amounts as printed and only means
+         *     something within one kind, `flows` add them as the owner sees them.
          *
          *     While `kind` includes purchases (or is not given), a line with a parent (a fee or refund
          *     linked to its purchase) is not a row of its own but one of the parent's `children`, and rows,
@@ -563,8 +566,11 @@ export interface components {
          * @enum {string}
          */
         TransactionSort: "newest" | "oldest" | "largest" | "smallest";
-        /** @enum {string} */
-        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment";
+        /**
+         * @description A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+         * @enum {string}
+         */
+        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment" | "interest" | "fee" | "other";
         Transaction: {
             /** Format: int64 */
             id: number;
@@ -582,6 +588,24 @@ export interface components {
             originalCurrency?: string;
             country?: string;
             cardLast4?: string;
+            accountKind?: components["schemas"]["AccountKind"];
+            /**
+             * Format: int64
+             * @description A deposit account; absent for a card line
+             */
+            accountId?: number;
+            /** @description The owner's name for a deposit account, else the bank's */
+            accountName?: string;
+            /** @description A deposit account's full number where given, else as printed */
+            accountNumber?: string;
+            /** @description ISO 4217, or a points program's code */
+            unit?: string;
+            memo?: string;
+            counterparty?: string;
+            balance?: components["schemas"]["Decimal"];
+            /** @description Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it */
+            flow?: components["schemas"]["Decimal"];
+            counterpart?: components["schemas"]["LineCounterpart"];
             /** @description The line this one adjusts, such as the purchase a fee or refund belongs to */
             parent?: components["schemas"]["TransactionLink"];
             /** @description Lines that adjust this one, possibly on other statements; absent without any */
@@ -609,14 +633,35 @@ export interface components {
             items: components["schemas"]["Transaction"][];
             /** @description Rows matching every filter */
             total: number;
+            /** @description Amounts as printed, which only adds up within one kind of account: use with accountKind */
             sum: components["schemas"]["Decimal"];
+            /** @description Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016) */
+            flows: components["schemas"]["UnitFlow"][];
             byKind: components["schemas"]["KindTotal"][];
             byCard: components["schemas"]["CardTotal"][];
+            /** @description Deposit accounts, a facet like byCard */
+            byAccount: components["schemas"]["AccountTotal"][];
+        };
+        UnitFlow: {
+            unit: string;
+            /** @description Negative or zero */
+            spent: components["schemas"]["Decimal"];
+            received: components["schemas"]["Decimal"];
+        };
+        AccountTotal: {
+            /** Format: int64 */
+            accountId: number;
+            institution: string;
+            accountName?: string;
+            accountNumber?: string;
+            count: number;
         };
         KindTotal: {
             kind: components["schemas"]["TransactionKind"];
             count: number;
             amount: components["schemas"]["Decimal"];
+            /** @description Seen from the owner */
+            flow: components["schemas"]["Decimal"];
         };
         CardTotal: {
             institution: string;
@@ -1118,7 +1163,13 @@ export interface operations {
                 card?: string;
                 /** @description Only rows charged in a foreign currency or in another country */
                 overseas?: boolean;
-                /** @description Case-insensitive substring of the description */
+                /** @description Only card lines, or only deposit lines */
+                accountKind?: components["schemas"]["AccountKind"];
+                /** @description One deposit account */
+                account?: number;
+                /** @description Leave out transfers between the owner's lines and card payments (ADR 0016) */
+                hideTransfers?: boolean;
+                /** @description Case-insensitive substring of the description or the memo */
                 q?: string;
                 /** @description Row order; largest and smallest compare amounts by size, ignoring the sign */
                 sort?: components["schemas"]["TransactionSort"];

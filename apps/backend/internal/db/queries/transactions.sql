@@ -4,9 +4,22 @@
 
 -- name: SearchTransactions :many
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
@@ -20,8 +33,6 @@ LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
                    FROM transactions c
                    WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
 WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
-  -- Card lines only: deposit lines count money in as positive (ADR 0013) and get views of their own.
-  AND s.kind = 'credit_card'
   AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
   AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
   AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
@@ -29,8 +40,13 @@ WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
   AND (sqlc.narg(kinds)::text[] IS NULL OR t.kind = ANY (sqlc.narg(kinds)::text[]))
   AND (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
   AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 = sqlc.narg(card_last4)::text)
+  AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)
   AND (NOT @overseas::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND (sqlc.narg(query)::text IS NULL OR strpos(lower(t.description), lower(sqlc.narg(query)::text)) > 0)
+  AND (sqlc.narg(account_kind)::text IS NULL OR a.kind = sqlc.narg(account_kind)::text)
+  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
+  AND (NOT @hide_transfers::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+  AND (sqlc.narg(query)::text IS NULL
+       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower(sqlc.narg(query)::text)) > 0)
 -- Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
 -- big payment counts as large. Ties go newest first, then in statement line order.
 ORDER BY CASE WHEN @sort::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
@@ -40,52 +56,73 @@ ORDER BY CASE WHEN @sort::text = 'largest' THEN abs(t.amount + coalesce(kids.amo
 LIMIT @row_limit OFFSET @row_offset;
 
 -- name: TransactionTotals :many
--- The rows SearchTransactions lists, one group per (kind, card) with flags for whether the group
--- passes the kind and card filters, so the caller can build the full total and the card facet from a
--- single scan. Amounts are net of children.
+-- The rows SearchTransactions lists, one group per kind, account, card, and unit, with flags for whether
+-- the group passes the kind filter and the account picker's (bank, card, account), so the caller can
+-- build the totals and the account facets from a single scan. Amounts are net of children; spent and
+-- received are seen from the owner and leave out transfers and card payments (ADR 0016).
 SELECT t.kind,
+       a.kind AS account_kind,
+       t.account_id,
+       coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number,
        s.institution,
        t.card_last4,
+       t.unit,
        (sqlc.narg(kinds)::text[] IS NULL OR t.kind = ANY (sqlc.narg(kinds)::text[]))::boolean AS kind_match,
        ((sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
            -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
-           AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM sqlc.narg(card_last4)::text))::boolean AS card_match,
+           AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM sqlc.narg(card_last4)::text)
+           AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint))::boolean AS pick_match,
        count(*)::integer AS row_count,
-       sum(t.amount + coalesce(kids.amount, 0))::numeric AS amount
+       sum(t.amount + coalesce(kids.amount, 0))::numeric AS amount,
+       coalesce(sum(flow.amount) FILTER (WHERE flow.amount < 0 AND NOT flow.transfer), 0)::numeric AS spent,
+       coalesce(sum(flow.amount) FILTER (WHERE flow.amount > 0 AND NOT flow.transfer), 0)::numeric AS received
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
 LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                    FROM transactions c
                    WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
+CROSS JOIN LATERAL (SELECT CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS amount,
+                           (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer) flow
 WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
-  -- Card lines only: deposit lines count money in as positive (ADR 0013) and get views of their own.
-  AND s.kind = 'credit_card'
   AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
   AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
   AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
   AND (sqlc.narg(closing_to)::date IS NULL OR s.closing_date <= sqlc.narg(closing_to)::date)
   AND (NOT @overseas::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND (sqlc.narg(query)::text IS NULL OR strpos(lower(t.description), lower(sqlc.narg(query)::text)) > 0)
-GROUP BY t.kind, s.institution, t.card_last4
-ORDER BY t.kind, s.institution, t.card_last4;
+  AND (sqlc.narg(account_kind)::text IS NULL OR a.kind = sqlc.narg(account_kind)::text)
+  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
+  AND (NOT @hide_transfers::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+  AND (sqlc.narg(query)::text IS NULL
+       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower(sqlc.narg(query)::text)) > 0)
+GROUP BY t.kind, a.kind, t.account_id, coalesce(a.name, a.label), coalesce(a.full_number, a.number), s.institution,
+         t.card_last4, t.unit
+ORDER BY t.kind, s.institution, t.card_last4, t.account_id, t.unit;
 
 -- name: KindTotals :many
 -- The kind facet: lines as printed, whether or not they have a parent; every filter but the kind one
 -- applies.
 SELECT t.kind,
        count(*)::integer AS row_count,
-       sum(t.amount)::numeric AS amount
+       sum(t.amount)::numeric AS amount,
+       sum(CASE WHEN a.kind = 'credit_card' THEN -t.amount ELSE t.amount END)::numeric AS flow
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
-WHERE s.kind = 'credit_card'
-  AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
+JOIN accounts a ON a.id = t.account_id
+WHERE (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
   AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
   AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
   AND (sqlc.narg(closing_to)::date IS NULL OR s.closing_date <= sqlc.narg(closing_to)::date)
   AND (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
   AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM sqlc.narg(card_last4)::text)
+  AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)
   AND (NOT @overseas::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND (sqlc.narg(query)::text IS NULL OR strpos(lower(t.description), lower(sqlc.narg(query)::text)) > 0)
+  AND (sqlc.narg(account_kind)::text IS NULL OR a.kind = sqlc.narg(account_kind)::text)
+  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
+  AND (NOT @hide_transfers::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
+  AND (sqlc.narg(query)::text IS NULL
+       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower(sqlc.narg(query)::text)) > 0)
 GROUP BY t.kind
 ORDER BY t.kind;
 
@@ -93,15 +130,29 @@ ORDER BY t.kind;
 -- A line with its parent and its children, whichever statements they are on; the same columns as
 -- ListTransactions.
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
-       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children
+       t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
+       -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
+       -- sign turned, net of the children folded into it.
+       a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
+       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
+JOIN accounts a ON a.id = t.account_id
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
                                              'transactionDate', p.transaction_date, 'amount', p.amount::text,
                                              'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
+LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
+                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
                                                        'transactionDate', c.transaction_date, 'amount', c.amount::text,
                                              'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list

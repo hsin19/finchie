@@ -84,7 +84,10 @@ func (e DocumentStatus) Valid() bool {
 // Defines values for TransactionKind.
 const (
 	AnnualFee             TransactionKind = "annual_fee"
+	Fee                   TransactionKind = "fee"
 	ForeignTransactionFee TransactionKind = "foreign_transaction_fee"
+	Interest              TransactionKind = "interest"
+	Other                 TransactionKind = "other"
 	Payment               TransactionKind = "payment"
 	Purchase              TransactionKind = "purchase"
 	Rebate                TransactionKind = "rebate"
@@ -96,7 +99,13 @@ func (e TransactionKind) Valid() bool {
 	switch e {
 	case AnnualFee:
 		return true
+	case Fee:
+		return true
 	case ForeignTransactionFee:
+		return true
+	case Interest:
+		return true
+	case Other:
 		return true
 	case Payment:
 		return true
@@ -236,6 +245,15 @@ type AccountLine struct {
 	Unit        string  `json:"unit"`
 }
 
+// AccountTotal defines model for AccountTotal.
+type AccountTotal struct {
+	AccountId     int64   `json:"accountId"`
+	AccountName   *string `json:"accountName,omitempty"`
+	AccountNumber *string `json:"accountNumber,omitempty"`
+	Count         int     `json:"count"`
+	Institution   string  `json:"institution"`
+}
+
 // AccountUpdate defines model for AccountUpdate.
 type AccountUpdate struct {
 	// FullNumber Digits, spaces and dashes allowed; empty clears it
@@ -359,9 +377,14 @@ type KindTotal struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Amount Decimal         `json:"amount"`
-	Count  int             `json:"count"`
-	Kind   TransactionKind `json:"kind"`
+	Amount Decimal `json:"amount"`
+	Count  int     `json:"count"`
+
+	// Flow Seen from the owner
+	Flow Decimal `json:"flow"`
+
+	// Kind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+	Kind TransactionKind `json:"kind"`
 }
 
 // LineCounterpart The other line of a transfer or card payment (ADR 0016)
@@ -443,19 +466,44 @@ type Statement struct {
 
 // Transaction defines model for Transaction.
 type Transaction struct {
+	// AccountId A deposit account; absent for a card line
+	AccountId   *int64       `json:"accountId,omitempty"`
+	AccountKind *AccountKind `json:"accountKind,omitempty"`
+
+	// AccountName The owner's name for a deposit account, else the bank's
+	AccountName *string `json:"accountName,omitempty"`
+
+	// AccountNumber A deposit account's full number where given, else as printed
+	AccountNumber *string `json:"accountNumber,omitempty"`
+
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Amount    Decimal `json:"amount"`
-	CardLast4 *string `json:"cardLast4,omitempty"`
+	Amount Decimal `json:"amount"`
+
+	// Balance Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Balance   *Decimal `json:"balance,omitempty"`
+	CardLast4 *string  `json:"cardLast4,omitempty"`
 
 	// Children Lines that adjust this one, possibly on other statements; absent without any
-	Children    *[]TransactionLink `json:"children,omitempty"`
-	Country     *string            `json:"country,omitempty"`
-	Description string             `json:"description"`
-	Id          int64              `json:"id"`
-	Institution string             `json:"institution"`
-	Kind        TransactionKind    `json:"kind"`
+	Children *[]TransactionLink `json:"children,omitempty"`
+
+	// Counterpart The other line of a transfer or card payment (ADR 0016)
+	Counterpart  *LineCounterpart `json:"counterpart,omitempty"`
+	Counterparty *string          `json:"counterparty,omitempty"`
+	Country      *string          `json:"country,omitempty"`
+	Description  string           `json:"description"`
+
+	// Flow Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it
+	Flow        *Decimal `json:"flow,omitempty"`
+	Id          int64    `json:"id"`
+	Institution string   `json:"institution"`
+
+	// Kind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+	Kind TransactionKind `json:"kind"`
+	Memo *string         `json:"memo,omitempty"`
 
 	// OriginalAmount Decimal number as a string, e.g. "-6552.97"
 	//
@@ -468,6 +516,9 @@ type Transaction struct {
 	PostingDate     *openapi_types.Date `json:"postingDate,omitempty"`
 	StatementId     int64               `json:"statementId"`
 	TransactionDate openapi_types.Date  `json:"transactionDate"`
+
+	// Unit ISO 4217, or a points program's code
+	Unit *string `json:"unit,omitempty"`
 }
 
 // TransactionFamily defines model for TransactionFamily.
@@ -477,7 +528,7 @@ type TransactionFamily struct {
 	Transaction Transaction   `json:"transaction"`
 }
 
-// TransactionKind defines model for TransactionKind.
+// TransactionKind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
 type TransactionKind string
 
 // TransactionLink Another line, in short, enough to find it and to tell a refund in full
@@ -485,9 +536,11 @@ type TransactionLink struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Amount Decimal         `json:"amount"`
-	Id     int64           `json:"id"`
-	Kind   TransactionKind `json:"kind"`
+	Amount Decimal `json:"amount"`
+	Id     int64   `json:"id"`
+
+	// Kind A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+	Kind TransactionKind `json:"kind"`
 
 	// OriginalAmount Decimal number as a string, e.g. "-6552.97"
 	//
@@ -500,13 +553,16 @@ type TransactionLink struct {
 
 // TransactionSearch defines model for TransactionSearch.
 type TransactionSearch struct {
-	ByCard []CardTotal   `json:"byCard"`
-	ByKind []KindTotal   `json:"byKind"`
-	Items  []Transaction `json:"items"`
+	// ByAccount Deposit accounts, a facet like byCard
+	ByAccount []AccountTotal `json:"byAccount"`
+	ByCard    []CardTotal    `json:"byCard"`
+	ByKind    []KindTotal    `json:"byKind"`
 
-	// Sum Decimal number as a string, e.g. "-6552.97"
-	//
-	// Example: 1234.50
+	// Flows Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016)
+	Flows []UnitFlow    `json:"flows"`
+	Items []Transaction `json:"items"`
+
+	// Sum Amounts as printed, which only adds up within one kind of account: use with accountKind
 	Sum Decimal `json:"sum"`
 
 	// Total Rows matching every filter
@@ -515,6 +571,18 @@ type TransactionSearch struct {
 
 // TransactionSort defines model for TransactionSort.
 type TransactionSort string
+
+// UnitFlow defines model for UnitFlow.
+type UnitFlow struct {
+	// Received Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Received Decimal `json:"received"`
+
+	// Spent Negative or zero
+	Spent Decimal `json:"spent"`
+	Unit  string  `json:"unit"`
+}
 
 // Id defines model for Id.
 type Id = int64
@@ -565,7 +633,16 @@ type SearchTransactionsParams struct {
 	// Overseas Only rows charged in a foreign currency or in another country
 	Overseas *bool `form:"overseas,omitempty" json:"overseas,omitempty"`
 
-	// Q Case-insensitive substring of the description
+	// AccountKind Only card lines, or only deposit lines
+	AccountKind *AccountKind `form:"accountKind,omitempty" json:"accountKind,omitempty"`
+
+	// Account One deposit account
+	Account *int64 `form:"account,omitempty" json:"account,omitempty"`
+
+	// HideTransfers Leave out transfers between the owner's lines and card payments (ADR 0016)
+	HideTransfers *bool `form:"hideTransfers,omitempty" json:"hideTransfers,omitempty"`
+
+	// Q Case-insensitive substring of the description or the memo
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Sort Row order; largest and smallest compare amounts by size, ignoring the sign
@@ -987,6 +1064,27 @@ func (w *ServerInterfaceWrapper) SearchTransactions(ctx *echo.Context) error {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "overseas", ctx.QueryParams(), &params.Overseas, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter overseas: %s", err))
+	}
+
+	// ------------- Optional query parameter "accountKind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "accountKind", ctx.QueryParams(), &params.AccountKind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter accountKind: %s", err))
+	}
+
+	// ------------- Optional query parameter "account" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "account", ctx.QueryParams(), &params.Account, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter account: %s", err))
+	}
+
+	// ------------- Optional query parameter "hideTransfers" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "hideTransfers", ctx.QueryParams(), &params.HideTransfers, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter hideTransfers: %s", err))
 	}
 
 	// ------------- Optional query parameter "q" -------------

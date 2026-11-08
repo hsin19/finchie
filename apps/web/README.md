@@ -8,7 +8,7 @@ The browser app (ADR 0007): a SvelteKit single-page app, embedded in the backend
 | `/statements` | One month's bill (`?m=`, a closing month): what is due, spending, foreign transaction fees, rebates, by card and by kind, its statements. `?all` lists every statement, plus documents that produced none |
 | `/statements/{id}` | One statement: metadata, reconciliation by kind, its lines in statement order, processing log, re-parse; `?line=` scrolls to a line |
 | `/documents/{id}` | One document opened for reading (ADR 0012): an e-mail's headers, attachments, and body; the original to download even when the parser cannot open it |
-| `/transactions` | Search across statements: period, card, kinds, overseas, text; totals for the whole match |
+| `/transactions` | Search across every account's lines, cards and deposit accounts alike: period, bank, card or account, kinds, overseas, text in the description or memo. Amounts are seen from the owner, money out negative (ADR 0013); totals are what went out and came in per unit. Transfers between the owner's lines and card payments are listed, linked to their other line, but count as neither (ADR 0016), and `?hide=transfers` leaves them out |
 | `/accounts` | The net of deposits and card bills not seen paid, then every account (ADR 0013): its newest balance in each unit with its worth in NT$ (ADR 0015), and whether its balances join up; accounts with gaps first, where money moved that no statement shows. They are ordered by worth; `?sort=bank` by bank |
 | `/accounts/{id}` | One account: balances, gaps, its lines with running balances and where linked ones' money went (ADR 0016), every balance it has had; the owner can name it and give its full number |
 | `/upload` | Drop statement e-mails (`.eml`) and follow each through parsing; links the Gmail filter download |
@@ -40,6 +40,7 @@ Node 26 (`.node-version`); the pnpm version is pinned in `package.json`.
 | `src/lib/labels.ts` | Bank names, kind and status labels, tone classes |
 | `src/lib/documents.ts` | Where a document opens |
 | `src/lib/filters.ts` | The transactions page's filters, read from and written to the URL |
+| `src/lib/flows.ts` | Amounts as the owner sees them, and which lines are transfers |
 | `src/lib/keys.ts` | Which key presses are shortcuts: never while typing in a text field or composing with an IME, never while a dialog is open, never Enter or Space on a focused control |
 
 ## Pitfalls (SvelteKit 3)

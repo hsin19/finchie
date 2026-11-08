@@ -24,10 +24,11 @@ export const load = (async ({ fetch, url, parent }) => {
     const m = url.searchParams.get("m");
     const month = isMonth(m) ? m : (months[0] ?? thisMonth());
 
-    // Totals only (limit 0). With kind=purchase, `sum` and byCard are spending, while byKind (which
-    // ignores the kind filter) still has fees, rebates, and payments.
+    // Totals only (limit 0), of card lines alone, whose amounts add up as the bills print them. With
+    // kind=purchase, `sum` and byCard are spending, while byKind (which ignores the kind filter) still has
+    // fees, rebates, and payments.
     const client = api(fetch);
-    const purchases = (query: TransactionQuery) => client.GET("/api/transactions", { params: { query: { kind: ["purchase"], limit: 0, ...query } } });
+    const purchases = (query: TransactionQuery) => client.GET("/api/transactions", { params: { query: { accountKind: "credit_card", kind: ["purchase"], limit: 0, ...query } } });
     const [current, previous, overseas] = await Promise.all([
         purchases(closingRange(month)),
         purchases(closingRange(shiftMonth(month, -1))),

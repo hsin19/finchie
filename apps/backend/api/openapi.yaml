@@ -401,8 +401,11 @@ paths:
       summary: Transactions across every statement, newest first, with totals for the whole match
       description: |
         Filters combine with AND. `total` and `sum` cover every matching row, not just this page.
-        `byKind` and `byCard` are facets: each ignores its own filter (byKind ignores `kind`, byCard
-        ignores `institution` and `card`), so a picker can show the options it would switch to.
+        `byKind`, `byCard`, and `byAccount` are facets: each ignores its own filter (byKind ignores
+        `kind`; byCard and byAccount, the account picker's, ignore `institution`, `card`, and
+        `account`), so a picker can show the options it would switch to. Card and deposit lines come
+        together unless `accountKind` picks one (ADR 0013); `sum` adds amounts as printed and only means
+        something within one kind, `flows` add them as the owner sees them.
 
         While `kind` includes purchases (or is not given), a line with a parent (a fee or refund
         linked to its purchase) is not a row of its own but one of the parent's `children`, and rows,
@@ -443,9 +446,21 @@ paths:
           in: query
           description: Only rows charged in a foreign currency or in another country
           schema: { type: boolean }
+        - name: accountKind
+          in: query
+          description: Only card lines, or only deposit lines
+          schema: { $ref: "#/components/schemas/AccountKind" }
+        - name: account
+          in: query
+          description: One deposit account
+          schema: { type: integer, format: int64 }
+        - name: hideTransfers
+          in: query
+          description: Leave out transfers between the owner's lines and card payments (ADR 0016)
+          schema: { type: boolean }
         - name: q
           in: query
-          description: Case-insensitive substring of the description
+          description: Case-insensitive substring of the description or the memo
           schema: { type: string }
         - name: sort
           in: query
@@ -686,7 +701,8 @@ components:
 
     TransactionKind:
       type: string
-      enum: [purchase, foreign_transaction_fee, annual_fee, refund, rebate, payment]
+      description: A card line's kind (purchase … payment), or a deposit line's (interest, fee, other; ADR 0013)
+      enum: [purchase, foreign_transaction_fee, annual_fee, refund, rebate, payment, interest, fee, other]
 
     Transaction:
       type: object
@@ -704,6 +720,18 @@ components:
         originalCurrency: { type: string }
         country: { type: string }
         cardLast4: { type: string }
+        accountKind: { $ref: "#/components/schemas/AccountKind" }
+        accountId: { type: integer, format: int64, description: "A deposit account; absent for a card line" }
+        accountName: { type: string, description: "The owner's name for a deposit account, else the bank's" }
+        accountNumber: { type: string, description: "A deposit account's full number where given, else as printed" }
+        unit: { type: string, description: "ISO 4217, or a points program's code" }
+        memo: { type: string }
+        counterparty: { type: string }
+        balance: { $ref: "#/components/schemas/Decimal" }
+        flow:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it"
+        counterpart: { $ref: "#/components/schemas/LineCounterpart" }
         parent:
           $ref: "#/components/schemas/TransactionLink"
           description: The line this one adjusts, such as the purchase a fee or refund belongs to
@@ -737,27 +765,56 @@ components:
 
     TransactionSearch:
       type: object
-      required: [items, total, sum, byKind, byCard]
+      required: [items, total, sum, flows, byKind, byCard, byAccount]
       properties:
         items:
           type: array
           items: { $ref: "#/components/schemas/Transaction" }
         total: { type: integer, description: Rows matching every filter }
-        sum: { $ref: "#/components/schemas/Decimal" }
+        sum:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "Amounts as printed, which only adds up within one kind of account: use with accountKind"
+        flows:
+          type: array
+          description: "Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016)"
+          items: { $ref: "#/components/schemas/UnitFlow" }
         byKind:
           type: array
           items: { $ref: "#/components/schemas/KindTotal" }
         byCard:
           type: array
           items: { $ref: "#/components/schemas/CardTotal" }
+        byAccount:
+          type: array
+          description: Deposit accounts, a facet like byCard
+          items: { $ref: "#/components/schemas/AccountTotal" }
+
+    UnitFlow:
+      type: object
+      required: [unit, spent, received]
+      properties:
+        unit: { type: string }
+        spent: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "Negative or zero" }
+        received: { $ref: "#/components/schemas/Decimal" }
+
+    AccountTotal:
+      type: object
+      required: [accountId, institution, count]
+      properties:
+        accountId: { type: integer, format: int64 }
+        institution: { type: string }
+        accountName: { type: string }
+        accountNumber: { type: string }
+        count: { type: integer }
 
     KindTotal:
       type: object
-      required: [kind, count, amount]
+      required: [kind, count, amount, flow]
       properties:
         kind: { $ref: "#/components/schemas/TransactionKind" }
         count: { type: integer }
         amount: { $ref: "#/components/schemas/Decimal" }
+        flow: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: Seen from the owner }
 
     CardTotal:
       type: object

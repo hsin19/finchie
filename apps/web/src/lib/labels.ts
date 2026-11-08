@@ -3,6 +3,7 @@ import type {
     AccountKind,
     Document,
     DocumentStatus,
+    Transaction,
     TransactionKind,
 } from "#lib/api/client.js";
 
@@ -62,6 +63,12 @@ export function accountName(account: Pick<Account, "kind" | "label" | "name">): 
     return account.name ?? account.label ?? accountKinds[account.kind].label;
 }
 
+/** Where a line is: "ESUN··3381" for a card, "ESUN 臺幣活存" for a deposit account. */
+export function lineAccount(t: Pick<Transaction, "institution" | "cardLast4" | "accountKind" | "accountName">): string {
+    if (t.accountKind !== "deposit") return cardLabel(t.institution, t.cardLast4);
+    return `${institution(t.institution).code} ${t.accountName ?? accountKinds.deposit.label}`;
+}
+
 interface Kind {
     /** Column value, terminal style. */
     short: string;
@@ -76,9 +83,13 @@ export const kinds: Record<TransactionKind, Kind> = {
     refund: { short: "refund", label: "退款", tone: "pos" },
     rebate: { short: "rebate", label: "回饋", tone: "pos" },
     payment: { short: "payment", label: "繳款", tone: "mute" },
+    // A deposit account's lines (ADR 0013): banks print no more than these apart.
+    interest: { short: "interest", label: "利息", tone: "pos" },
+    fee: { short: "fee", label: "手續費", tone: "neg" },
+    other: { short: "other", label: "存提與轉帳", tone: "ink" },
 };
 
-export const kindOrder: TransactionKind[] = ["purchase", "foreign_transaction_fee", "annual_fee", "refund", "rebate", "payment"];
+export const kindOrder: TransactionKind[] = ["purchase", "foreign_transaction_fee", "annual_fee", "refund", "rebate", "payment", "interest", "fee", "other"];
 
 interface Status {
     tag: string;

@@ -120,18 +120,9 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 			balance := decimalString(r.Balance)
 			line.Balance = &balance
 		}
-		if r.CounterpartID != nil {
-			counterpart := LineCounterpart{
-				Id: *r.CounterpartID, StatementId: *r.CounterpartStatementID, Date: openapi_types.Date{Time: r.CounterpartDate.Time},
-				AccountKind: AccountKind(*r.CounterpartAccountKind), Institution: *r.CounterpartInstitution, AccountName: r.CounterpartAccountName,
-			}
-			// A card bill's container is no account the owner has: no account to point at (ADR 0013).
-			if counterpart.AccountKind != CreditCard {
-				counterpart.AccountId = r.CounterpartAccountID
-				counterpart.AccountNumber = cmp.Or(r.CounterpartFullNumber, r.CounterpartAccountNumber)
-			}
-			line.Counterpart = &counterpart
-		}
+		line.Counterpart = lineCounterpart(r.CounterpartID, r.CounterpartStatementID, r.CounterpartDate, r.CounterpartAccountID,
+			r.CounterpartAccountKind, r.CounterpartInstitution, r.CounterpartAccountName,
+			cmp.Or(r.CounterpartFullNumber, r.CounterpartAccountNumber))
 		lines = append(lines, line)
 	}
 	return lines, nil

@@ -216,7 +216,8 @@ func patch(t *testing.T, e *echo.Echo, path, body string) *httptest.ResponseReco
 	return recorder
 }
 
-func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.ParseDocumentResponse) {
+// store stores a parsed document the way the ingest worker would, and returns the document's ID.
+func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.ParseDocumentResponse) int64 {
 	t.Helper()
 	doc, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
 		Sha256: []byte(name), Filename: name, ContentType: "message/rfc822", Content: []byte("From: bank"),
@@ -226,6 +227,42 @@ func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.Par
 	}
 	if _, err := ingest.Store(t.Context(), pool, doc.ID, response); err != nil {
 		t.Fatal(err)
+	}
+	return doc.ID
+}
+
+func septemberLine(day int32, amount, description, counterparty string) *parserv1.DepositLine {
+	return &parserv1.DepositLine{
+		Date: &gdate.Date{Year: 2026, Month: 9, Day: day}, Description: description, Counterparty: counterparty,
+		Amount: &decimal.Decimal{Value: amount}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
+	}
+}
+
+// septemberDeposit is one account's statement for September 2026.
+func septemberDeposit(institution, number, closing string, lines ...*parserv1.DepositLine) *parserv1.ParseDocumentResponse {
+	return &parserv1.ParseDocumentResponse{Parser: institution + ".deposit", DepositStatement: &parserv1.DepositStatement{
+		Institution: institution,
+		PeriodStart: &gdate.Date{Year: 2026, Month: 9, Day: 1},
+		PeriodEnd:   &gdate.Date{Year: 2026, Month: 9, Day: 30},
+		Accounts: []*parserv1.DepositAccount{{
+			Number: number, Name: "活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: closing}, Lines: lines,
+		}},
+	}}
+}
+
+// septemberBill is E.SUN's card bill closing 9/7, due 9/22.
+func septemberBill(totalDue string, lines ...*parserv1.Transaction) *parserv1.ParseDocumentResponse {
+	return &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: &parserv1.Statement{
+		Institution: "esun", ClosingDate: &gdate.Date{Year: 2026, Month: 9, Day: 7}, DueDate: &gdate.Date{Year: 2026, Month: 9, Day: 22},
+		Currency: "TWD", TotalDue: &decimal.Decimal{Value: totalDue}, Transactions: lines,
+		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "0"}, Stated: &decimal.Decimal{Value: "0"}, StatedLabel: "x"},
+	}}
+}
+
+func cardLine(day int32, kind parserv1.TransactionKind, amount, description, card string) *parserv1.Transaction {
+	return &parserv1.Transaction{
+		TransactionDate: &gdate.Date{Year: 2026, Month: 9, Day: day}, Description: description, Kind: kind,
+		Amount: &decimal.Decimal{Value: amount}, CardLast4: card,
 	}
 }
 
@@ -263,37 +300,14 @@ func TestTheOwnerNamesAnAccountAndGivesItsFullNumberWhichMustFit(t *testing.T) {
 
 func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
-	line := func(day int32, amount, description, counterparty string) *parserv1.DepositLine {
-		return &parserv1.DepositLine{
-			Date: &gdate.Date{Year: 2026, Month: 9, Day: day}, Description: description, Counterparty: counterparty,
-			Amount: &decimal.Decimal{Value: amount}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-		}
-	}
-	deposit := func(institution, number, closing string, lines ...*parserv1.DepositLine) *parserv1.ParseDocumentResponse {
-		return &parserv1.ParseDocumentResponse{Parser: institution + ".deposit", DepositStatement: &parserv1.DepositStatement{
-			Institution: institution,
-			PeriodStart: &gdate.Date{Year: 2026, Month: 9, Day: 1},
-			PeriodEnd:   &gdate.Date{Year: 2026, Month: 9, Day: 30},
-			Accounts: []*parserv1.DepositAccount{{
-				Number: number, Name: "活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: closing}, Lines: lines,
-			}},
-		}}
-	}
 	// The bill closing 9/7 is paid on 9/22 from E.SUN; 5,000 goes to Taishin, whose number the line prints.
-	store(t, pool, "esun.eml", deposit("esun", savings, "5000",
-		line(22, "-6350", "玉山卡款扣繳", ""),
-		line(25, "-5000", "行銀跨行轉優", "812 0087654321***234"),
+	store(t, pool, "esun.eml", septemberDeposit("esun", savings, "5000",
+		septemberLine(22, "-6350", "玉山卡款扣繳", ""),
+		septemberLine(25, "-5000", "行銀跨行轉優", "812 0087654321***234"),
 	))
-	store(t, pool, "taishin.eml", deposit("taishin", "876543****9234", "5000", line(25, "5000", "CD轉入", "")))
-	store(t, pool, "bill.eml", &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: &parserv1.Statement{
-		Institution: "esun", ClosingDate: &gdate.Date{Year: 2026, Month: 9, Day: 7}, DueDate: &gdate.Date{Year: 2026, Month: 9, Day: 22},
-		Currency: "TWD", TotalDue: &decimal.Decimal{Value: "6350"},
-		Transactions: []*parserv1.Transaction{{
-			TransactionDate: &gdate.Date{Year: 2026, Month: 9, Day: 22}, Description: "感謝您辦理本行自動轉帳繳款",
-			Kind: parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT, Amount: &decimal.Decimal{Value: "-6350"},
-		}},
-		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "0"}, Stated: &decimal.Decimal{Value: "0"}, StatedLabel: "x"},
-	}})
+	store(t, pool, "taishin.eml", septemberDeposit("taishin", "876543****9234", "5000", septemberLine(25, "5000", "CD轉入", "")))
+	store(t, pool, "bill.eml", septemberBill("6350",
+		cardLine(22, parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT, "-6350", "感謝您辦理本行自動轉帳繳款", "")))
 
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
 	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")

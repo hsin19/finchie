@@ -9,8 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	gdate "google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
@@ -237,41 +235,82 @@ func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
-func TestDepositStatementsStayOutOfTheCardViewsUntilTheyHaveTheirOwn(t *testing.T) {
+func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
-	seedStatement(t, pool, "esun", "2026-09-07", []line{{date: "2026-09-01", description: "SHOP", kind: "purchase", amount: "100"}})
-	doc, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
-		Sha256: []byte("deposit"), Filename: "deposit.eml", ContentType: "message/rfc822", Content: []byte("From: bank"),
-	})
-	if err != nil {
-		t.Fatal(err)
+	fee := septemberLine(26, "-15", "跨行手續費", "")
+	fee.Kind = parserv1.DepositLineKind_DEPOSIT_LINE_KIND_FEE
+	transfer := septemberLine(25, "-5000", "行銀跨行轉優", "812 0087654321***234")
+	transfer.Memo = "房租"
+	deposit := store(t, pool, "esun.eml", septemberDeposit("esun", savings, "47165",
+		septemberLine(5, "60000", "薪資", ""),
+		septemberLine(22, "-6350", "玉山卡款扣繳", ""),
+		transfer,
+		fee,
+	))
+	store(t, pool, "taishin.eml", septemberDeposit("taishin", "876543****9234", "5000", septemberLine(25, "5000", "CD轉入", "")))
+	store(t, pool, "bill.eml", septemberBill("6350",
+		cardLine(1, parserv1.TransactionKind_TRANSACTION_KIND_PURCHASE, "6350", "SHOP", "3381"),
+		cardLine(22, parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT, "-6350", "感謝您辦理本行自動轉帳繳款", "")))
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")
+
+	all := decode[TransactionSearch](t, get(t, e, "/api/transactions"))
+	if all.Total != 7 {
+		t.Fatalf("total = %d, want every account's lines", all.Total)
 	}
-	// Synthetic (ADR 0006); money in is positive on a deposit account, so its lines would distort card totals.
-	deposit := &parserv1.DepositStatement{
-		Institution: "esun",
-		PeriodStart: &gdate.Date{Year: 2026, Month: 9, Day: 1},
-		PeriodEnd:   &gdate.Date{Year: 2026, Month: 9, Day: 30},
-		Accounts: []*parserv1.DepositAccount{{
-			Number: "1234567***890", Name: "臺幣活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: "60000"},
-			Lines: []*parserv1.DepositLine{{
-				Date: &gdate.Date{Year: 2026, Month: 9, Day: 5}, Description: "薪資", Amount: &decimal.Decimal{Value: "60000"},
-				Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-			}},
-		}},
+	// What went out and came in: the purchase and the fee, and the salary. The card payment and the
+	// transfer moved money between the owner's own lines.
+	if len(all.Flows) != 1 || all.Flows[0] != (UnitFlow{Unit: "TWD", Spent: "-6365", Received: "60000"}) {
+		t.Fatalf("flows = %+v", all.Flows)
 	}
-	if _, err := ingest.Store(t.Context(), pool, doc.ID, &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: deposit}); err != nil {
-		t.Fatal(err)
+	items := map[string]Transaction{}
+	for _, item := range all.Items {
+		items[item.Description] = item
+	}
+	if shop := items["SHOP"]; shop.Amount != "6350" || *shop.Flow != "-6350" || *shop.AccountKind != CreditCard || shop.AccountId != nil {
+		t.Fatalf("card purchase = %+v", shop)
+	}
+	if salary := items["薪資"]; *salary.Flow != "60000" || *salary.AccountKind != Deposit || *salary.AccountId != esun.Id || *salary.AccountNumber != savings {
+		t.Fatalf("salary = %+v", salary)
+	}
+	if out := items["行銀跨行轉優"]; out.Counterpart == nil || *out.Counterpart.AccountId != taishin.Id || *out.Memo != "房租" {
+		t.Fatalf("transfer = %+v", out)
+	}
+	if paid := items["感謝您辦理本行自動轉帳繳款"]; paid.Counterpart == nil || *paid.Counterpart.AccountId != esun.Id {
+		t.Fatalf("card payment = %+v", paid)
+	}
+	kinds := map[TransactionKind]string{}
+	for _, k := range all.ByKind {
+		kinds[k.Kind] = k.Flow
+	}
+	if kinds[Fee] != "-15" || kinds[Purchase] != "-6350" {
+		t.Fatalf("byKind = %+v", all.ByKind)
 	}
 
+	if hidden := decode[TransactionSearch](t, get(t, e, "/api/transactions?hideTransfers=true")); hidden.Total != 3 || hidden.Flows[0] != all.Flows[0] {
+		t.Fatalf("without transfers: total %d, flows %+v", hidden.Total, hidden.Flows)
+	}
+	// The account picker's facets skip the picker itself.
+	one := decode[TransactionSearch](t, get(t, e, fmt.Sprintf("/api/transactions?account=%d", esun.Id)))
+	if one.Total != 4 || len(one.ByAccount) != 2 || one.ByAccount[0].AccountId != esun.Id || one.ByAccount[0].Count != 4 || one.ByAccount[1].Count != 1 || len(one.ByCard) == 0 {
+		t.Fatalf("one account: total %d, byAccount %+v, byCard %+v", one.Total, one.ByAccount, one.ByCard)
+	}
+	if memo := decode[TransactionSearch](t, get(t, e, "/api/transactions?q=房租")); memo.Total != 1 {
+		t.Fatalf("q matches the memo: total %d", memo.Total)
+	}
+	// The bill pages ask for card lines alone, whose amounts add up as printed.
+	cards := decode[TransactionSearch](t, get(t, e, "/api/transactions?accountKind=credit_card"))
+	if cards.Total != 2 || cards.Sum != "0" || len(cards.ByAccount) != 0 {
+		t.Fatalf("card lines: total %d, sum %s, byAccount %+v", cards.Total, cards.Sum, cards.ByAccount)
+	}
+
+	// The statement endpoints still list card bills alone.
 	if statements := decode[[]Statement](t, get(t, e, "/api/statements")); len(statements) != 1 || statements[0].Institution != "esun" {
 		t.Fatalf("statements = %+v", statements)
 	}
-	if search := decode[TransactionSearch](t, get(t, e, "/api/transactions")); search.Total != 1 || search.Sum != "100" {
-		t.Fatalf("search = total %d, sum %s", search.Total, search.Sum)
-	}
 	// The document says what it produced, so the upload page needs no card bill to count its lines.
-	stored := decode[Document](t, get(t, e, fmt.Sprintf("/api/documents/%d", doc.ID)))
-	if stored.StatementKind == nil || *stored.StatementKind != Deposit || stored.LineCount != 1 || stored.AccountCount != 1 {
+	stored := decode[Document](t, get(t, e, fmt.Sprintf("/api/documents/%d", deposit)))
+	if stored.StatementKind == nil || *stored.StatementKind != Deposit || stored.LineCount != 4 || stored.AccountCount != 1 {
 		t.Fatalf("document = kind %v, %d lines, %d accounts", stored.StatementKind, stored.LineCount, stored.AccountCount)
 	}
 }

@@ -1,6 +1,7 @@
 // The transactions page keeps every filter in the URL
-// (?m=2026-10&kind=purchase&card=hsbc:4417&q=uber&overseas=1&sort=largest&page=2), so a filtered view
-// can be bookmarked and the back button undoes a filter. ?closing=2026-10 keeps the rows of the
+// (?m=2026-10&kind=purchase&card=hsbc:4417&q=uber&overseas=1&hide=transfers&sort=largest&page=2), so a
+// filtered view can be bookmarked and the back button undoes a filter. ?card= picks a bank or one of its
+// cards, ?account= a deposit account. ?closing=2026-10 keeps the rows of the
 // statements that closed that month; it replaces the default period instead of adding to it.
 
 import {
@@ -24,8 +25,12 @@ export interface Filters {
     kinds: TransactionKind[];
     institution: string;
     card: string;
+    /** A deposit account's ID, or "". */
+    account: string;
     q: string;
     overseas: boolean;
+    /** Leave out transfers between the owner's lines and card payments (ADR 0016). */
+    hideTransfers: boolean;
     sort: TransactionSort;
     page: number;
 }
@@ -41,8 +46,10 @@ export function readFilters(params: ReadonlyURLSearchParams): Filters {
         kinds: params.getAll("kind").filter((k): k is TransactionKind => (kindOrder as string[]).includes(k)),
         institution,
         card,
+        account: /^\d+$/.test(params.get("account") ?? "") ? params.get("account")! : "",
         q: params.get("q") ?? "",
         overseas: params.get("overseas") === "1",
+        hideTransfers: params.getAll("hide").includes("transfers"),
         sort: SORTS.find(s => s === sort) ?? "newest",
         page: Math.max(1, Math.floor(Number(params.get("page"))) || 1),
     };
