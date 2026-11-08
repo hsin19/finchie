@@ -19,7 +19,10 @@ import {
     invalidate,
     refreshAll,
 } from "$app/navigation";
-import { resolve } from "$app/paths";
+import {
+    asset,
+    resolve,
+} from "$app/paths";
 import { page } from "$app/state";
 import type { LayoutProps } from "./$types";
 
@@ -108,7 +111,7 @@ function onkeydown(event: KeyboardEvent) {
 <div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-3.5 pb-28 md:px-5 md:pt-5 md:pb-6">
     <header class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-2.5 md:panel md:px-3.5 md:py-2.5">
         <div class="min-w-0 grow truncate text-[14px]">
-            <a href={resolve("/")} class="font-bold text-accent">finchie</a>
+            <a href={resolve("/")} aria-label="finchie" class="font-bold text-accent"><img src={asset("favicon.svg")} alt="" class="-mr-0.5 inline-block size-[18px] align-[-4px]" />inchie</a>
             {prompt.command}{#each prompt.flags as flag (flag.name)}
                 <span class="text-mute">{` ${flag.name}`}</span>{flag.value ? ` ${flag.value}` : ""}
             {/each}
