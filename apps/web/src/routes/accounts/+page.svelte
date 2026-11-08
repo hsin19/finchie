@@ -2,6 +2,7 @@
 import {
     sortAccounts,
     totalWorth,
+    unpaidBills,
 } from "#lib/accounts.js";
 import type { Account } from "#lib/api/client.js";
 import {
@@ -12,6 +13,8 @@ import {
 import {
     formatAmount,
     sign,
+    subtract,
+    sum,
 } from "#lib/money.js";
 import { resolve } from "$app/paths";
 import type { PageProps } from "./$types";
@@ -32,6 +35,10 @@ const sorts = [
     { value: "bank", label: "依銀行", href: resolve("/accounts?sort=bank") },
 ] as const;
 const gapped = $derived(data.accounts.filter(a => a.gaps.length > 0));
+// Net of the card bills not yet seen paid (ADR 0016); a paid bill's money already left a deposit account.
+const deposits = $derived(totalWorth(data.accounts));
+const unpaid = $derived(unpaidBills(data.statements));
+const owed = $derived(sum(unpaid.map(s => s.totalDue)));
 
 function href(account: Account) {
     return resolve("/accounts/[id]", { id: String(account.id) });
@@ -45,13 +52,35 @@ function href(account: Account) {
         <ul class="mt-1.5">
             {#each gapped as account (account.id)}
                 <li>
-                    <a href={href(account)}>{institution(account.institution).name} {accountName(account)} {account.number}</a>
+                    <a href={href(account)}>{institution(account.institution).name} {accountName(account)} {account.fullNumber ?? account.number}</a>
                     <span class="text-mute">· {account.gaps.length} 段</span>
                 </li>
             {/each}
         </ul>
     </section>
 {/if}
+
+<section class="panel flex flex-wrap items-baseline gap-x-8 gap-y-2 px-3.5 py-2.5">
+    <div>
+        <div class="label">NET · 淨額</div>
+        <div class="text-[20px] font-bold text-ink-bright">≈ NT${formatAmount(subtract(deposits.total, owed))}</div>
+    </div>
+    <div>
+        <div class="label">DEPOSITS · 存款</div>
+        <div>≈ NT${formatAmount(deposits.total)}{deposits.missing ? `（${deposits.missing} 個帳戶沒有匯率，不計）` : ""}</div>
+    </div>
+    <div>
+        <div class="label">CARDS · 未見繳款的卡費</div>
+        <div class={unpaid.length > 0 ? "text-neg" : "text-dim"}>
+            {unpaid.length > 0 ? `${formatAmount(owed)}（${unpaid.length} 張）` : "沒有"}
+        </div>
+        {#if unpaid.length > 0}
+            <a href={resolve("/statements?all")} class="text-[12px] text-dim hover:text-ink">
+                {unpaid.map(s => `${institution(s.institution).name} ${s.dueDate.slice(5).replace("-", "/")} 到期`).join("、")} →
+            </a>
+        {/if}
+    </div>
+</section>
 
 <nav aria-label="排序" class="flex items-baseline gap-2 text-[12px] text-mute">
     排序
@@ -90,7 +119,7 @@ function href(account: Account) {
                             <td class="py-2.5 pr-2">{institution(account.institution).name}</td>
                             <td class="px-2 py-2.5">
                                 <a href={href(account)}>{accountName(account)}</a>
-                                {#if account.number}<span class="text-mute">{account.number}</span>{/if}
+                                {#if account.number}<span class="text-mute">{account.fullNumber ?? account.number}</span>{/if}
                             </td>
                             <td class="px-2 py-2.5 text-right">
                                 {#each account.balances as balance (balance.unit)}

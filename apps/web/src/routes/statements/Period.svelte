@@ -185,7 +185,7 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
                     {institution(statement.institution).name} <span class="text-mute">{shortDate(statement.closingDate).replace("-", "/")} 結帳</span>
                 </span>
                 <span class="text-[12px] text-mute">
-                    {statement.transactionCount} 筆 · {reconciliation(statement)} · {shortDate(statement.dueDate).replace("-", "/")} 到期 {formatAmount(statement.totalDue)}
+                    {statement.transactionCount} 筆 · {reconciliation(statement)} · {shortDate(statement.dueDate).replace("-", "/")} 到期 {formatAmount(statement.totalDue)}{statement.paidOn ? ` · 已繳 ${shortDate(statement.paidOn).replace("-", "/")}` : ""}
                 </span>
             </a>
         {:else}

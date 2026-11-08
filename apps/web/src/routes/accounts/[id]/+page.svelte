@@ -1,5 +1,11 @@
 <script lang="ts">
 import {
+    type AccountLine,
+    api,
+    LEDGER,
+    unwrap,
+} from "#lib/api/client.js";
+import {
     accountKinds,
     accountName,
     institution,
@@ -8,6 +14,7 @@ import {
     formatAmount,
     sign,
 } from "#lib/money.js";
+import { invalidate } from "$app/navigation";
 import { resolve } from "$app/paths";
 import type { PageProps } from "./$types";
 
@@ -15,6 +22,41 @@ let { data }: PageProps = $props();
 
 const account = $derived(data.account);
 const bank = $derived(institution(account.institution));
+
+// The owner's details (ADR 0016): optional, and an empty field clears one.
+let editing = $state(false);
+let name = $state("");
+let fullNumber = $state("");
+let saveError = $state<string>();
+
+function edit() {
+    name = account.name ?? "";
+    fullNumber = account.fullNumber ?? "";
+    saveError = undefined;
+    editing = true;
+}
+
+async function save(event: SubmitEvent) {
+    event.preventDefault();
+    try {
+        unwrap(await api().PATCH("/api/accounts/{id}", { params: { path: { id: account.id } }, body: { name, fullNumber } }));
+        editing = false;
+        await invalidate(LEDGER);
+    } catch (error) {
+        saveError = (error as Error).message;
+    }
+}
+
+/** Where a linked line's money went or came from: another account, or a card bill it paid. */
+function counterpart(line: AccountLine): { href: string; text: string; } | undefined {
+    const other = line.counterpart;
+    if (!other) return undefined;
+    const bankName = institution(other.institution).name;
+    if (other.accountId !== undefined) {
+        return { href: resolve("/accounts/[id]", { id: String(other.accountId) }), text: `${bankName} ${other.accountName ?? ""} ${other.accountNumber ?? ""}` };
+    }
+    return { href: resolve("/statements/[id]", { id: String(other.statementId) }), text: `${bankName} 信用卡帳單` };
+}
 
 function amountTone(value: string) {
     return sign(value) < 0 ? "text-neg" : sign(value) > 0 ? "text-pos" : "text-dim";
@@ -25,10 +67,28 @@ function amountTone(value: string) {
     <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h1 class="text-[16px] font-bold">
             {bank.name} {accountName(account)}
-            {#if account.number}<span class="font-normal text-mute">{account.number}</span>{/if}
+            {#if account.number}<span class="font-normal text-mute">{account.fullNumber ?? account.number}</span>{/if}
         </h1>
-        <a href={resolve("/accounts")} class="text-[12px] text-dim hover:text-ink">← 全部帳戶</a>
+        <span class="flex gap-3 text-[12px]">
+            {#if !editing}<button type="button" class="text-dim hover:text-ink" onclick={edit}>編輯名稱與帳號</button>{/if}
+            <a href={resolve("/accounts")} class="text-dim hover:text-ink">← 全部帳戶</a>
+        </span>
     </div>
+    {#if editing}
+        <form class="mt-2 flex flex-wrap items-end gap-3" onsubmit={save}>
+            <label class="flex flex-col gap-1 text-[12px] text-mute">
+                名稱（空白則用銀行的「{account.label ?? accountKinds[account.kind].label}」）
+                <input class="control min-h-9 w-56 text-ink" bind:value={name} placeholder={account.label ?? ""} />
+            </label>
+            <label class="flex flex-col gap-1 text-[12px] text-mute">
+                完整帳號（要和 {account.number} 露出的數字對得上）
+                <input class="control min-h-9 w-56 text-ink" bind:value={fullNumber} inputmode="numeric" placeholder={account.number} />
+            </label>
+            <button type="submit" class="control min-h-9 border-accent px-3">儲存</button>
+            <button type="button" class="control min-h-9 px-3" onclick={() => (editing = false)}>取消</button>
+            {#if saveError}<span class="w-full text-[12px] text-neg">{saveError}</span>{/if}
+        </form>
+    {/if}
     <div class="mt-2 flex flex-wrap gap-x-8 gap-y-2">
         {#each account.balances as balance (balance.unit)}
             <div>
@@ -94,7 +154,14 @@ function amountTone(value: string) {
                 {#each data.lines as line (line.id)}
                     <tr class="border-t border-rule hover:bg-raised">
                         <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
-                        <td class="px-2 py-2">{line.description}</td>
+                        <td class="px-2 py-2">
+                            {line.description}
+                            {#if counterpart(line)}
+                                {@const other = counterpart(line)}
+                                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved in counterpart() -->
+                                <a href={other?.href} class="block text-[12px] text-dim hover:text-ink">↔ {other?.text}</a>
+                            {/if}
+                        </td>
                         <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
                         <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
                         <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">

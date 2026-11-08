@@ -11,12 +11,71 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cardBills = `-- name: CardBills :many
+SELECT id, institution, closing_date, due_date, total_due
+FROM statements
+WHERE kind = 'credit_card'
+ORDER BY institution, closing_date
+`
+
+type CardBillsRow struct {
+	ID          int64
+	Institution string
+	ClosingDate pgtype.Date
+	DueDate     pgtype.Date
+	TotalDue    pgtype.Numeric
+}
+
+func (q *Queries) CardBills(ctx context.Context) ([]CardBillsRow, error) {
+	rows, err := q.db.Query(ctx, cardBills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CardBillsRow
+	for rows.Next() {
+		var i CardBillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Institution,
+			&i.ClosingDate,
+			&i.DueDate,
+			&i.TotalDue,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const clearPaid = `-- name: ClearPaid :exec
+UPDATE statements SET paid_on = NULL, paid_by = NULL WHERE paid_on IS NOT NULL OR paid_by IS NOT NULL
+`
+
+func (q *Queries) ClearPaid(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearPaid)
+	return err
+}
+
 const clearParents = `-- name: ClearParents :exec
 UPDATE transactions SET parent_id = NULL WHERE parent_id IS NOT NULL
 `
 
 func (q *Queries) ClearParents(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, clearParents)
+	return err
+}
+
+const clearTransfers = `-- name: ClearTransfers :exec
+UPDATE transactions SET counterpart_id = NULL WHERE counterpart_id IS NOT NULL
+`
+
+func (q *Queries) ClearTransfers(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearTransfers)
 	return err
 }
 
@@ -279,6 +338,41 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 	return items, nil
 }
 
+const setCounterparts = `-- name: SetCounterparts :exec
+UPDATE transactions t SET counterpart_id = l.counterpart_id
+FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS counterpart_id) l
+WHERE t.id = l.id
+`
+
+type SetCounterpartsParams struct {
+	Ids            []int64
+	CounterpartIds []int64
+}
+
+func (q *Queries) SetCounterparts(ctx context.Context, arg SetCounterpartsParams) error {
+	_, err := q.db.Exec(ctx, setCounterparts, arg.Ids, arg.CounterpartIds)
+	return err
+}
+
+const setPaid = `-- name: SetPaid :exec
+UPDATE statements s SET paid_on = p.paid_on, paid_by = NULLIF(p.paid_by, 0)
+FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::date[]) AS paid_on,
+             unnest($3::bigint[]) AS paid_by) p
+WHERE s.id = p.id
+`
+
+type SetPaidParams struct {
+	Ids    []int64
+	PaidOn []pgtype.Date
+	PaidBy []int64
+}
+
+// paid_by 0 is none: a bill that owes nothing is paid by no line.
+func (q *Queries) SetPaid(ctx context.Context, arg SetPaidParams) error {
+	_, err := q.db.Exec(ctx, setPaid, arg.Ids, arg.PaidOn, arg.PaidBy)
+	return err
+}
+
 const setParents = `-- name: SetParents :exec
 UPDATE transactions t SET parent_id = l.parent_id
 FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS parent_id) l
@@ -455,6 +549,62 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 			&i.CardMatch,
 			&i.RowCount,
 			&i.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const transferLines = `-- name: TransferLines :many
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
+       t.transaction_date, t.kind, t.amount, t.counterparty
+FROM transactions t
+JOIN accounts a ON a.id = t.account_id
+WHERE a.kind = 'deposit' OR t.kind = 'payment'
+ORDER BY t.id
+`
+
+type TransferLinesRow struct {
+	ID              int64
+	AccountID       int64
+	AccountKind     string
+	Institution     string
+	Number          string
+	FullNumber      *string
+	StatementID     int64
+	TransactionDate pgtype.Date
+	Kind            string
+	Amount          pgtype.Numeric
+	Counterparty    *string
+}
+
+// The lines a transfer link can join (ADR 0016): every deposit account's lines, and card payment lines.
+func (q *Queries) TransferLines(ctx context.Context) ([]TransferLinesRow, error) {
+	rows, err := q.db.Query(ctx, transferLines)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TransferLinesRow
+	for rows.Next() {
+		var i TransferLinesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.AccountKind,
+			&i.Institution,
+			&i.Number,
+			&i.FullNumber,
+			&i.StatementID,
+			&i.TransactionDate,
+			&i.Kind,
+			&i.Amount,
+			&i.Counterparty,
 		); err != nil {
 			return nil, err
 		}

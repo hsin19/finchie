@@ -9,8 +9,8 @@ The browser app (ADR 0007): a SvelteKit single-page app, embedded in the backend
 | `/statements/{id}` | One statement: metadata, reconciliation by kind, its lines in statement order, processing log, re-parse; `?line=` scrolls to a line |
 | `/documents/{id}` | One document opened for reading (ADR 0012): an e-mail's headers, attachments, and body; the original to download even when the parser cannot open it |
 | `/transactions` | Search across statements: period, card, kinds, overseas, text; totals for the whole match |
-| `/accounts` | Every account (ADR 0013): its newest balance in each unit with its worth in NT$ (ADR 0015), and whether its balances join up; accounts with gaps first, where money moved that no statement shows. They are ordered by worth; `?sort=bank` by bank |
-| `/accounts/{id}` | One account: balances, gaps, its lines with running balances (deposit accounts), every balance it has had |
+| `/accounts` | The net of deposits and card bills not seen paid, then every account (ADR 0013): its newest balance in each unit with its worth in NT$ (ADR 0015), and whether its balances join up; accounts with gaps first, where money moved that no statement shows. They are ordered by worth; `?sort=bank` by bank |
+| `/accounts/{id}` | One account: balances, gaps, its lines with running balances and where linked ones' money went (ADR 0016), every balance it has had; the owner can name it and give its full number |
 | `/upload` | Drop statement e-mails (`.eml`) and follow each through parsing; links the Gmail filter download |
 
 Keys: `o` `s` `t` `b` `u` switch pages, `/` searches, `j` `k` `Enter` `n` `p` move through transactions, `f` opens a statement's PDF, `1`–`9` a document's attachments, `?` lists everything, `⌘K` opens the command palette.

@@ -3,11 +3,14 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/labstack/echo/v5"
 	gdate "google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/genproto/googleapis/type/decimal"
 
@@ -201,5 +204,110 @@ func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testi
 	detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", dollars.Id)))
 	if detail.Worth == nil || *detail.Worth != "336.00" {
 		t.Fatalf("detail worth = %v", detail.Worth)
+	}
+}
+
+func patch(t *testing.T, e *echo.Echo, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	e.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.ParseDocumentResponse) {
+	t.Helper()
+	doc, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
+		Sha256: []byte(name), Filename: name, ContentType: "message/rfc822", Content: []byte("From: bank"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, response); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTheOwnerNamesAnAccountAndGivesItsFullNumberWhichMustFit(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	storeDeposit(t, pool, 9, "1000")
+	id := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), savings).Id
+	path := fmt.Sprintf("/api/accounts/%d", id)
+
+	// savings is 1234567***890: the full number must keep those digits where they are.
+	for _, misfit := range []string{"1234567000891", "123456700089", "12345670008900", "1234567abc890"} {
+		if got := patch(t, e, path, `{"fullNumber": "`+misfit+`"}`); got.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d", misfit, got.Code)
+		}
+	}
+	if got := patch(t, e, path, `{"name": " 薪轉 ", "fullNumber": "1234567-000-890"}`); got.Code != http.StatusNoContent {
+		t.Fatalf("update: %d %s", got.Code, got.Body)
+	}
+	account := decode[AccountDetail](t, get(t, e, path))
+	if *account.Name != "薪轉" || *account.FullNumber != "1234567000890" || account.Number != savings {
+		t.Fatalf("account = name %v, full %v, number %s", account.Name, account.FullNumber, account.Number)
+	}
+	// A field left out stays; an empty one clears.
+	if got := patch(t, e, path, `{"name": ""}`); got.Code != http.StatusNoContent {
+		t.Fatalf("clear: %d", got.Code)
+	}
+	account = decode[AccountDetail](t, get(t, e, path))
+	if account.Name != nil || account.FullNumber == nil {
+		t.Fatalf("after clearing the name: name %v, full %v", account.Name, account.FullNumber)
+	}
+	if got := patch(t, e, "/api/accounts/999", `{"name": "x"}`); got.Code != http.StatusNotFound {
+		t.Fatalf("unknown account: %d", got.Code)
+	}
+}
+
+func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	line := func(day int32, amount, description, counterparty string) *parserv1.DepositLine {
+		return &parserv1.DepositLine{
+			Date: &gdate.Date{Year: 2026, Month: 9, Day: day}, Description: description, Counterparty: counterparty,
+			Amount: &decimal.Decimal{Value: amount}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
+		}
+	}
+	deposit := func(institution, number, closing string, lines ...*parserv1.DepositLine) *parserv1.ParseDocumentResponse {
+		return &parserv1.ParseDocumentResponse{Parser: institution + ".deposit", DepositStatement: &parserv1.DepositStatement{
+			Institution: institution,
+			PeriodStart: &gdate.Date{Year: 2026, Month: 9, Day: 1},
+			PeriodEnd:   &gdate.Date{Year: 2026, Month: 9, Day: 30},
+			Accounts: []*parserv1.DepositAccount{{
+				Number: number, Name: "活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: closing}, Lines: lines,
+			}},
+		}}
+	}
+	// The bill closing 9/7 is paid on 9/22 from E.SUN; 5,000 goes to Taishin, whose number the line prints.
+	store(t, pool, "esun.eml", deposit("esun", savings, "5000",
+		line(22, "-6350", "玉山卡款扣繳", ""),
+		line(25, "-5000", "行銀跨行轉優", "812 0087654321***234"),
+	))
+	store(t, pool, "taishin.eml", deposit("taishin", "876543****9234", "5000", line(25, "5000", "CD轉入", "")))
+	store(t, pool, "bill.eml", &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: &parserv1.Statement{
+		Institution: "esun", ClosingDate: &gdate.Date{Year: 2026, Month: 9, Day: 7}, DueDate: &gdate.Date{Year: 2026, Month: 9, Day: 22},
+		Currency: "TWD", TotalDue: &decimal.Decimal{Value: "6350"},
+		Transactions: []*parserv1.Transaction{{
+			TransactionDate: &gdate.Date{Year: 2026, Month: 9, Day: 22}, Description: "感謝您辦理本行自動轉帳繳款",
+			Kind: parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT, Amount: &decimal.Decimal{Value: "-6350"},
+		}},
+		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "0"}, Stated: &decimal.Decimal{Value: "0"}, StatedLabel: "x"},
+	}})
+
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")
+	lines := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", esun.Id)))
+	transfer, card := lines[0], lines[1]
+	if transfer.Counterpart == nil || transfer.Counterpart.AccountId == nil || *transfer.Counterpart.AccountId != taishin.Id ||
+		*transfer.Counterpart.AccountNumber != "876543****9234" {
+		t.Fatalf("transfer counterpart = %+v", transfer.Counterpart)
+	}
+	if card.Counterpart == nil || card.Counterpart.AccountKind != CreditCard || card.Counterpart.AccountId != nil || card.Counterpart.Institution != "esun" {
+		t.Fatalf("card payment counterpart = %+v", card.Counterpart)
+	}
+	statements := decode[[]Statement](t, get(t, e, "/api/statements"))
+	if len(statements) != 1 || statements[0].PaidOn == nil || statements[0].PaidOn.String() != "2026-09-22" {
+		t.Fatalf("bill = %+v", statements)
 	}
 }

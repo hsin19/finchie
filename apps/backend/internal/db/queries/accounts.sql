@@ -12,15 +12,23 @@ VALUES (@account_id, @unit, @as_of, @amount, @statement_id);
 
 -- name: ListAccounts :many
 -- The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
-SELECT id, institution, kind, number, label, name
+SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
 WHERE kind <> 'credit_card'
 ORDER BY institution, kind DESC, number;
 
 -- name: GetAccount :one
-SELECT id, institution, kind, number, label, name
+SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
 WHERE id = @id AND kind <> 'credit_card';
+
+-- name: UpdateAccountDetails :one
+-- The owner's details (ADR 0016); a set flag that is false leaves its column as it is.
+UPDATE accounts
+SET name        = CASE WHEN @set_name::boolean THEN sqlc.narg(name)::text ELSE name END,
+    full_number = CASE WHEN @set_full_number::boolean THEN sqlc.narg(full_number)::text ELSE full_number END
+WHERE id = @id AND kind <> 'credit_card'
+RETURNING id;
 
 -- name: LatestBalances :many
 -- Each account's newest balance in each unit, with its worth in NT$ at the newest rate of the unit
@@ -72,8 +80,15 @@ ORDER BY o.account_id, o.unit, o.as_of;
 -- Newest first. Amounts as the source reports them: money in is positive on a deposit account, a
 -- purchase is positive on a card bill.
 SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, t.unit,
-       t.amount, t.balance
+       t.amount, t.balance,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 WHERE t.account_id = @account_id
 ORDER BY t.transaction_date DESC, t.statement_id DESC, t.line_no DESC
 LIMIT @row_limit OFFSET @row_offset;

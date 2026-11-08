@@ -58,7 +58,15 @@ func toStatement(row dbq.ListStatementsRow) Statement {
 			StatedLabel: deref(row.StatedLabel),
 		},
 		TransactionCount: int(row.TransactionCount),
+		PaidOn:           optionalDate(row.PaidOn),
 	}
+}
+
+func optionalDate(d pgtype.Date) *openapi_types.Date {
+	if !d.Valid {
+		return nil
+	}
+	return &openapi_types.Date{Time: d.Time}
 }
 
 func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {

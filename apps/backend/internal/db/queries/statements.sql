@@ -23,7 +23,7 @@ VALUES (@statement_id, @account_id, @unit, @line_no, @transaction_date, @posting
 
 -- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
+       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 -- Card bills only, until deposit statements get views of their own (ADR 0013).
@@ -33,7 +33,7 @@ LIMIT @row_limit;
 
 -- name: GetStatement :one
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
+       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 WHERE s.id = @id AND s.kind = 'credit_card';

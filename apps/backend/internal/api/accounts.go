@@ -1,11 +1,13 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -87,8 +89,8 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	account := toAccount(row, latest, gaps)
 	return GetAccount200JSONResponse(AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
-		Label: account.Label, Name: account.Name, Balances: account.Balances, Continuity: account.Continuity,
-		Worth: account.Worth, Gaps: account.Gaps, History: history,
+		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
+		Continuity: account.Continuity, Worth: account.Worth, Gaps: account.Gaps, History: history,
 	}), nil
 }
 
@@ -118,6 +120,18 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 			balance := decimalString(r.Balance)
 			line.Balance = &balance
 		}
+		if r.CounterpartID != nil {
+			counterpart := LineCounterpart{
+				Id: *r.CounterpartID, StatementId: *r.CounterpartStatementID, Date: openapi_types.Date{Time: r.CounterpartDate.Time},
+				AccountKind: AccountKind(*r.CounterpartAccountKind), Institution: *r.CounterpartInstitution, AccountName: r.CounterpartAccountName,
+			}
+			// A card bill's container is no account the owner has: no account to point at (ADR 0013).
+			if counterpart.AccountKind != CreditCard {
+				counterpart.AccountId = r.CounterpartAccountID
+				counterpart.AccountNumber = cmp.Or(r.CounterpartFullNumber, r.CounterpartAccountNumber)
+			}
+			line.Counterpart = &counterpart
+		}
 		lines = append(lines, line)
 	}
 	return lines, nil
@@ -136,8 +150,8 @@ func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap) Acc
 	}
 	return Account{
 		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
-		Label: row.Label, Name: row.Name, Balances: balances, Continuity: continuity, Gaps: gaps,
-		Worth: worthOf(balances),
+		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Balances: balances, Continuity: continuity,
+		Gaps: gaps, Worth: worthOf(balances),
 	}
 }
 
@@ -183,4 +197,58 @@ func toGap(g dbq.AccountGapsRow) BalanceGap {
 		Unit: g.Unit, From: openapi_types.Date{Time: g.FromDate.Time}, To: openapi_types.Date{Time: g.ToDate.Time},
 		Unseen: decimalString(g.Unseen),
 	}
+}
+
+func (s *Server) UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error) {
+	queries := dbq.New(s.pool)
+	row, err := queries.GetAccount(ctx, request.Id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UpdateAccount404JSONResponse(notFound("account", request.Id)), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get account: %w", err)
+	}
+
+	params := dbq.UpdateAccountDetailsParams{ID: request.Id}
+	if name := request.Body.Name; name != nil {
+		params.SetName = true
+		if trimmed := strings.TrimSpace(*name); trimmed != "" {
+			params.Name = &trimmed
+		}
+	}
+	if full := request.Body.FullNumber; full != nil {
+		params.SetFullNumber = true
+		digits := strings.NewReplacer(" ", "", "-", "").Replace(*full)
+		if digits != "" {
+			if !fitsMasked(row.Number, digits) {
+				return UpdateAccount400JSONResponse{ProblemJSONResponse{Message: fmt.Sprintf(
+					"%s does not fit %s: the full number has its digits, and the same ones where the bank prints them", *full, row.Number)}}, nil
+			}
+			params.FullNumber = &digits
+		}
+	}
+	if _, err := queries.UpdateAccountDetails(ctx, params); err != nil {
+		return nil, fmt.Errorf("update account: %w", err)
+	}
+	// A full number fits counterparties (ADR 0016): work the links out again with it.
+	if params.SetFullNumber {
+		if _, err := ingest.Relink(ctx, s.pool); err != nil {
+			return nil, err
+		}
+	}
+	return UpdateAccount204Response{}, nil
+}
+
+// fitsMasked reports whether a full number is the one a bank masks as `masked`: as long, all digits,
+// and the same digit wherever the bank prints one.
+func fitsMasked(masked, full string) bool {
+	if len(full) != len(masked) {
+		return false
+	}
+	for i := range len(full) {
+		if full[i] < '0' || full[i] > '9' || (masked[i] != '*' && masked[i] != full[i]) {
+			return false
+		}
+	}
+	return true
 }

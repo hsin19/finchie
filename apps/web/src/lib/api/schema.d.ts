@@ -204,7 +204,13 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * The owner's details of an account, its own name and its full number
+         * @description Both optional (ADR 0016): a field left out stays as it is, an empty string clears it. A full
+         *     number must fit the masked number the bank prints, digit for digit; links are worked out
+         *     again, since it fits counterparties too.
+         */
+        patch: operations["updateAccount"];
         trace?: never;
     };
     "/api/accounts/{id}/lines": {
@@ -423,6 +429,11 @@ export interface components {
             totalDue: components["schemas"]["Decimal"];
             reconciliation: components["schemas"]["Reconciliation"];
             transactionCount: number;
+            /**
+             * Format: date
+             * @description When a deposit account or a later bill showed it paid (ADR 0016); absent while that is not known
+             */
+            paidOn?: string;
         };
         /** @enum {string} */
         AccountKind: "credit_card" | "deposit";
@@ -449,6 +460,8 @@ export interface components {
             label?: string | null;
             /** @description The owner's name for it */
             name?: string | null;
+            /** @description Its full number, where the owner gave one (ADR 0016) */
+            fullNumber?: string;
             /** @description The newest balance in each unit */
             balances: components["schemas"]["Balance"][];
             continuity: components["schemas"]["AccountContinuity"];
@@ -495,6 +508,32 @@ export interface components {
             /** @description Money that moved between them that no line shows */
             unseen: components["schemas"]["Decimal"];
         };
+        AccountUpdate: {
+            /** @description The owner's name for the account; empty clears it */
+            name?: string;
+            /** @description Digits, spaces and dashes allowed; empty clears it */
+            fullNumber?: string;
+        };
+        /** @description The other line of a transfer or card payment (ADR 0016) */
+        LineCounterpart: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            statementId: number;
+            /** Format: date */
+            date: string;
+            accountKind: components["schemas"]["AccountKind"];
+            /**
+             * Format: int64
+             * @description A deposit account; absent for a card bill
+             */
+            accountId?: number;
+            institution: string;
+            /** @description The owner's name for the account, else the bank's */
+            accountName?: string;
+            /** @description Its full number where given, else as printed */
+            accountNumber?: string;
+        };
         AccountLine: {
             /** Format: int64 */
             id: number;
@@ -511,6 +550,7 @@ export interface components {
             amount: components["schemas"]["Decimal"];
             /** @description The running balance, when printed */
             balance?: components["schemas"]["Decimal"] | null;
+            counterpart?: components["schemas"]["LineCounterpart"];
         };
         Reconciliation: {
             balanced: boolean;
@@ -893,6 +933,32 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDetail"];
                 };
             };
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
     };

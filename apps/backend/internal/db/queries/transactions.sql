@@ -134,3 +134,36 @@ UPDATE transactions SET parent_id = NULL WHERE parent_id IS NOT NULL;
 UPDATE transactions t SET parent_id = l.parent_id
 FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@parent_ids::bigint[]) AS parent_id) l
 WHERE t.id = l.id;
+
+-- name: TransferLines :many
+-- The lines a transfer link can join (ADR 0016): every deposit account's lines, and card payment lines.
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
+       t.transaction_date, t.kind, t.amount, t.counterparty
+FROM transactions t
+JOIN accounts a ON a.id = t.account_id
+WHERE a.kind = 'deposit' OR t.kind = 'payment'
+ORDER BY t.id;
+
+-- name: CardBills :many
+SELECT id, institution, closing_date, due_date, total_due
+FROM statements
+WHERE kind = 'credit_card'
+ORDER BY institution, closing_date;
+
+-- name: ClearTransfers :exec
+UPDATE transactions SET counterpart_id = NULL WHERE counterpart_id IS NOT NULL;
+
+-- name: ClearPaid :exec
+UPDATE statements SET paid_on = NULL, paid_by = NULL WHERE paid_on IS NOT NULL OR paid_by IS NOT NULL;
+
+-- name: SetCounterparts :exec
+UPDATE transactions t SET counterpart_id = l.counterpart_id
+FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@counterpart_ids::bigint[]) AS counterpart_id) l
+WHERE t.id = l.id;
+
+-- name: SetPaid :exec
+-- paid_by 0 is none: a bill that owes nothing is paid by no line.
+UPDATE statements s SET paid_on = p.paid_on, paid_by = NULLIF(p.paid_by, 0)
+FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@paid_on::date[]) AS paid_on,
+             unnest(@paid_by::bigint[]) AS paid_by) p
+WHERE s.id = p.id;

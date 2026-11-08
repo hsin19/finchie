@@ -17,6 +17,7 @@ type Account struct {
 	Expiry      string
 	CreatedAt   pgtype.Timestamptz
 	Label       *string
+	FullNumber  *string
 }
 
 type Balance struct {
@@ -63,6 +64,8 @@ type Statement struct {
 	Balanced           bool
 	Kind               string
 	PeriodStart        pgtype.Date
+	PaidOn             pgtype.Date
+	PaidBy             *int64
 }
 
 type Transaction struct {
@@ -85,4 +88,5 @@ type Transaction struct {
 	Memo             *string
 	Counterparty     *string
 	Balance          pgtype.Numeric
+	CounterpartID    *int64
 }

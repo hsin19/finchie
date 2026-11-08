@@ -115,8 +115,15 @@ func (q *Queries) AccountGaps(ctx context.Context, accountID *int64) ([]AccountG
 
 const accountLines = `-- name: AccountLines :many
 SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, t.unit,
-       t.amount, t.balance
+       t.amount, t.balance,
+       -- Where its money went or came from (ADR 0016).
+       c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
+       ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
+       coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
+       ca.full_number AS counterpart_full_number
 FROM transactions t
+LEFT JOIN transactions c ON c.id = t.counterpart_id
+LEFT JOIN accounts ca ON ca.id = c.account_id
 WHERE t.account_id = $1
 ORDER BY t.transaction_date DESC, t.statement_id DESC, t.line_no DESC
 LIMIT $3 OFFSET $2
@@ -129,16 +136,25 @@ type AccountLinesParams struct {
 }
 
 type AccountLinesRow struct {
-	ID              int64
-	StatementID     int64
-	TransactionDate pgtype.Date
-	Description     string
-	Memo            *string
-	Counterparty    *string
-	Kind            string
-	Unit            string
-	Amount          pgtype.Numeric
-	Balance         pgtype.Numeric
+	ID                       int64
+	StatementID              int64
+	TransactionDate          pgtype.Date
+	Description              string
+	Memo                     *string
+	Counterparty             *string
+	Kind                     string
+	Unit                     string
+	Amount                   pgtype.Numeric
+	Balance                  pgtype.Numeric
+	CounterpartID            *int64
+	CounterpartStatementID   *int64
+	CounterpartDate          pgtype.Date
+	CounterpartAccountID     *int64
+	CounterpartAccountKind   *string
+	CounterpartInstitution   *string
+	CounterpartAccountName   *string
+	CounterpartAccountNumber *string
+	CounterpartFullNumber    *string
 }
 
 // Newest first. Amounts as the source reports them: money in is positive on a deposit account, a
@@ -163,6 +179,15 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 			&i.Unit,
 			&i.Amount,
 			&i.Balance,
+			&i.CounterpartID,
+			&i.CounterpartStatementID,
+			&i.CounterpartDate,
+			&i.CounterpartAccountID,
+			&i.CounterpartAccountKind,
+			&i.CounterpartInstitution,
+			&i.CounterpartAccountName,
+			&i.CounterpartAccountNumber,
+			&i.CounterpartFullNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -175,7 +200,7 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT id, institution, kind, number, label, name
+SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
 WHERE id = $1 AND kind <> 'credit_card'
 `
@@ -187,6 +212,7 @@ type GetAccountRow struct {
 	Number      string
 	Label       *string
 	Name        *string
+	FullNumber  *string
 }
 
 func (q *Queries) GetAccount(ctx context.Context, id int64) (GetAccountRow, error) {
@@ -199,6 +225,7 @@ func (q *Queries) GetAccount(ctx context.Context, id int64) (GetAccountRow, erro
 		&i.Number,
 		&i.Label,
 		&i.Name,
+		&i.FullNumber,
 	)
 	return i, err
 }
@@ -281,7 +308,7 @@ func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, erro
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, institution, kind, number, label, name
+SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
 WHERE kind <> 'credit_card'
 ORDER BY institution, kind DESC, number
@@ -294,6 +321,7 @@ type ListAccountsRow struct {
 	Number      string
 	Label       *string
 	Name        *string
+	FullNumber  *string
 }
 
 // The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
@@ -313,6 +341,7 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 			&i.Number,
 			&i.Label,
 			&i.Name,
+			&i.FullNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -322,6 +351,36 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateAccountDetails = `-- name: UpdateAccountDetails :one
+UPDATE accounts
+SET name        = CASE WHEN $1::boolean THEN $2::text ELSE name END,
+    full_number = CASE WHEN $3::boolean THEN $4::text ELSE full_number END
+WHERE id = $5 AND kind <> 'credit_card'
+RETURNING id
+`
+
+type UpdateAccountDetailsParams struct {
+	SetName       bool
+	Name          *string
+	SetFullNumber bool
+	FullNumber    *string
+	ID            int64
+}
+
+// The owner's details (ADR 0016); a set flag that is false leaves its column as it is.
+func (q *Queries) UpdateAccountDetails(ctx context.Context, arg UpdateAccountDetailsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateAccountDetails,
+		arg.SetName,
+		arg.Name,
+		arg.SetFullNumber,
+		arg.FullNumber,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const upsertAccount = `-- name: UpsertAccount :one

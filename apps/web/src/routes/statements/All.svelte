@@ -56,6 +56,7 @@ async function reparse(id: number) {
                     <th class="px-2 py-2 font-medium">BANK</th>
                     <th class="px-2 py-2 font-medium">CLOSING</th>
                     <th class="px-2 py-2 font-medium">DUE</th>
+                    <th class="px-2 py-2 font-medium">PAID</th>
                     <th class="px-2 py-2 text-right font-medium">TOTAL_DUE</th>
                     <th class="px-2 py-2 text-right font-medium">ROWS</th>
                     <th class="px-2 py-2 font-medium">RECONCILE</th>
@@ -73,6 +74,7 @@ async function reparse(id: number) {
                         </td>
                         <td class="px-2 py-2.5 text-dim">{s.closingDate}</td>
                         <td class="px-2 py-2.5 text-dim">{s.dueDate}</td>
+                        <td class="px-2 py-2.5 {s.paidOn ? 'text-pos' : 'text-mute'}" title={s.paidOn ? "" : "還沒看到繳款：等涵蓋到期日的存款對帳單"}>{s.paidOn ?? "—"}</td>
                         <td class="px-2 py-2.5 text-right">{formatAmount(s.totalDue)} <span class="text-mute">{s.currency}</span></td>
                         <td class="px-2 py-2.5 text-right text-dim">{s.transactionCount}</td>
                         <td class="px-2 py-2.5 {s.reconciliation.balanced ? 'text-pos' : 'text-neg'}">

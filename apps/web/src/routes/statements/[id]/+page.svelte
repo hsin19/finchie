@@ -169,6 +169,8 @@ onKeys({
             <dd class="m-0">{s.closingDate}</dd>
             <dt class="text-mute">due</dt>
             <dd class="m-0">{s.dueDate}</dd>
+            <dt class="text-mute">paid</dt>
+            <dd class="m-0 {s.paidOn ? 'text-pos' : 'text-mute'}">{s.paidOn ?? "還沒看到繳款（等涵蓋到期日的存款對帳單）"}</dd>
             <dt class="text-mute">total_due</dt>
             <dd class="m-0">{formatAmount(s.totalDue)} {s.currency}</dd>
             <dt class="text-mute">document</dt>

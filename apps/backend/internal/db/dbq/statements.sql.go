@@ -47,7 +47,7 @@ func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKey
 
 const getStatement = `-- name: GetStatement :one
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
+       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 WHERE s.id = $1 AND s.kind = 'credit_card'
@@ -65,6 +65,7 @@ type GetStatementRow struct {
 	StatedNewCharges   pgtype.Numeric
 	StatedLabel        *string
 	Balanced           bool
+	PaidOn             pgtype.Date
 	TransactionCount   int32
 }
 
@@ -83,6 +84,7 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 		&i.StatedNewCharges,
 		&i.StatedLabel,
 		&i.Balanced,
+		&i.PaidOn,
 		&i.TransactionCount,
 	)
 	return i, err
@@ -153,7 +155,7 @@ type InsertTransactionsParams struct {
 
 const listStatements = `-- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced,
+       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 WHERE s.kind = 'credit_card'
@@ -173,6 +175,7 @@ type ListStatementsRow struct {
 	StatedNewCharges   pgtype.Numeric
 	StatedLabel        *string
 	Balanced           bool
+	PaidOn             pgtype.Date
 	TransactionCount   int32
 }
 
@@ -198,6 +201,7 @@ func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListSta
 			&i.StatedNewCharges,
 			&i.StatedLabel,
 			&i.Balanced,
+			&i.PaidOn,
 			&i.TransactionCount,
 		); err != nil {
 			return nil, err
