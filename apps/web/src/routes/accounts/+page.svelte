@@ -18,9 +18,9 @@ import type { PageProps } from "./$types";
 
 let { data }: PageProps = $props();
 
-// Deposit accounts first: their balances are checked; a card bill's are what it says is owed.
+// By kind, in a fixed order. Card bills are no accounts the owner has and are not listed (ADR 0013).
 const groups = $derived(
-    (["deposit", "credit_card"] as const)
+    (["deposit"] as const)
         .map(kind => {
             const accounts = data.accounts.filter(a => a.kind === kind);
             return { kind, accounts: sortAccounts(accounts, data.sort), worth: totalWorth(accounts) };
@@ -28,8 +28,8 @@ const groups = $derived(
         .filter(group => group.accounts.length > 0),
 );
 const sorts = [
-    { value: "bank", label: "依銀行", href: resolve("/accounts") },
-    { value: "balance", label: "依餘額", href: resolve("/accounts?sort=balance") },
+    { value: "balance", label: "依餘額", href: resolve("/accounts") },
+    { value: "bank", label: "依銀行", href: resolve("/accounts?sort=bank") },
 ] as const;
 const gapped = $derived(data.accounts.filter(a => a.gaps.length > 0));
 
@@ -71,7 +71,6 @@ function href(account: Account) {
             <h1 class="label">ACCOUNTS · {accountKinds[group.kind].label}（{group.accounts.length}）</h1>
             <span class="text-[12px] text-mute">
                 合計 ≈ NT${formatAmount(group.worth.total)}{group.worth.missing ? `（${group.worth.missing} 個帳戶沒有匯率，不計）` : ""}
-                {#if group.kind === "credit_card"}· 餘額是帳單上的應繳金額，負數是欠款{/if}
             </span>
         </div>
         <div class="overflow-x-auto">
@@ -114,7 +113,7 @@ function href(account: Account) {
                             </td>
                             <td class="py-2.5 pl-2">
                                 {#if account.continuity === "unknown"}
-                                    <span class="text-mute" title="信用卡帳單的明細依消費日，還無法逐期檢查">—</span>
+                                    <span class="text-mute" title="它的來源只給餘額、沒有明細，無法逐期檢查">—</span>
                                 {:else if account.gaps.length > 0}
                                     <span class="text-neg">缺 {account.gaps.length} 段</span>
                                 {:else}

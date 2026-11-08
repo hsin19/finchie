@@ -7,12 +7,13 @@ import {
 
 export type AccountSort = "bank" | "balance";
 
+/** By worth unless the URL asks for the bank order. */
 export function accountSort(value: string | null): AccountSort {
-    return value === "balance" ? "balance" : "bank";
+    return value === "bank" ? "bank" : "balance";
 }
 
 /**
- * By bank, as the API lists them; or by worth in NT$, largest first (ADR 0015). An account without a
+ * By worth in NT$, largest first (ADR 0015); or by bank, as the API lists them. An account without a
  * worth, holding a unit with no rate, goes last; ties keep the bank order.
  */
 export function sortAccounts(accounts: Account[], by: AccountSort): Account[] {

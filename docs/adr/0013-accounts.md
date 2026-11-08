@@ -2,7 +2,7 @@
 
 ## Decision
 
-An account is anything that holds a value for the owner, or a debt: a deposit account in NT$ or in foreign currencies, the bill of a bank's credit cards, and later a brokerage account, an exchange (InTheGreenYet), a card's points, an airline's miles, a hotel's points. It exists in its own right. Sources tell Finchie what happens in it: statements are one, an exchange's API another, and more may come; none of them defines it. What an account is for, say that salary arrives in one and rent leaves from another, shows in how its money moves, not in how it is reported.
+An account is anything that holds a value for the owner: a deposit account in NT$ or in foreign currencies, and later a brokerage account, an exchange (InTheGreenYet), a card's points, an airline's miles, a hotel's points. It exists in its own right. Sources tell Finchie what happens in it: statements are one, an exchange's API another, and more may come; none of them defines it. What an account is for, say that salary arrives in one and rent leaves from another, shows in how its money moves, not in how it is reported.
 
 ### Discovered, never set up
 
@@ -10,7 +10,7 @@ There is no account setup. A source that reports an account Finchie has not seen
 
 | Kind | One per | Number | Notes |
 |---|---|---|---|
-| `credit_card` | Institution: one bill | Empty | Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
+| `credit_card` | Institution: one bill | Empty | Not an account the owner has: a container for the bank's card lines, which need one to belong to. It holds no balance and is not listed among the accounts. Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
 | `deposit` | Account number | As the bank prints it, usually masked (`12345**6789*`). The parser normalizes it so one account reads the same every month | One account can hold several currencies; its balance is per currency |
 
 More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one.
@@ -20,7 +20,7 @@ An account outlives every report of it: re-parsing or deleting a document never 
 ### What sources report: lines and balances
 
 - **Lines.** `transactions` gains `account_id`, `unit`, and `status`; a line keeps its statement as where it came from. Deposit lines also carry `balance`, the running balance where the bank prints one, and `memo`. Their kind is `interest` or `fee` when the bank's own wording says so, else `other`. Telling card payments and transfers between the owner's accounts apart is for the transfer links to come, derived from the lines like ADR 0009's.
-- **Balances.** `balances` holds what an account held in one unit at the end of a day, and which source said so: a statement's closing balance, its opening balance (as the end of the day before its period), an exchange's snapshot. A card bill's balance is −`total_due` on its closing date.
+- **Balances.** `balances` holds what an account held in one unit at the end of a day, and which source said so: a statement's closing balance, its opening balance (as the end of the day before its period), an exchange's snapshot.
 
 Balances are seen from the owner's side: money held is positive, money owed negative. Deposit lines follow that (money in is positive). Card lines keep the sign card bills print, a purchase positive, which the bill's arithmetic and ADR 0009 rely on; anything that adds card and deposit lines together, such as cash flow, flips the card lines.
 
@@ -49,16 +49,17 @@ Sources skip: a combined statement can be missing for a month without activity, 
 |---|---|---|
 | Joins | Nothing happened that no source reported | Nothing |
 | Does not join | A report is missing, or a balance was misread | The account is flagged with the two balances between which money moved unseen; `finchie.accounts.gaps` counts flagged accounts for alerting (ADR 0011) |
-| Unknown | Nothing reports the movements between them (card bills until their parsers read the previous bill's amount; balance-only snapshots) | Nothing |
+| Unknown | Nothing reports the movements between them (balance-only snapshots) | Nothing |
 
 Like links (ADR 0009), continuity is derived, not kept by hand: reports arrive in any order, so an account's is worked out again whenever one of its balances is stored.
 
 ### Existing data
 
-A migration creates one `credit_card` account per institution that has statements, sets every line's account, unit (its statement's currency), and status (`active`), and records each bill's −`total_due` as its account's balance on its closing date.
+A migration creates one `credit_card` account per institution that has statements, and sets every line's account, unit (its statement's currency), and status (`active`).
 
 ## Alternatives considered
 
+- **A card bill as an account, its amount due as the balance** (what this ADR first said). A bill reports what is owed on one day, not a balance that carries on: once paid, it still counted until the next bill, the payment counted again from the deposit account it left, and nothing could check either.
 - **Accounts as part of statements**, one row per account a statement covers. Simple while statements are the only source, but an exchange has no statements, and an account would be as many rows as reports of it.
 - **One statement per account.** A combined statement is one document listing several accounts; splitting it would break one document, one statement (ADR 0005), which duplicates and re-parsing rely on.
 - **A table of its own for deposit lines.** Card and deposit signs could never be mixed up, but search, the transactions page, and the links of ADR 0009 and of transfers would each have to span two tables.
@@ -71,5 +72,6 @@ A migration creates one `credit_card` account per institution that has statement
 - The web app gets an accounts page (latest balance per account and unit, flagged gaps), and search an account facet.
 - The statements' uniqueness key changes; existing statements become `credit_card`.
 - ADR 0004 gets a note: a points program's unit counts as an amount's currency.
+- What a card bill says is owed stays on the bill (`total_due`, `due_date`); whether it was paid comes with the transfer links, and net worth takes off only the bills not yet paid.
 - Net worth is the latest balance of every account and unit, whatever reported it; it needs exchange rates, which come with InTheGreenYet's ADR (came first, with ADR 0015), and for points their worth.
 - What an account is for can later be read from its lines instead of being told: a salary that arrives every month, rent that leaves every month. One that stops is the kind of thing worth a notification (`AGENTS.md`, no work for the owner).

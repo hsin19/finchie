@@ -118,9 +118,11 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 	if gap := deposit.Gaps[0]; gap.From.String() != "2026-09-30" || gap.To.String() != "2026-11-30" || gap.Unseen != "800" || gap.Unit != "TWD" {
 		t.Fatalf("gap = %+v", gap)
 	}
-	card := accountNamed(t, accounts, "")
-	if card.Kind != CreditCard || card.Continuity != Unknown || len(card.Gaps) != 0 || card.Balances[0].Amount != "-300" {
-		t.Fatalf("card account = %+v", card)
+	// A card bill holds no balance and is no account the owner has: it is not listed (ADR 0013).
+	for _, a := range accounts {
+		if a.Kind == CreditCard {
+			t.Fatalf("card account listed: %+v", a)
+		}
 	}
 
 	path := fmt.Sprintf("/api/accounts/%d", deposit.Id)

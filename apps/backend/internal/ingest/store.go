@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -166,15 +165,14 @@ func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse)
 		if err != nil {
 			return stored{}, err
 		}
-		currency := *statement.Currency
 		for i := range lines {
-			lines[i].Unit = currency
+			lines[i].Unit = *statement.Currency
 		}
-		// A bank's card bill is one account; its balance is what the bill says is owed.
+		// A bank's card lines belong to its credit_card account, which holds no balance: what the bill
+		// says is owed stays on the bill (ADR 0013).
 		return stored{statement: statement, accounts: []storedAccount{{
-			account:  dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindCreditCard},
-			lines:    lines,
-			balances: []dbq.InsertBalanceParams{{Unit: currency, AsOf: statement.ClosingDate, Amount: negate(statement.TotalDue)}},
+			account: dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindCreditCard},
+			lines:   lines,
 		}}}, nil
 	case deposit != nil && bill == nil:
 		return convertDeposit(documentID, deposit)
@@ -326,14 +324,6 @@ func convertDeposit(documentID int64, d *parserv1.DepositStatement) (stored, err
 	}
 	result.statement = statement
 	return result, nil
-}
-
-// negate is -n, exactly.
-func negate(n pgtype.Numeric) pgtype.Numeric {
-	if !n.Valid || n.Int == nil {
-		return n
-	}
-	return pgtype.Numeric{Int: new(big.Int).Neg(n.Int), Exp: n.Exp, Valid: true}
 }
 
 func requiredDate(d *date.Date, field string, errs []error) (pgtype.Date, []error) {

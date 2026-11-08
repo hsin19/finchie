@@ -109,7 +109,7 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 }
 
-func TestABillIsStoredInItsBanksCardAccountWithWhatItSaysIsOwed(t *testing.T) {
+func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
 	pool := testdb.Pool(t)
 	store := func(name string, statement *parserv1.Statement) {
 		t.Helper()
@@ -131,15 +131,6 @@ func TestABillIsStoredInItsBanksCardAccountWithWhatItSaysIsOwed(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions WHERE account_id = $1 AND unit = 'TWD' AND status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
 		t.Fatalf("lines in the account = %d (%v)", lines, err)
 	}
-	var asOf time.Time
-	var amount string
-	if err := pool.QueryRow(t.Context(), "SELECT as_of, amount::text FROM balances WHERE account_id = $1 AND unit = 'TWD'", account).Scan(&asOf, &amount); err != nil {
-		t.Fatal(err)
-	}
-	// The sample bill's total due is -40010, a credit: the owner is owed 40010.
-	if asOf.Format(time.DateOnly) != "2026-10-21" || amount != "40010" {
-		t.Fatalf("balance = %s on %s", amount, asOf.Format(time.DateOnly))
-	}
 
 	november := sampleStatement(true)
 	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
@@ -147,13 +138,13 @@ func TestABillIsStoredInItsBanksCardAccountWithWhatItSaysIsOwed(t *testing.T) {
 	other := sampleStatement(true)
 	other.Institution = "taishin"
 	store("taishin.eml", other)
-	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 3 {
-		t.Fatalf("accounts = %d, balances = %d: one account per bank's bill, one balance per bill",
-			countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
+	// One account per bank, and no balance: what a bill says is owed stays on the bill (ADR 0013).
+	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 0 {
+		t.Fatalf("accounts = %d, balances = %d", countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
 	}
 }
 
-func TestReparsingKeepsTheAccountAndReplacesTheBalance(t *testing.T) {
+func TestReparsingKeepsTheAccount(t *testing.T) {
 	pool := testdb.Pool(t)
 	id := addDocument(t, pool, "again.eml")
 	for range 2 {
@@ -161,8 +152,8 @@ func TestReparsingKeepsTheAccountAndReplacesTheBalance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if countRows(t, pool, "accounts") != 1 || countRows(t, pool, "balances") != 1 {
-		t.Fatalf("accounts = %d, balances = %d", countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
+	if countRows(t, pool, "accounts") != 1 || countRows(t, pool, "transactions") != 2 {
+		t.Fatalf("accounts = %d, lines = %d", countRows(t, pool, "accounts"), countRows(t, pool, "transactions"))
 	}
 }
 

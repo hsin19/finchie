@@ -177,7 +177,7 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 const getAccount = `-- name: GetAccount :one
 SELECT id, institution, kind, number, label, name
 FROM accounts
-WHERE id = $1
+WHERE id = $1 AND kind <> 'credit_card'
 `
 
 type GetAccountRow struct {
@@ -283,6 +283,7 @@ func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, erro
 const listAccounts = `-- name: ListAccounts :many
 SELECT id, institution, kind, number, label, name
 FROM accounts
+WHERE kind <> 'credit_card'
 ORDER BY institution, kind DESC, number
 `
 
@@ -295,6 +296,7 @@ type ListAccountsRow struct {
 	Name        *string
 }
 
+// The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
 func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listAccounts)
 	if err != nil {

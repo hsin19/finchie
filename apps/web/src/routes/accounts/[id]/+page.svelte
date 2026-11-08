@@ -15,7 +15,6 @@ let { data }: PageProps = $props();
 
 const account = $derived(data.account);
 const bank = $derived(institution(account.institution));
-const isCard = $derived(account.kind === "credit_card");
 
 function amountTone(value: string) {
     return sign(value) < 0 ? "text-neg" : sign(value) > 0 ? "text-pos" : "text-dim";
@@ -46,7 +45,7 @@ function amountTone(value: string) {
             <div class="label">CONTINUITY</div>
             {#if account.continuity === "unknown"}
                 <div class="text-mute">無法檢查</div>
-                <div class="text-[12px] text-mute">信用卡帳單的明細依消費日，還不能逐期接起來</div>
+                <div class="text-[12px] text-mute">它的來源只給餘額、沒有明細，接不起來</div>
             {:else if account.gaps.length > 0}
                 <div class="text-neg">缺 {account.gaps.length} 段</div>
             {:else}
@@ -74,48 +73,42 @@ function amountTone(value: string) {
     </section>
 {/if}
 
-{#if isCard}
-    <section class="panel px-3.5 py-2.5 text-dim">
-        信用卡帳單的明細在 <a href={resolve(`/transactions?card=${account.institution}`)}>交易</a> 和 <a href={resolve("/statements?all")}>帳單</a>。
-    </section>
-{:else}
-    <section class="panel px-3.5 pt-1 pb-2.5">
-        <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
-            <h2 class="label">LINES · 明細（{data.lines.length}）</h2>
-            <span class="text-[12px] text-mute">新的在上 · 存入是正數</span>
-        </div>
-        <div class="overflow-x-auto">
-            <table class="w-full min-w-[820px] border-collapse">
-                <thead>
-                    <tr class="text-left text-mute">
-                        <th class="py-2 pr-2 font-medium">DATE</th>
-                        <th class="px-2 py-2 font-medium">DESCRIPTION</th>
-                        <th class="px-2 py-2 font-medium">MEMO</th>
-                        <th class="px-2 py-2 font-medium">COUNTERPARTY</th>
-                        <th class="px-2 py-2 text-right font-medium">AMOUNT</th>
-                        <th class="py-2 pl-2 text-right font-medium">BALANCE</th>
+<section class="panel px-3.5 pt-1 pb-2.5">
+    <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
+        <h2 class="label">LINES · 明細（{data.lines.length}）</h2>
+        <span class="text-[12px] text-mute">新的在上 · 存入是正數</span>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full min-w-[820px] border-collapse">
+            <thead>
+                <tr class="text-left text-mute">
+                    <th class="py-2 pr-2 font-medium">DATE</th>
+                    <th class="px-2 py-2 font-medium">DESCRIPTION</th>
+                    <th class="px-2 py-2 font-medium">MEMO</th>
+                    <th class="px-2 py-2 font-medium">COUNTERPARTY</th>
+                    <th class="px-2 py-2 text-right font-medium">AMOUNT</th>
+                    <th class="py-2 pl-2 text-right font-medium">BALANCE</th>
+                </tr>
+            </thead>
+            <tbody>
+                {#each data.lines as line (line.id)}
+                    <tr class="border-t border-rule hover:bg-raised">
+                        <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
+                        <td class="px-2 py-2">{line.description}</td>
+                        <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
+                        <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
+                        <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
+                            {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
+                        </td>
+                        <td class="py-2 pl-2 text-right whitespace-nowrap text-dim">{line.balance ? formatAmount(line.balance) : ""}</td>
                     </tr>
-                </thead>
-                <tbody>
-                    {#each data.lines as line (line.id)}
-                        <tr class="border-t border-rule hover:bg-raised">
-                            <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
-                            <td class="px-2 py-2">{line.description}</td>
-                            <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
-                            <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
-                            <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
-                                {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
-                            </td>
-                            <td class="py-2 pl-2 text-right whitespace-nowrap text-dim">{line.balance ? formatAmount(line.balance) : ""}</td>
-                        </tr>
-                    {:else}
-                        <tr><td colspan="6" class="py-2.5 text-mute">這個帳戶還沒有明細：對帳單只印了它的餘額。</td></tr>
-                    {/each}
-                </tbody>
-            </table>
-        </div>
-    </section>
-{/if}
+                {:else}
+                    <tr><td colspan="6" class="py-2.5 text-mute">這個帳戶還沒有明細：對帳單只印了它的餘額。</td></tr>
+                {/each}
+            </tbody>
+        </table>
+    </div>
+</section>
 
 <section class="panel px-3.5 pt-1 pb-2.5">
     <h2 class="label py-2.5">HISTORY · 每一期的餘額</h2>
@@ -126,9 +119,6 @@ function amountTone(value: string) {
                     <td class="py-1.5 pr-4 text-dim">{balance.asOf}</td>
                     <td class="py-1.5 pr-2 text-right {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</td>
                     <td class="py-1.5 pr-4 text-mute">{balance.unit}</td>
-                    {#if isCard}
-                        <td class="py-1.5"><a href={resolve("/statements/[id]", { id: String(balance.statementId) })} class="text-dim hover:text-ink">帳單 →</a></td>
-                    {/if}
                 </tr>
             {/each}
         </tbody>

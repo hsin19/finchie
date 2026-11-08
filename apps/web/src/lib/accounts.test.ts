@@ -17,9 +17,10 @@ function account(id: number, worth?: string): Account {
 describe("accounts", () => {
     const accounts = [account(1, "500"), account(2), account(3, "15124.5"), account(4, "-300"), account(5, "500")];
 
-    it("keeps the bank order unless asked to sort by balance", () => {
-        expect(accountSort(null)).toBe("bank");
-        expect(accountSort("nonsense")).toBe("bank");
+    it("sorts by balance unless asked for the bank order", () => {
+        expect(accountSort(null)).toBe("balance");
+        expect(accountSort("nonsense")).toBe("balance");
+        expect(accountSort("bank")).toBe("bank");
         expect(sortAccounts(accounts, "bank").map(a => a.id)).toEqual([1, 2, 3, 4, 5]);
     });
 

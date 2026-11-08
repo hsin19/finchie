@@ -11,14 +11,16 @@ INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
 VALUES (@account_id, @unit, @as_of, @amount, @statement_id);
 
 -- name: ListAccounts :many
+-- The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
 SELECT id, institution, kind, number, label, name
 FROM accounts
+WHERE kind <> 'credit_card'
 ORDER BY institution, kind DESC, number;
 
 -- name: GetAccount :one
 SELECT id, institution, kind, number, label, name
 FROM accounts
-WHERE id = @id;
+WHERE id = @id AND kind <> 'credit_card';
 
 -- name: LatestBalances :many
 -- Each account's newest balance in each unit, with its worth in NT$ at the newest rate of the unit
