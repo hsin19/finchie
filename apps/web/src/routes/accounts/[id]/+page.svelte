@@ -131,7 +131,7 @@ function amountTone(value: string) {
                 </div>
             </div>
         {:else}
-            {#each account.balances as balance (balance.unit)}
+            {#each holdings as balance (balance.unit)}
                 <div>
                     <div class="label">BALANCE · {balance.unit}</div>
                     <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</div>

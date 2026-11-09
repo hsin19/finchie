@@ -12,6 +12,9 @@ import {
     accountSort,
     historyByDay,
     holdingsByWorth,
+    isSmallAccount,
+    leftOut,
+    listedBalances,
     sortAccounts,
     totalWorth,
     unpaidBills,
@@ -77,5 +80,60 @@ describe("exchange holdings", () => {
             { asOf: "2026-11-09", balances: [history[0], history[1]] },
             { asOf: "2026-11-08", balances: [history[2]] },
         ]);
+    });
+});
+
+describe("small accounts and balances", () => {
+    const money = (unit: string, amount: string, worth?: string): Balance => ({ unit, asOf: "2026-09-30", amount, worth });
+    const holding = (balances: Balance[], worth?: string, gaps = 0): Account => ({
+        id: 1,
+        institution: "nextbank",
+        kind: "deposit",
+        number: "1",
+        balances,
+        continuity: "checked",
+        gaps: Array.from({ length: gaps }, () => ({ unit: "TWD", from: "2026-08-31", to: "2026-09-30", unseen: "1" })),
+        worth,
+    });
+
+    it("lists balances by worth, and only those of NT$1,000 or more when small ones are hidden", () => {
+        const foreign = holding([money("EUR", "0", "0"), money("JPY", "0", "0"), money("USD", "9040.21", "296380.87")], "296380.87");
+        // A balance at 0 is none at all, whether small ones are hidden or not.
+        expect(listedBalances(foreign, false).listed.map(b => b.unit)).toEqual(["USD"]);
+        const hidden = listedBalances(foreign, true);
+        expect(hidden).toEqual({ listed: [foreign.balances[2]], others: 0, othersAtMost: undefined, unpriced: 0 });
+        expect(leftOut(hidden)).toBe("");
+        // Dust worth nothing once rounded is not counted either.
+        const dusty = holding([money("USD", "9040.21", "296380.87"), money("PEPE", "1", "0.00")], "296380.87");
+        expect(leftOut(listedBalances(dusty, true))).toBe("");
+    });
+
+    it("lists the three largest and says the most any other is worth", () => {
+        const coins = holding(
+            [money("BNB", "5.3", "121513.22"), money("USDT", "97.5", "3193.38"), money("ETH", "1", "73813.25"), money("USDC", "231", "7589.22"), money("SOL", "0.001", "3.68"), money("TAO", "0.01")],
+            "215889",
+        );
+        const view = listedBalances(coins, true);
+        expect(view.listed.map(b => b.unit)).toEqual(["BNB", "ETH", "USDC"]);
+        expect(leftOut(view)).toBe("另 2 種 ≤ NT$3,193、1 種沒有匯率");
+        expect(listedBalances(coins, false).listed).toHaveLength(6);
+    });
+
+    it("lists nothing when no balance is known to reach NT$1,000, and says why", () => {
+        // MAX: its own token has no rate; nothing tells what it is worth on its own.
+        const max = holding([money("TWD", "0.27", "0.27"), money("BTC", "0.00002639", "65.55"), money("MAX", "570.12")], "4251.35");
+        const view = listedBalances(max, true);
+        expect(view.listed).toEqual([]);
+        expect(leftOut(view)).toBe("另 2 種 ≤ NT$66、1 種沒有匯率");
+        expect(leftOut(listedBalances(max, false))).toBe("");
+    });
+
+    it("counts an account as small under NT$1,000 either way, gaps or not, unless its worth is unknown", () => {
+        expect(isSmallAccount(holding([], "999.99"))).toBe(true);
+        expect(isSmallAccount(holding([], "-999.99"))).toBe(true);
+        expect(isSmallAccount(holding([], "1000"))).toBe(false);
+        expect(isSmallAccount(holding([], "-5000"))).toBe(false);
+        expect(isSmallAccount(holding([]))).toBe(false);
+        expect(isSmallAccount(holding([], "0", 1))).toBe(true);
     });
 });

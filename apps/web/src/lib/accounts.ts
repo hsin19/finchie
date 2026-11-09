@@ -4,6 +4,9 @@ import type {
     Statement,
 } from "#lib/api/client.js";
 import {
+    formatAmount,
+    negate,
+    roundWhole,
     sign,
     subtract,
     sum,
@@ -45,6 +48,56 @@ export function unpaidBills(statements: Statement[]): Statement[] {
         if (!seen || s.closingDate > seen.closingDate) newest.set(s.institution, s);
     }
     return [...newest.values()].filter(s => !s.paidOn && sign(s.totalDue) > 0);
+}
+
+/** Below this worth in NT$, either way, an account or a balance is small: the accounts page leaves it out unless ?all. */
+export const SMALL_WORTH = "1000";
+
+/** How many balances an account lists while small ones are hidden. */
+export const LISTED_BALANCES = 3;
+
+function small(worth: string): boolean {
+    return sign(subtract(sign(worth) < 0 ? negate(worth) : worth, SMALL_WORTH)) < 0;
+}
+
+/**
+ * An account worth less than NT$1,000 either way; one whose worth is not known is not. Gaps do not keep one
+ * listed: the page names every account with gaps above the list.
+ */
+export function isSmallAccount(account: Account): boolean {
+    return account.worth !== undefined && small(account.worth);
+}
+
+export interface ListedBalances {
+    listed: Balance[];
+    /** Balances with a worth left out, and the largest worth among them. */
+    others: number;
+    othersAtMost?: string;
+    /** Balances left out for having no rate. */
+    unpriced: number;
+}
+
+/**
+ * The balances an account lists, largest worth first; one at 0 is none at all. Hiding small ones keeps the
+ * three largest known to be worth NT$1,000 or more, and tells what it leaves out: how many others, the
+ * most any of them is worth, and how many have no rate. A balance worth nothing once rounded is not
+ * counted either.
+ */
+export function listedBalances(account: Account, hideSmall: boolean): ListedBalances {
+    const sorted = holdingsByWorth(account.balances.filter(b => sign(b.amount) !== 0));
+    if (!hideSmall) return { listed: sorted, others: 0, unpriced: 0 };
+    const priced = sorted.filter(b => b.worth !== undefined);
+    const listed = priced.filter(b => !small(b.worth!)).slice(0, LISTED_BALANCES);
+    const others = priced.filter(b => !listed.includes(b) && sign(b.worth!) !== 0);
+    return { listed, others: others.length, othersAtMost: others[0]?.worth, unpriced: sorted.length - priced.length };
+}
+
+/** "另 11 種 ≤ NT$3,193、32 種沒有匯率", or "" when nothing is left out. */
+export function leftOut({ others, othersAtMost, unpriced }: ListedBalances): string {
+    const parts: string[] = [];
+    if (others > 0 && othersAtMost !== undefined) parts.push(`${others} 種 ≤ NT$${formatAmount(roundWhole(othersAtMost))}`);
+    if (unpriced > 0) parts.push(`${unpriced} 種沒有匯率`);
+    return parts.length > 0 ? `另 ${parts.join("、")}` : "";
 }
 
 /** Holdings by worth in NT$, largest first; those without a rate go last, by unit. */

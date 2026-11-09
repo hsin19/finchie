@@ -6,6 +6,7 @@ import {
 import {
     formatAmount,
     negate,
+    roundWhole,
     sign,
     subtract,
     sum,
@@ -53,5 +54,19 @@ describe("formatAmount", () => {
 
     it("rejects anything but a decimal", () => {
         expect(() => formatAmount("1e3")).toThrow();
+    });
+});
+
+describe("roundWhole", () => {
+    it.each([
+        ["296380.87", "296381"],
+        ["296380.5", "296381"],
+        ["296380.49", "296380"],
+        ["-2.5", "-3"],
+        ["-0.4", "0"],
+        ["420600.00", "420600"],
+        ["15124", "15124"],
+    ])("%s → %s", (input, expected) => {
+        expect(roundWhole(input)).toBe(expected);
     });
 });

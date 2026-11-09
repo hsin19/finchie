@@ -1,5 +1,9 @@
 <script lang="ts">
 import {
+    type AccountSort,
+    isSmallAccount,
+    leftOut,
+    listedBalances,
     sortAccounts,
     totalWorth,
     unpaidBills,
@@ -12,28 +16,41 @@ import {
 } from "#lib/labels.js";
 import {
     formatAmount,
+    roundWhole,
     sign,
     subtract,
     sum,
 } from "#lib/money.js";
+import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import type { PageProps } from "./$types";
 
 let { data }: PageProps = $props();
 
+const hideSmall = $derived(!data.all);
+
 // By kind, in a fixed order. Card bills are no accounts the owner has and are not listed (ADR 0013).
+// Small accounts are left out of the list, never out of the totals.
 const groups = $derived(
     (["deposit", "securities", "exchange"] as const)
         .map(kind => {
             const accounts = data.accounts.filter(a => a.kind === kind);
-            return { kind, accounts: sortAccounts(accounts, data.sort), worth: totalWorth(accounts) };
+            const listed = hideSmall ? accounts.filter(a => !isSmallAccount(a)) : accounts;
+            return { kind, accounts: sortAccounts(listed, data.sort), hidden: accounts.length - listed.length, worth: totalWorth(accounts) };
         })
-        .filter(group => group.accounts.length > 0),
+        .filter(group => group.accounts.length + group.hidden > 0),
 );
-const sorts = [
-    { value: "balance", label: "依餘額", href: resolve("/accounts") },
-    { value: "bank", label: "依銀行", href: resolve("/accounts?sort=bank") },
-] as const;
+
+function accountsHref(sort: AccountSort, all: boolean) {
+    const query = [sort === "bank" ? "sort=bank" : "", all ? "all" : ""].filter(Boolean).join("&");
+    return query ? resolve(`/accounts?${query}`) : resolve("/accounts");
+}
+
+const sorts = $derived([
+    { value: "balance", label: "依餘額", href: accountsHref("balance", data.all) },
+    { value: "bank", label: "依銀行", href: accountsHref("bank", data.all) },
+]);
+
 const gapped = $derived(data.accounts.filter(a => a.gaps.length > 0));
 // Net of the card bills not yet seen paid (ADR 0016); a paid bill's money already left a deposit account.
 const holdings = $derived(totalWorth(data.accounts));
@@ -99,17 +116,28 @@ function href(account: Account) {
     </div>
 </section>
 
-<nav aria-label="排序" class="flex items-baseline gap-2 text-[12px] text-mute">
-    排序
-    {#each sorts as sort (sort.value)}
-        <a
-            href={sort.href}
-            aria-current={data.sort === sort.value ? "page" : undefined}
-            class="rounded-[4px] border px-2 py-1 {data.sort === sort.value ? 'border-accent text-ink' : 'border-line text-dim hover:text-ink'}"
-        >{sort.label}</a>
-    {/each}
-    <span>· 外幣以最新匯率折合新臺幣比較</span>
-</nav>
+<div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-mute">
+    <nav aria-label="排序" class="flex items-baseline gap-2">
+        排序
+        {#each sorts as sort (sort.value)}
+            <a
+                href={sort.href}
+                aria-current={data.sort === sort.value ? "page" : undefined}
+                class="rounded-[4px] border px-2 py-1 {data.sort === sort.value ? 'border-accent text-ink' : 'border-line text-dim hover:text-ink'}"
+            >{sort.label}</a>
+        {/each}
+    </nav>
+    <label class="flex min-h-9 items-center gap-1.5 text-dim" title="帳戶和餘額都算；合計照樣全部加進去">
+        <input
+            type="checkbox"
+            class="accent-accent"
+            checked={hideSmall}
+            onchange={event => void goto(accountsHref(data.sort, !event.currentTarget.checked))}
+        />
+        隱藏 &lt; NT$1,000
+    </label>
+    <span>外幣以最新匯率折合新臺幣比較</span>
+</div>
 
 {#each groups as group (group.kind)}
     <section class="panel px-3.5 pt-1 pb-2.5">
@@ -117,10 +145,19 @@ function href(account: Account) {
             <h1 class="label">ACCOUNTS · {accountKinds[group.kind].label}（{group.accounts.length}）</h1>
             <span class="text-[12px] text-mute">
                 合計 ≈ NT${formatAmount(group.worth.total)}{group.worth.missing ? `（${group.worth.missing} 個帳戶沒有匯率，不計）` : ""}
+                {#if group.hidden > 0}· 另 {group.hidden} 個 &lt; NT$1,000 未列出{/if}
             </span>
         </div>
         <div class="overflow-x-auto">
-            <table class="w-full min-w-[720px] border-collapse">
+            <!-- Fixed widths, so the tables of deposits, securities, and exchanges line up; the account takes the rest. -->
+            <table class="w-full min-w-[860px] table-fixed border-collapse">
+                <colgroup>
+                    <col class="w-28" />
+                    <col />
+                    <col class="w-[22rem]" />
+                    <col class="w-32" />
+                    <col class="w-24" />
+                </colgroup>
                 <thead>
                     <tr class="text-left text-mute">
                         <th class="py-2 pr-2 font-medium">BANK</th>
@@ -132,6 +169,11 @@ function href(account: Account) {
                 </thead>
                 <tbody>
                     {#each group.accounts as account (account.id)}
+                        {@const view = listedBalances(account, hideSmall)}
+                        {@const rows = view.listed}
+                        {@const note = leftOut(view)}
+                        <!-- An account holding NT$ alone is worth its balance: no worth line of its own. -->
+                        {@const ntdOnly = account.balances.length === 1 && account.balances[0].unit === "TWD"}
                         <tr class="border-t border-rule align-top hover:bg-raised">
                             <td class="py-2.5 pr-2">{institution(account.institution).name}</td>
                             <td class="px-2 py-2.5">
@@ -139,8 +181,20 @@ function href(account: Account) {
                                 {#if account.number}<span class="text-mute">{account.fullNumber ?? account.number}</span>{/if}
                             </td>
                             <td class="px-2 py-2.5 text-right">
-                                {#each account.balances as balance (balance.unit)}
-                                    <div class={sign(balance.amount) < 0 ? "text-neg" : "text-ink"}>
+                                {#if !ntdOnly}
+                                    <div
+                                        class={account.worth !== undefined && sign(account.worth) < 0 ? "text-neg" : "text-accent-soft"}
+                                        title={account.worthFrom === "valuation" ? "有幣種沒有匯率：取交易所的估值" : "各項折合新臺幣加總"}
+                                    >
+                                        {#if account.worth !== undefined}
+                                            ≈ {formatAmount(roundWhole(account.worth))} <span class="text-mute">TWD</span>
+                                        {:else}
+                                            無法估值
+                                        {/if}
+                                    </div>
+                                {/if}
+                                {#each rows as balance (balance.unit)}
+                                    <div class={sign(balance.amount) < 0 ? "text-neg" : ntdOnly ? "text-accent-soft" : "text-ink"}>
                                         {formatAmount(balance.amount)} <span class="text-mute">{balance.unit}{balance.code ? ` ${balance.code}` : ""}</span>
                                     </div>
                                     {#if balance.unit !== "TWD" && balance.worth !== undefined}
@@ -148,12 +202,13 @@ function href(account: Account) {
                                             ≈ NT${formatAmount(balance.worth)}
                                         </div>
                                     {/if}
-                                {:else}
-                                    <span class="text-mute">—</span>
                                 {/each}
+                                {#if note}<div class="text-[12px] text-mute">{note}</div>{/if}
                             </td>
                             <td class="px-2 py-2.5 text-dim">
-                                {#each account.balances as balance (balance.unit)}
+                                <!-- Keeps each date beside its balance below the account's worth line. -->
+                                {#if !ntdOnly}<div aria-hidden="true" class="invisible">·</div>{/if}
+                                {#each rows as balance (balance.unit)}
                                     <div>{balance.asOf}</div>
                                     <!-- Keeps each date beside its balance when a worth line follows the balance. -->
                                     {#if balance.unit !== "TWD" && balance.worth !== undefined}<div aria-hidden="true" class="invisible text-[12px]">·</div>{/if}
@@ -169,6 +224,8 @@ function href(account: Account) {
                                 {/if}
                             </td>
                         </tr>
+                    {:else}
+                        <tr><td colspan="5" class="py-2.5 text-mute">都不到 NT$1,000：取消勾選「隱藏 &lt; NT$1,000」就會列出。</td></tr>
                     {/each}
                 </tbody>
             </table>

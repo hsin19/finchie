@@ -8,5 +8,10 @@ import type { PageLoad } from "./$types";
 
 export const load = (async ({ fetch, depends, url }) => {
     depends(LEDGER);
-    return { accounts: need(await api(fetch).GET("/api/accounts")), sort: accountSort(url.searchParams.get("sort")) };
+    return {
+        accounts: need(await api(fetch).GET("/api/accounts")),
+        sort: accountSort(url.searchParams.get("sort")),
+        // Accounts and balances under NT$1,000 are left out unless ?all.
+        all: url.searchParams.has("all"),
+    };
 }) satisfies PageLoad;

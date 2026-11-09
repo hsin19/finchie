@@ -50,6 +50,14 @@ export function sign(value: string): -1 | 0 | 1 {
     return units < 0n ? -1 : units > 0n ? 1 : 0;
 }
 
+/** To the nearest whole unit, halves away from zero: "296380.87" → "296381", "-2.5" → "-3". */
+export function roundWhole(value: string): string {
+    const { units, scale } = parse(value);
+    const factor = 10n ** BigInt(scale);
+    const magnitude = ((units < 0n ? -units : units) * 2n + factor) / (2n * factor);
+    return render({ units: units < 0n ? -magnitude : magnitude, scale: 0 });
+}
+
 /** For proportions only (bar widths, percentages); never for arithmetic on money. */
 export function approx(value: string): number {
     return Number(value);
