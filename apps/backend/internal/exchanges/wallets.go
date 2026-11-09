@@ -43,6 +43,11 @@ func fold(ctx context.Context, institution string, wallets []wallet, prices map[
 		}
 	}
 	snapshot.Valuation = &Value{Unit: "USDT", Amount: total}
+	for coin := range snapshot.Holdings {
+		if price, ok := prices[coin]; ok {
+			snapshot.price(coin, "USDT", price)
+		}
+	}
 	return snapshot
 }
 

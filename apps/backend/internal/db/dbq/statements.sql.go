@@ -146,7 +146,7 @@ func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams
 type InsertTransactionsParams struct {
 	StatementID      int64
 	AccountID        int64
-	Unit             string
+	UnitID           int64
 	LineNo           int32
 	TransactionDate  pgtype.Date
 	PostingDate      pgtype.Date
@@ -229,7 +229,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
        (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -242,6 +242,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -377,14 +378,14 @@ JOIN statements o ON o.id <> s.id
     AND o.period_start <= s.closing_date
     AND o.closing_date >= s.period_start
 WHERE s.id = $1
-  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = $2 AND t.unit = $3)
-    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = $2 AND b.unit = $3))
+  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = $2 AND t.unit_id = $3)
+    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = $2 AND b.unit_id = $3))
 `
 
 type OverlappingDepositStatementsParams struct {
 	StatementID int64
 	AccountID   int64
-	Unit        string
+	UnitID      int64
 }
 
 type OverlappingDepositStatementsRow struct {
@@ -398,7 +399,7 @@ type OverlappingDepositStatementsRow struct {
 // the currency: on-demand exports such as Cathay's e-passbook (ADR 0013). Statements that only adjoin,
 // as monthly ones do, share no day.
 func (q *Queries) OverlappingDepositStatements(ctx context.Context, arg OverlappingDepositStatementsParams) ([]OverlappingDepositStatementsRow, error) {
-	rows, err := q.db.Query(ctx, overlappingDepositStatements, arg.StatementID, arg.AccountID, arg.Unit)
+	rows, err := q.db.Query(ctx, overlappingDepositStatements, arg.StatementID, arg.AccountID, arg.UnitID)
 	if err != nil {
 		return nil, err
 	}
@@ -437,17 +438,17 @@ const trimStatementBalances = `-- name: TrimStatementBalances :exec
 DELETE FROM balances b
 WHERE b.statement_id = $1::bigint
   AND b.account_id = $2
-  AND b.unit = $3
+  AND b.unit_id = $3
   AND b.as_of <= $4
   AND (b.as_of >= $5 OR EXISTS (
       SELECT 1 FROM balances k
-      WHERE k.statement_id = $6::bigint AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of))
+      WHERE k.statement_id = $6::bigint AND k.account_id = b.account_id AND k.unit_id = b.unit_id AND k.as_of = b.as_of))
 `
 
 type TrimStatementBalancesParams struct {
 	StatementID int64
 	AccountID   int64
-	Unit        string
+	UnitID      int64
 	ToDate      pgtype.Date
 	FromDate    pgtype.Date
 	KeeperID    int64
@@ -460,7 +461,7 @@ func (q *Queries) TrimStatementBalances(ctx context.Context, arg TrimStatementBa
 	_, err := q.db.Exec(ctx, trimStatementBalances,
 		arg.StatementID,
 		arg.AccountID,
-		arg.Unit,
+		arg.UnitID,
 		arg.ToDate,
 		arg.FromDate,
 		arg.KeeperID,
@@ -472,14 +473,14 @@ const trimStatementLines = `-- name: TrimStatementLines :exec
 DELETE FROM transactions
 WHERE statement_id = $1
   AND account_id = $2
-  AND unit = $3
+  AND unit_id = $3
   AND transaction_date BETWEEN $4 AND $5
 `
 
 type TrimStatementLinesParams struct {
 	StatementID int64
 	AccountID   int64
-	Unit        string
+	UnitID      int64
 	FromDate    pgtype.Date
 	ToDate      pgtype.Date
 }
@@ -489,7 +490,7 @@ func (q *Queries) TrimStatementLines(ctx context.Context, arg TrimStatementLines
 	_, err := q.db.Exec(ctx, trimStatementLines,
 		arg.StatementID,
 		arg.AccountID,
-		arg.Unit,
+		arg.UnitID,
 		arg.FromDate,
 		arg.ToDate,
 	)

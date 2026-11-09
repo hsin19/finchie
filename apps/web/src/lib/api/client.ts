@@ -12,6 +12,7 @@ export type AccountDetail = Schemas["AccountDetail"];
 export type AccountKind = Schemas["AccountKind"];
 export type AccountLine = Schemas["AccountLine"];
 export type Balance = Schemas["Balance"];
+export type Expiry = Schemas["Expiry"];
 export type BalanceGap = Schemas["BalanceGap"];
 export type CardTotal = Schemas["CardTotal"];
 export type Document = Schemas["Document"];
@@ -20,6 +21,8 @@ export type DocumentStatus = Schemas["DocumentStatus"];
 export type KindTotal = Schemas["KindTotal"];
 export type LineCounterpart = Schemas["LineCounterpart"];
 export type PreviewFile = Schemas["PreviewFile"];
+export type Price = Schemas["Price"];
+export type PriceSource = Schemas["PriceSource"];
 export type Statement = Schemas["Statement"];
 export type Trade = Schemas["Trade"];
 export type Transaction = Schemas["Transaction"];
@@ -65,9 +68,12 @@ export function attempt<R extends Result>(result: R): { data: Data<R>; error?: u
     return result.data === undefined ? { error: message(result) } : { data: result.data as Data<R> };
 }
 
-/** For event handlers: an error response becomes an Error to show next to the control. */
+/**
+ * For event handlers: an error response becomes an Error to show next to the control. Success is the
+ * status, not a body: a 204 has none.
+ */
 export function unwrap<R extends Result>(result: R): Data<R> {
-    if (result.data === undefined) throw new Error(message(result));
+    if (!result.response.ok) throw new Error(message(result));
     return result.data as Data<R>;
 }
 

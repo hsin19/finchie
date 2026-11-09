@@ -28,7 +28,7 @@ Continuity (ADR 0013) then checks shares. Between two statements, trades must ex
 
 ### Prices
 
-`fetch_quotes`, a River periodic job that runs at start and every 6 hours like the exchange rates (ADR 0015), reads the day's closing prices of the listed (TWSE `exchangeReport/STOCK_DAY_ALL`) and OTC (TPEx `tpex_mainboard_daily_close_quotes`) securities. Both lists are free and need no key; each row has a code, a name, and a close. The job keeps the rows for names some securities account holds or held: `quotes (day, name, code, market, close)`. A holding's worth is its shares times the newest close of its name, in NT$. A name neither list prints (delisted, renamed) has no worth and sorts last, like a unit without a rate.
+`fetch_quotes`, a River periodic job that runs at start and every 6 hours like the exchange rates (ADR 0015), reads the day's closing prices of the listed (TWSE `exchangeReport/STOCK_DAY_ALL`) and OTC (TPEx `tpex_mainboard_daily_close_quotes`) securities. Both lists are free and need no key; each row has a code, a name, and a close. The job keeps the rows for names some securities account holds or held: `quotes (day, name, code, market, close)` (ADR 0020: prices from `twse` and `tpex` as of 13:30, the code and market on the security's unit). A holding's worth is its shares times the newest close of its name, in NT$. A name neither list prints (delisted, renamed) has no worth and sorts last, like a unit without a rate.
 
 ### What it is for
 

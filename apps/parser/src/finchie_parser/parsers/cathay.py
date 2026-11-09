@@ -1,14 +1,35 @@
 import re
+from datetime import date
 from decimal import Decimal
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
+from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, sum_new_charges
+from finchie_parser.parsers.base import (
+    Parsed,
+    StatementParser,
+    earned,
+    find,
+    points_program,
+    sum_new_charges,
+    used,
+)
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, clean, month_day, roc_date
+from finchie_parser.text import amount, clean, month_day, month_end, roc_date
 
+# 信用卡回饋總覽, its headings unmapped glyphs (ADR 0019): "<program> <上期累計> <本期新增/扣除> <本期贈送>
+# <本期兌/轉換> <本期結餘>", e.g. "小樹點(信用卡) 3,190 64 0 1 3,253".
+_POINTS = re.compile(
+    r"^(?P<name>\S*(?:點|里數)\S*) (?P<opening>-?[\d,]+) (?P<added>-?[\d,]+) (?P<gift>-?[\d,]+)"
+    r" (?P<used>-?[\d,]+) (?P<closing>-?[\d,]+)$"
+)
+# "您有88點小樹點(信用卡)於本月到期；共計有669點小樹點(信用卡)將於116年3月31日前陸續到期": the closing month's, and
+# the next twelve months' together, the closing month's included.
+_POINTS_EXPIRING = re.compile(
+    r"您有(?P<month>[\d,]+)點(?P<name>\S+?)於本月到期；共計有(?P<total>[\d,]+)點\S+?"
+    r"將於(?P<y>\d{3})年(?P<m>\d{1,2})月(?P<d>\d{1,2})日前陸續到期"
+)
 # Page 1 prints the closing date next to the credit limit: "115/10/01 140,000".
 _CLOSING = re.compile(r"^(\d{3}/\d\d/\d\d) [\d,]+$", re.ASCII)
 # The auto-debit notice carries the due date, already moved past holidays.
@@ -34,7 +55,7 @@ _PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?)
 
 class CathayParser(StatementParser):
     name = "cathay.credit_card"
-    version = "4"
+    version = "5"
     institution = "cathay"
     sender_domains = ("cathaybk.com.tw",)
     subject_terms = ("信用卡", "電子帳單")
@@ -60,6 +81,8 @@ class CathayParser(StatementParser):
         payments: Decimal | None = None
 
         transactions: list[Transaction] = []
+        programs: list[re.Match[str]] = []
+        expiring: dict[str, list[PointsExpiry]] = {}
         for line in (line for text in texts for line in text.splitlines()):
             if match := _NEW_CHARGES.match(line):
                 new_charges = (new_charges or Decimal(0)) + amount(match.group(1))
@@ -104,6 +127,14 @@ class CathayParser(StatementParser):
                         amount=amount(match["amt"]),
                     )
                 )
+            elif match := _POINTS.match(line):
+                programs.append(match)
+            elif match := _POINTS_EXPIRING.search(line):
+                by = date(int(match["y"]) + 1911, int(match["m"]), int(match["d"]))
+                expiring[match["name"]] = [
+                    PointsExpiry(amount(match["month"]), month_end(closing.year, closing.month)),
+                    PointsExpiry(amount(match["total"]), by),
+                ]
 
         if new_charges is None:
             raise LayoutError("statement field not found: 本期消費")
@@ -113,6 +144,22 @@ class CathayParser(StatementParser):
         if payments is not None and paid != payments:
             warnings.append(f"payment lines add up to {paid}, but 繳款小計 is {payments}")
 
+        points = [
+            points_program(
+                m["name"],
+                opening=amount(m["opening"]),
+                lines=(
+                    earned("本期新增/扣除", amount(m["added"])),
+                    earned("本期贈送", amount(m["gift"])),
+                    used("本期兌/轉換", amount(m["used"])),
+                ),
+                closing=amount(m["closing"]),
+                expiries=expiring.get(m["name"], ()),
+                warnings=warnings,
+            )
+            for m in programs
+        ]
+
         statement = Statement(
             institution=self.institution,
             closing_date=closing,
@@ -121,6 +168,7 @@ class CathayParser(StatementParser):
             total_due=total_due,
             transactions=transactions,
             reconciliation=Reconciliation(sum_new_charges(transactions), new_charges, "本期消費"),
+            points=points,
         )
         return Parsed(statement, warnings)
 

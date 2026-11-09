@@ -260,7 +260,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
        (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -274,6 +274,7 @@ FROM matched m
 JOIN transactions t ON t.id = m.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -504,7 +505,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
        (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -517,6 +518,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -649,7 +651,7 @@ func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]Transactio
 const transactionTotals = `-- name: TransactionTotals :many
 WITH lines AS (
     SELECT t.kind, a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-           coalesce(a.full_number, a.number) AS account_number, s.institution, t.card_last4, t.unit,
+           coalesce(a.full_number, a.number) AS account_number, s.institution, t.card_last4, u.symbol AS unit,
            t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow,
            ($1::text[] IS NULL OR t.kind = ANY ($1::text[])) AS kind_match,
            (($2::text IS NULL OR s.institution = $2::text)
@@ -659,11 +661,12 @@ WITH lines AS (
            t.amount + coalesce(kids.amount, 0) AS amount,
            CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS flow,
            (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer,
-           -- Shares, not money: a trade is neither spent nor received (ADR 0017).
-           a.kind = 'securities' AS shares
+           -- Shares or points, not money: neither spent nor received (ADR 0017, ADR 0019).
+           a.kind IN ('securities', 'points') AS shares
     FROM transactions t
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
+    JOIN units u ON u.id = t.unit_id
     LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                        FROM transactions c
                        WHERE $5::boolean AND c.parent_id = t.id) kids ON true
@@ -793,9 +796,10 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 
 const transferLines = `-- name: TransferLines :many
 SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
-       t.transaction_date, t.kind, t.amount, t.unit, t.memo, t.counterparty
+       t.transaction_date, t.kind, t.amount, u.symbol AS unit, t.memo, t.counterparty
 FROM transactions t
 JOIN accounts a ON a.id = t.account_id
+JOIN units u ON u.id = t.unit_id
 WHERE a.kind = 'deposit' OR t.kind = 'payment'
 ORDER BY t.id
 `

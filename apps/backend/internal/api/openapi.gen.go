@@ -38,22 +38,25 @@ func (e AccountContinuity) Valid() bool {
 
 // Defines values for AccountKind.
 const (
-	CreditCard AccountKind = "credit_card"
-	Deposit    AccountKind = "deposit"
-	Exchange   AccountKind = "exchange"
-	Securities AccountKind = "securities"
+	AccountKindCreditCard AccountKind = "credit_card"
+	AccountKindDeposit    AccountKind = "deposit"
+	AccountKindExchange   AccountKind = "exchange"
+	AccountKindPoints     AccountKind = "points"
+	AccountKindSecurities AccountKind = "securities"
 )
 
 // Valid indicates whether the value is a known member of the AccountKind enum.
 func (e AccountKind) Valid() bool {
 	switch e {
-	case CreditCard:
+	case AccountKindCreditCard:
 		return true
-	case Deposit:
+	case AccountKindDeposit:
 		return true
-	case Exchange:
+	case AccountKindExchange:
 		return true
-	case Securities:
+	case AccountKindPoints:
+		return true
+	case AccountKindSecurities:
 		return true
 	default:
 		return false
@@ -87,10 +90,45 @@ func (e DocumentStatus) Valid() bool {
 	}
 }
 
+// Defines values for PriceSource.
+const (
+	Binance PriceSource = "binance"
+	Bitget  PriceSource = "bitget"
+	Fawaz   PriceSource = "fawaz"
+	Max     PriceSource = "max"
+	Owner   PriceSource = "owner"
+	Tpex    PriceSource = "tpex"
+	Twse    PriceSource = "twse"
+)
+
+// Valid indicates whether the value is a known member of the PriceSource enum.
+func (e PriceSource) Valid() bool {
+	switch e {
+	case Binance:
+		return true
+	case Bitget:
+		return true
+	case Fawaz:
+		return true
+	case Max:
+		return true
+	case Owner:
+		return true
+	case Tpex:
+		return true
+	case Twse:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransactionKind.
 const (
+	Adjust                TransactionKind = "adjust"
 	AnnualFee             TransactionKind = "annual_fee"
 	Buy                   TransactionKind = "buy"
+	Earn                  TransactionKind = "earn"
 	Fee                   TransactionKind = "fee"
 	ForeignTransactionFee TransactionKind = "foreign_transaction_fee"
 	Interest              TransactionKind = "interest"
@@ -98,6 +136,7 @@ const (
 	Payment               TransactionKind = "payment"
 	Purchase              TransactionKind = "purchase"
 	Rebate                TransactionKind = "rebate"
+	Redeem                TransactionKind = "redeem"
 	Refund                TransactionKind = "refund"
 	Sell                  TransactionKind = "sell"
 )
@@ -105,9 +144,13 @@ const (
 // Valid indicates whether the value is a known member of the TransactionKind enum.
 func (e TransactionKind) Valid() bool {
 	switch e {
+	case Adjust:
+		return true
 	case AnnualFee:
 		return true
 	case Buy:
+		return true
+	case Earn:
 		return true
 	case Fee:
 		return true
@@ -122,6 +165,8 @@ func (e TransactionKind) Valid() bool {
 	case Purchase:
 		return true
 	case Rebate:
+		return true
+	case Redeem:
 		return true
 	case Refund:
 		return true
@@ -156,6 +201,27 @@ func (e TransactionSort) Valid() bool {
 	}
 }
 
+// Defines values for UnitKind.
+const (
+	UnitKindMoney    UnitKind = "money"
+	UnitKindPoints   UnitKind = "points"
+	UnitKindSecurity UnitKind = "security"
+)
+
+// Valid indicates whether the value is a known member of the UnitKind enum.
+func (e UnitKind) Valid() bool {
+	switch e {
+	case UnitKindMoney:
+		return true
+	case UnitKindPoints:
+		return true
+	case UnitKindSecurity:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorthFrom.
 const (
 	WorthFromHoldings  WorthFrom = "holdings"
@@ -181,6 +247,9 @@ type Account struct {
 
 	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
+
+	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
+	Expiries []Expiry `json:"expiries"`
 
 	// FullNumber Its full number, where the owner gave one (ADR 0016)
 	FullNumber *string      `json:"fullNumber,omitempty"`
@@ -217,6 +286,22 @@ type Account struct {
 // AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 type AccountContinuity string
 
+// AccountCreate defines model for AccountCreate.
+type AccountCreate struct {
+	// Kind Any but credit_card
+	Kind AccountKind `json:"kind"`
+
+	// Name Its own name (`label`), no other account's
+	//
+	// Example: 飯店會員
+	Name string `json:"name"`
+}
+
+// AccountCreated defines model for AccountCreated.
+type AccountCreated struct {
+	Id int64 `json:"id"`
+}
+
 // AccountDetail defines model for AccountDetail.
 type AccountDetail struct {
 	// Balances The newest balance in each unit
@@ -224,6 +309,9 @@ type AccountDetail struct {
 
 	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
+
+	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
+	Expiries []Expiry `json:"expiries"`
 
 	// FullNumber Its full number, where the owner gave one (ADR 0016)
 	FullNumber *string      `json:"fullNumber,omitempty"`
@@ -304,7 +392,7 @@ type AccountTotal struct {
 
 // AccountUpdate defines model for AccountUpdate.
 type AccountUpdate struct {
-	// FullNumber Digits, spaces and dashes allowed; empty clears it
+	// FullNumber Where the source prints a masked number, its digits (spaces and dashes allowed); else any. Empty clears it
 	FullNumber *string `json:"fullNumber,omitempty"`
 
 	// Name The owner's name for the account; empty clears it
@@ -326,21 +414,21 @@ type Balance struct {
 	// Example: 00878
 	Code *string `json:"code,omitempty"`
 
-	// Price A security's newest close in NT$, which its worth used
-	Price *Decimal `json:"price,omitempty"`
-
-	// RateDay The day of the rate or close its worth used; absent for NT$
-	RateDay *openapi_types.Date `json:"rateDay,omitempty"`
+	// Price Its unit's newest price, which its worth used; absent for NT$ and for a unit without one
+	Price *Price `json:"price,omitempty"`
 
 	// StatementId The statement that reported it; absent for a snapshot, such as an exchange's (ADR 0018)
 	StatementId *int64 `json:"statementId,omitempty"`
 
-	// Unit ISO 4217, or a points program's code
+	// Unit Its unit's symbol: ISO 4217 or a coin's ticker, a security's name, a points program's
 	//
 	// Example: TWD
 	Unit string `json:"unit"`
 
-	// Worth In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points
+	// UnitId Its unit (ADR 0020), for giving it a price; on an account's newest balances
+	UnitId *int64 `json:"unitId,omitempty"`
+
+	// Worth In NT$, at its unit's newest price (ADR 0020); absent for a unit without one in NT$
 	Worth *Decimal `json:"worth,omitempty"`
 }
 
@@ -428,6 +516,40 @@ type EmailPreview struct {
 	Subject   string `json:"subject"`
 }
 
+// Expiry Points a source says will lapse by a date (ADR 0019): one date's, one month's, or several months' together
+type Expiry struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal            `json:"amount"`
+	By     openapi_types.Date `json:"by"`
+
+	// Unit Example: 小樹點(信用卡)
+	Unit string `json:"unit"`
+}
+
+// HoldingsUpdate defines model for HoldingsUpdate.
+type HoldingsUpdate struct {
+	Holdings []struct {
+		// Amount Decimal number as a string, e.g. "-6552.97"
+		//
+		// Example: 1234.50
+		Amount   Decimal `json:"amount"`
+		Expiries []struct {
+			// Amount Decimal number as a string, e.g. "-6552.97"
+			//
+			// Example: 1234.50
+			Amount Decimal            `json:"amount"`
+			By     openapi_types.Date `json:"by"`
+		} `json:"expiries"`
+
+		// Unit Its symbol: a currency or coin, a security's name, a points program's
+		//
+		// Example: 飯店點數
+		Unit string `json:"unit"`
+	} `json:"holdings"`
+}
+
 // KindTotal defines model for KindTotal.
 type KindTotal struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
@@ -439,7 +561,7 @@ type KindTotal struct {
 	// Flow Seen from the owner
 	Flow Decimal `json:"flow"`
 
-	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
 	Kind TransactionKind `json:"kind"`
 }
 
@@ -500,6 +622,29 @@ type PreviewFile struct {
 	Primary   bool `json:"primary"`
 	SizeBytes int  `json:"sizeBytes"`
 }
+
+// Price What one unit is worth by its newest price, whatever the source (ADR 0020)
+type Price struct {
+	// AsOf When the price held: the start of a rate's day, a close's 13:30, an exchange's fetch, the owner's word
+	AsOf time.Time `json:"asOf"`
+
+	// Quote The unit the source priced it in
+	//
+	// Example: USDT
+	Quote string `json:"quote"`
+
+	// Quoted One unit in the quote unit
+	Quoted Decimal `json:"quoted"`
+
+	// Source The exchange-rate feed (ADR 0015), the stock exchanges' closes (ADR 0017), a crypto exchange's markets (ADR 0018), or the owner
+	Source PriceSource `json:"source"`
+
+	// Twd One unit in NT$; through the quote unit's own newest price when that is not NT$, absent when that one is not in NT$
+	Twd *Decimal `json:"twd,omitempty"`
+}
+
+// PriceSource The exchange-rate feed (ADR 0015), the stock exchanges' closes (ADR 0017), a crypto exchange's markets (ADR 0018), or the owner
+type PriceSource string
 
 // Problem defines model for Problem.
 type Problem struct {
@@ -615,7 +760,7 @@ type Transaction struct {
 	Id          int64    `json:"id"`
 	Institution string   `json:"institution"`
 
-	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
 	Kind TransactionKind `json:"kind"`
 	Memo *string         `json:"memo,omitempty"`
 
@@ -645,7 +790,7 @@ type TransactionFamily struct {
 	Transaction Transaction   `json:"transaction"`
 }
 
-// TransactionKind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+// TransactionKind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
 type TransactionKind string
 
 // TransactionLink Another line, in short, enough to find it and to tell a refund in full
@@ -656,7 +801,7 @@ type TransactionLink struct {
 	Amount Decimal `json:"amount"`
 	Id     int64   `json:"id"`
 
-	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
 	Kind TransactionKind `json:"kind"`
 
 	// OriginalAmount Decimal number as a string, e.g. "-6552.97"
@@ -689,6 +834,19 @@ type TransactionSearch struct {
 // TransactionSort defines model for TransactionSort.
 type TransactionSort string
 
+// Unit defines model for Unit.
+type Unit struct {
+	// Code A security's code
+	//
+	// Example: 00878
+	Code *string  `json:"code,omitempty"`
+	Id   int64    `json:"id"`
+	Kind UnitKind `json:"kind"`
+
+	// Symbol Example: 小樹點(信用卡)
+	Symbol string `json:"symbol"`
+}
+
 // UnitFlow defines model for UnitFlow.
 type UnitFlow struct {
 	// Moved What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received
@@ -707,6 +865,18 @@ type UnitFlow struct {
 	Unit  string  `json:"unit"`
 }
 
+// UnitKind defines model for UnitKind.
+type UnitKind string
+
+// UnitPriceUpdate defines model for UnitPriceUpdate.
+type UnitPriceUpdate struct {
+	// Quote A money unit to price it in, NT$ when left out; one with no price in NT$ gives it no worth
+	Quote *string `json:"quote,omitempty"`
+
+	// Value What one unit is worth in the quote unit: 0 or more
+	Value Decimal `json:"value"`
+}
+
 // Valuation What a source says the whole account is worth (ADR 0018): an exchange, by its own prices
 type Valuation struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
@@ -718,7 +888,7 @@ type Valuation struct {
 	// Unit Example: USDT
 	Unit string `json:"unit"`
 
-	// Worth In NT$, at the newest rate of its unit; absent for a unit without one
+	// Worth In NT$, at its unit's newest price (ADR 0020); absent for a unit without one
 	Worth *Decimal `json:"worth,omitempty"`
 }
 
@@ -794,23 +964,43 @@ type SearchTransactionsParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListUnitsParams defines parameters for ListUnits.
+type ListUnitsParams struct {
+	Kind *UnitKind `form:"kind,omitempty" json:"kind,omitempty"`
+}
+
+// CreateAccountJSONRequestBody defines body for CreateAccount for application/json ContentType.
+type CreateAccountJSONRequestBody = AccountCreate
+
 // UpdateAccountJSONRequestBody defines body for UpdateAccount for application/json ContentType.
 type UpdateAccountJSONRequestBody = AccountUpdate
 
+// UpdateHoldingsJSONRequestBody defines body for UpdateHoldings for application/json ContentType.
+type UpdateHoldingsJSONRequestBody = HoldingsUpdate
+
 // UploadDocumentMultipartRequestBody defines body for UploadDocument for multipart/form-data ContentType.
 type UploadDocumentMultipartRequestBody UploadDocumentMultipartBody
+
+// SetUnitPriceJSONRequestBody defines body for SetUnitPrice for application/json ContentType.
+type SetUnitPriceJSONRequestBody = UnitPriceUpdate
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// ListAccounts Every account, with its newest balance in each unit and where its balances do not join up
 	// (GET /api/accounts)
 	ListAccounts(ctx *echo.Context) error
+	// CreateAccount An account the owner keeps by hand
+	// (POST /api/accounts)
+	CreateAccount(ctx *echo.Context) error
 	// GetAccount One account with every balance its sources reported
 	// (GET /api/accounts/{id})
 	GetAccount(ctx *echo.Context, id Id) error
 	// UpdateAccount The owner's details of an account, its own name and its full number
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx *echo.Context, id Id) error
+	// UpdateHoldings What an account the owner keeps holds today, and what will lapse
+	// (PUT /api/accounts/{id}/holdings)
+	UpdateHoldings(ctx *echo.Context, id Id) error
 	// ListAccountLines An account's lines, newest first
 	// (GET /api/accounts/{id}/lines)
 	ListAccountLines(ctx *echo.Context, id Id, params ListAccountLinesParams) error
@@ -859,6 +1049,15 @@ type ServerInterface interface {
 	// GetTransaction A transaction with its parent and children, whichever statements they are on
 	// (GET /api/transactions/{id})
 	GetTransaction(ctx *echo.Context, id Id) error
+	// ListUnits The units amounts are counted in
+	// (GET /api/units)
+	ListUnits(ctx *echo.Context, params ListUnitsParams) error
+	// ClearUnitPrice Withdraw every price the owner gave a unit
+	// (DELETE /api/units/{id}/price)
+	ClearUnitPrice(ctx *echo.Context, id Id) error
+	// SetUnitPrice What one unit is worth, by the owner's word
+	// (PUT /api/units/{id}/price)
+	SetUnitPrice(ctx *echo.Context, id Id) error
 }
 
 // ServerInterfaceWrapper converts echo contexts to parameters.
@@ -872,6 +1071,15 @@ func (w *ServerInterfaceWrapper) ListAccounts(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ListAccounts(ctx)
+	return err
+}
+
+// CreateAccount converts echo context to params.
+func (w *ServerInterfaceWrapper) CreateAccount(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.CreateAccount(ctx)
 	return err
 }
 
@@ -904,6 +1112,22 @@ func (w *ServerInterfaceWrapper) UpdateAccount(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.UpdateAccount(ctx, id)
+	return err
+}
+
+// UpdateHoldings converts echo context to params.
+func (w *ServerInterfaceWrapper) UpdateHoldings(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.UpdateHoldings(ctx, id)
 	return err
 }
 
@@ -1277,6 +1501,56 @@ func (w *ServerInterfaceWrapper) GetTransaction(ctx *echo.Context) error {
 	return err
 }
 
+// ListUnits converts echo context to params.
+func (w *ServerInterfaceWrapper) ListUnits(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUnitsParams
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", ctx.QueryParams(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter kind: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListUnits(ctx, params)
+	return err
+}
+
+// ClearUnitPrice converts echo context to params.
+func (w *ServerInterfaceWrapper) ClearUnitPrice(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ClearUnitPrice(ctx, id)
+	return err
+}
+
+// SetUnitPrice converts echo context to params.
+func (w *ServerInterfaceWrapper) SetUnitPrice(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.SetUnitPrice(ctx, id)
+	return err
+}
+
 // This is a simple interface which specifies echo.Route addition functions which
 // are present on both echo.Echo and echo.Group, since we want to allow using
 // either of them for path registration
@@ -1334,8 +1608,13 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/documents/:id/preview/body", wrapper.GetDocumentPreviewBody, options.OperationMiddlewares["getDocumentPreviewBody"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/preview/files/:index", wrapper.GetDocumentPreviewFile, options.OperationMiddlewares["getDocumentPreviewFile"]...)
 	router.GET(options.BaseURL+"/api/accounts", wrapper.ListAccounts, options.OperationMiddlewares["listAccounts"]...)
+	router.POST(options.BaseURL+"/api/accounts", wrapper.CreateAccount, options.OperationMiddlewares["createAccount"]...)
 	router.GET(options.BaseURL+"/api/accounts/:id", wrapper.GetAccount, options.OperationMiddlewares["getAccount"]...)
 	router.PATCH(options.BaseURL+"/api/accounts/:id", wrapper.UpdateAccount, options.OperationMiddlewares["updateAccount"]...)
+	router.PUT(options.BaseURL+"/api/accounts/:id/holdings", wrapper.UpdateHoldings, options.OperationMiddlewares["updateHoldings"]...)
+	router.GET(options.BaseURL+"/api/units", wrapper.ListUnits, options.OperationMiddlewares["listUnits"]...)
+	router.DELETE(options.BaseURL+"/api/units/:id/price", wrapper.ClearUnitPrice, options.OperationMiddlewares["clearUnitPrice"]...)
+	router.PUT(options.BaseURL+"/api/units/:id/price", wrapper.SetUnitPrice, options.OperationMiddlewares["setUnitPrice"]...)
 	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
@@ -1365,6 +1644,56 @@ func (response ListAccounts200JSONResponse) VisitListAccountsResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAccountRequestObject struct {
+	Body *CreateAccountJSONRequestBody
+}
+
+type CreateAccountResponseObject interface {
+	VisitCreateAccountResponse(w http.ResponseWriter) error
+}
+
+type CreateAccount201JSONResponse AccountCreated
+
+func (response CreateAccount201JSONResponse) VisitCreateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAccount400JSONResponse struct{ ProblemJSONResponse }
+
+func (response CreateAccount400JSONResponse) VisitCreateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAccount409JSONResponse Problem
+
+func (response CreateAccount409JSONResponse) VisitCreateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1439,6 +1768,65 @@ func (response UpdateAccount400JSONResponse) VisitUpdateAccountResponse(w http.R
 type UpdateAccount404JSONResponse Problem
 
 func (response UpdateAccount404JSONResponse) VisitUpdateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAccount409JSONResponse Problem
+
+func (response UpdateAccount409JSONResponse) VisitUpdateAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateHoldingsRequestObject struct {
+	Id   Id `json:"id"`
+	Body *UpdateHoldingsJSONRequestBody
+}
+
+type UpdateHoldingsResponseObject interface {
+	VisitUpdateHoldingsResponse(w http.ResponseWriter) error
+}
+
+type UpdateHoldings204Response struct {
+}
+
+func (response UpdateHoldings204Response) VisitUpdateHoldingsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UpdateHoldings400JSONResponse struct{ ProblemJSONResponse }
+
+func (response UpdateHoldings400JSONResponse) VisitUpdateHoldingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateHoldings404JSONResponse Problem
+
+func (response UpdateHoldings404JSONResponse) VisitUpdateHoldingsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2243,17 +2631,120 @@ func (response GetTransaction404JSONResponse) VisitGetTransactionResponse(w http
 	return err
 }
 
+type ListUnitsRequestObject struct {
+	Params ListUnitsParams
+}
+
+type ListUnitsResponseObject interface {
+	VisitListUnitsResponse(w http.ResponseWriter) error
+}
+
+type ListUnits200JSONResponse []Unit
+
+func (response ListUnits200JSONResponse) VisitListUnitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ClearUnitPriceRequestObject struct {
+	Id Id `json:"id"`
+}
+
+type ClearUnitPriceResponseObject interface {
+	VisitClearUnitPriceResponse(w http.ResponseWriter) error
+}
+
+type ClearUnitPrice204Response struct {
+}
+
+func (response ClearUnitPrice204Response) VisitClearUnitPriceResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ClearUnitPrice404JSONResponse struct{ ProblemJSONResponse }
+
+func (response ClearUnitPrice404JSONResponse) VisitClearUnitPriceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUnitPriceRequestObject struct {
+	Id   Id `json:"id"`
+	Body *SetUnitPriceJSONRequestBody
+}
+
+type SetUnitPriceResponseObject interface {
+	VisitSetUnitPriceResponse(w http.ResponseWriter) error
+}
+
+type SetUnitPrice204Response struct {
+}
+
+func (response SetUnitPrice204Response) VisitSetUnitPriceResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetUnitPrice400JSONResponse struct{ ProblemJSONResponse }
+
+func (response SetUnitPrice400JSONResponse) VisitSetUnitPriceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUnitPrice404JSONResponse Problem
+
+func (response SetUnitPrice404JSONResponse) VisitSetUnitPriceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ListAccounts Every account, with its newest balance in each unit and where its balances do not join up
 	// (GET /api/accounts)
 	ListAccounts(ctx context.Context, request ListAccountsRequestObject) (ListAccountsResponseObject, error)
+	// CreateAccount An account the owner keeps by hand
+	// (POST /api/accounts)
+	CreateAccount(ctx context.Context, request CreateAccountRequestObject) (CreateAccountResponseObject, error)
 	// GetAccount One account with every balance its sources reported
 	// (GET /api/accounts/{id})
 	GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error)
 	// UpdateAccount The owner's details of an account, its own name and its full number
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error)
+	// UpdateHoldings What an account the owner keeps holds today, and what will lapse
+	// (PUT /api/accounts/{id}/holdings)
+	UpdateHoldings(ctx context.Context, request UpdateHoldingsRequestObject) (UpdateHoldingsResponseObject, error)
 	// ListAccountLines An account's lines, newest first
 	// (GET /api/accounts/{id}/lines)
 	ListAccountLines(ctx context.Context, request ListAccountLinesRequestObject) (ListAccountLinesResponseObject, error)
@@ -2302,6 +2793,15 @@ type StrictServerInterface interface {
 	// GetTransaction A transaction with its parent and children, whichever statements they are on
 	// (GET /api/transactions/{id})
 	GetTransaction(ctx context.Context, request GetTransactionRequestObject) (GetTransactionResponseObject, error)
+	// ListUnits The units amounts are counted in
+	// (GET /api/units)
+	ListUnits(ctx context.Context, request ListUnitsRequestObject) (ListUnitsResponseObject, error)
+	// ClearUnitPrice Withdraw every price the owner gave a unit
+	// (DELETE /api/units/{id}/price)
+	ClearUnitPrice(ctx context.Context, request ClearUnitPriceRequestObject) (ClearUnitPriceResponseObject, error)
+	// SetUnitPrice What one unit is worth, by the owner's word
+	// (PUT /api/units/{id}/price)
+	SetUnitPrice(ctx context.Context, request SetUnitPriceRequestObject) (SetUnitPriceResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx *echo.Context, request any) (any, error)
@@ -2333,6 +2833,52 @@ func (sh *strictHandler) ListAccounts(ctx *echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(ListAccountsResponseObject); ok {
 		return validResponse.VisitListAccountsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// CreateAccount operation middleware
+func (sh *strictHandler) CreateAccount(ctx *echo.Context) error {
+	var request CreateAccountRequestObject
+
+	var body CreateAccountJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAccount(ctx.Request().Context(), request.(CreateAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAccount")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(CreateAccountResponseObject); ok {
+		return validResponse.VisitCreateAccountResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -2406,6 +2952,54 @@ func (sh *strictHandler) UpdateAccount(ctx *echo.Context, id Id) error {
 		return err
 	} else if validResponse, ok := response.(UpdateAccountResponseObject); ok {
 		return validResponse.VisitUpdateAccountResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// UpdateHoldings operation middleware
+func (sh *strictHandler) UpdateHoldings(ctx *echo.Context, id Id) error {
+	var request UpdateHoldingsRequestObject
+
+	request.Id = id
+
+	var body UpdateHoldingsJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateHoldings(ctx.Request().Context(), request.(UpdateHoldingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateHoldings")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UpdateHoldingsResponseObject); ok {
+		return validResponse.VisitUpdateHoldingsResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}
@@ -2810,6 +3404,104 @@ func (sh *strictHandler) GetTransaction(ctx *echo.Context, id Id) error {
 		return err
 	} else if validResponse, ok := response.(GetTransactionResponseObject); ok {
 		return validResponse.VisitGetTransactionResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListUnits operation middleware
+func (sh *strictHandler) ListUnits(ctx *echo.Context, params ListUnitsParams) error {
+	var request ListUnitsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUnits(ctx.Request().Context(), request.(ListUnitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUnits")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListUnitsResponseObject); ok {
+		return validResponse.VisitListUnitsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ClearUnitPrice operation middleware
+func (sh *strictHandler) ClearUnitPrice(ctx *echo.Context, id Id) error {
+	var request ClearUnitPriceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ClearUnitPrice(ctx.Request().Context(), request.(ClearUnitPriceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ClearUnitPrice")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ClearUnitPriceResponseObject); ok {
+		return validResponse.VisitClearUnitPriceResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// SetUnitPrice operation middleware
+func (sh *strictHandler) SetUnitPrice(ctx *echo.Context, id Id) error {
+	var request SetUnitPriceRequestObject
+
+	request.Id = id
+
+	var body SetUnitPriceJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SetUnitPrice(ctx.Request().Context(), request.(SetUnitPriceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetUnitPrice")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(SetUnitPriceResponseObject); ok {
+		return validResponse.VisitSetUnitPriceResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

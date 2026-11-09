@@ -3,6 +3,7 @@ import type {
     AccountKind,
     Document,
     DocumentStatus,
+    PriceSource,
     Transaction,
     TransactionKind,
 } from "#lib/api/client.js";
@@ -34,7 +35,8 @@ const institutions: Record<string, Institution> = {
 };
 
 // Institutions Finchie reads no card bills from, so never in a spending chart: banks it reads deposit
-// statements from, brokers (ADR 0017), and exchanges (ADR 0018).
+// statements from, brokers (ADR 0017), exchanges (ADR 0018), and the owner, for accounts kept by hand
+// (ADR 0019).
 const depositOnly: Record<string, Institution> = {
     fubon: { name: "富邦", code: "TFB", color: "var(--color-mute)" },
     ctbc: { name: "中信", code: "CTBC", color: "var(--color-mute)" },
@@ -43,6 +45,7 @@ const depositOnly: Record<string, Institution> = {
     max: { name: "MAX", code: "MAX", color: "var(--color-mute)" },
     binance: { name: "Binance", code: "BINANCE", color: "var(--color-mute)" },
     bitget: { name: "Bitget", code: "BITGET", color: "var(--color-mute)" },
+    owner: { name: "手動", code: "MANUAL", color: "var(--color-mute)" },
 };
 
 /** Banks in chart order; a bank without a color comes after them. */
@@ -63,9 +66,21 @@ export const accountKinds: Record<AccountKind, { short: string; label: string; }
     credit_card: { short: "card", label: "信用卡" },
     securities: { short: "securities", label: "證券" },
     exchange: { short: "exchange", label: "交易所" },
+    points: { short: "points", label: "點數" },
 };
 
 /** The owner's name for an account, else the bank's ("臺幣活存"), else its kind's. */
+/** Where a price came from (ADR 0020). */
+export const priceSources: Record<PriceSource, string> = {
+    fawaz: "匯率",
+    twse: "證交所收盤",
+    tpex: "櫃買收盤",
+    max: "MAX",
+    binance: "Binance",
+    bitget: "Bitget",
+    owner: "自訂",
+};
+
 export function accountName(account: Pick<Account, "kind" | "label" | "name">): string {
     return account.name ?? account.label ?? accountKinds[account.kind].label;
 }
@@ -97,9 +112,13 @@ export const kinds: Record<TransactionKind, Kind> = {
     // A trade, in shares (ADR 0017).
     buy: { short: "buy", label: "買進", tone: "ink" },
     sell: { short: "sell", label: "賣出", tone: "ink" },
+    // A points bill's period totals, in points (ADR 0019).
+    earn: { short: "earn", label: "獲得點數", tone: "ink" },
+    adjust: { short: "adjust", label: "點數調整", tone: "ink" },
+    redeem: { short: "redeem", label: "使用點數", tone: "ink" },
 };
 
-export const kindOrder: TransactionKind[] = ["purchase", "foreign_transaction_fee", "annual_fee", "refund", "rebate", "payment", "interest", "fee", "other", "buy", "sell"];
+export const kindOrder: TransactionKind[] = ["purchase", "foreign_transaction_fee", "annual_fee", "refund", "rebate", "payment", "interest", "fee", "other", "buy", "sell", "earn", "adjust", "redeem"];
 
 interface Status {
     tag: string;

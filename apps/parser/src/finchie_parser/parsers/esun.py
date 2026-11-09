@@ -1,12 +1,21 @@
 import re
 from decimal import Decimal
 
-from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
+from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, sum_new_charges
+from finchie_parser.parsers.base import (
+    Parsed,
+    StatementParser,
+    adjusted,
+    earned,
+    find,
+    points_program,
+    sum_new_charges,
+    used,
+)
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, clean, month_day, roc_date
+from finchie_parser.text import amount, clean, month_day, month_end, roc_date
 
 _DUE = re.compile(r"^(\d{3}/\d\d/\d\d) \d+(?:\.\d+)?%", re.ASCII)
 # The closing date is printed next to the cash-advance limit: "115/09/07 24,000 / 240,000 元".
@@ -23,11 +32,20 @@ _ROW = re.compile(
     re.ASCII,
 )
 _PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<desc>\D.*) TWD (?P<amt>-[\d,]+)$", re.ASCII)
+# 點數明細, its headings an image (ADR 0019): "<上期累積點數> 點 <本期加點> 點 <本期調整點數> 點 <本期扣點> 點
+# <本期結餘點數> 點". The table names no program; its notes call the points e point.
+_POINTS = re.compile(
+    r"^(?P<opening>-?[\d,]+) 點 (?P<added>-?[\d,]+) 點 (?P<adjusted>-?[\d,]+) 點 (?P<used>-?[\d,]+) 點"
+    r" (?P<closing>-?[\d,]+) 點$"
+)
+_POINTS_NAME = "e point"
+# "※您有e point點數即將到期：2026/10共0點、2026/11共0點，…": each month's, by its last day.
+_POINTS_EXPIRING = re.compile(r"(?P<y>\d{4})/(?P<m>\d{1,2})共(?P<n>[\d,]+)點")
 
 
 class EsunParser(StatementParser):
     name = "esun.credit_card"
-    version = "1"
+    version = "2"
     institution = "esun"
     # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
     # comes from the same address.
@@ -49,10 +67,19 @@ class EsunParser(StatementParser):
         total_due = amount(find(_TOTAL_DUE, texts, "本期應繳總金額").group(1))
 
         transactions: list[Transaction] = []
+        program: re.Match[str] | None = None
+        expiries: list[PointsExpiry] = []
         section = ""
         card = ""
         for line in (line for text in texts for line in text.splitlines()):
-            if line.startswith("本期費用明細"):
+            if match := _POINTS.match(line):
+                program = match
+            elif "即將到期" in line and _POINTS_NAME in line:
+                expiries = [
+                    PointsExpiry(amount(m["n"]), month_end(int(m["y"]), int(m["m"])))
+                    for m in _POINTS_EXPIRING.finditer(line)
+                ]
+            elif line.startswith("本期費用明細"):
                 section, card = "fees", ""
             elif line.startswith("本期消費明細"):
                 section = "purchases"
@@ -87,6 +114,24 @@ class EsunParser(StatementParser):
                     )
                 )
 
+        warnings: list[str] = []
+        points = []
+        if program:
+            points.append(
+                points_program(
+                    _POINTS_NAME,
+                    opening=amount(program["opening"]),
+                    lines=(
+                        earned("本期加點", amount(program["added"])),
+                        adjusted("本期調整點數", amount(program["adjusted"])),
+                        used("本期扣點", amount(program["used"])),
+                    ),
+                    closing=amount(program["closing"]),
+                    expiries=expiries,
+                    warnings=warnings,
+                )
+            )
+
         statement = Statement(
             institution=self.institution,
             closing_date=closing,
@@ -95,8 +140,9 @@ class EsunParser(StatementParser):
             total_due=total_due,
             transactions=transactions,
             reconciliation=Reconciliation(sum_new_charges(transactions), subtotal, "本期合計"),
+            points=points,
         )
-        return Parsed(statement)
+        return Parsed(statement, warnings)
 
 
 def _kind(description: str, value: Decimal) -> Kind:

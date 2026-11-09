@@ -23,10 +23,10 @@ type Account struct {
 type Balance struct {
 	ID          int64
 	AccountID   int64
-	Unit        string
 	AsOf        pgtype.Date
 	Amount      pgtype.Numeric
 	StatementID *int64
+	UnitID      int64
 }
 
 type Document struct {
@@ -44,18 +44,33 @@ type Document struct {
 	ParsedAt      pgtype.Timestamptz
 }
 
-type ExchangeRate struct {
-	Day    pgtype.Date
-	Unit   string
-	PerTwd pgtype.Numeric
+type Expiry struct {
+	ID          int64
+	AccountID   int64
+	UnitID      int64
+	Amount      pgtype.Numeric
+	LapsesBy    pgtype.Date
+	StatementID *int64
 }
 
-type Quote struct {
-	Day    pgtype.Date
-	Name   string
-	Code   string
-	Market string
-	Close  pgtype.Numeric
+type NewestPrice struct {
+	UnitID      int64
+	AsOf        pgtype.Timestamptz
+	Source      string
+	Quote       string
+	Amount      pgtype.Numeric
+	QuoteAmount pgtype.Numeric
+	UnitAmount  pgtype.Numeric
+	TwdAmount   pgtype.Numeric
+}
+
+type Price struct {
+	UnitID      int64
+	AsOf        pgtype.Timestamptz
+	Amount      pgtype.Numeric
+	QuoteUnitID int64
+	QuoteAmount pgtype.Numeric
+	Source      string
 }
 
 type Statement struct {
@@ -102,17 +117,25 @@ type Transaction struct {
 	CardLast4        *string
 	ParentID         *int64
 	AccountID        int64
-	Unit             string
 	Status           string
 	Memo             *string
 	Counterparty     *string
 	Balance          pgtype.Numeric
 	CounterpartID    *int64
+	UnitID           int64
+}
+
+type Unit struct {
+	ID     int64
+	Kind   string
+	Symbol string
+	Code   *string
+	Market *string
 }
 
 type Valuation struct {
 	AccountID int64
 	AsOf      pgtype.Date
-	Unit      string
 	Amount    pgtype.Numeric
+	UnitID    int64
 }

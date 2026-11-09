@@ -78,6 +78,8 @@ func TestBinanceListsAWalletByCoinOnlyWhenItsCoinsAddUpToItsValue(t *testing.T) 
 	}
 	// USDT: spot 100, funding 50, then earn 300, margin 10, and futures 1000 by their values.
 	assertSnapshot(t, snapshot, map[string]string{"BTC": "0.15", "DUST": "3", "USDT": "1460"}, "10460.2")
+	// Prices for the coins held that a market prices: not DUST, nor USDT in itself.
+	assertPrices(t, snapshot, map[string]string{"BTC": "60000 USDT"})
 
 	b.apiSecret = "wrong"
 	if _, err := b.Fetch(t.Context()); err == nil || !strings.Contains(err.Error(), "-1022") {

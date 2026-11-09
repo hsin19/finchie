@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fakes import FakeDocument
 
-from finchie_parser.model import Kind
+from finchie_parser.model import Kind, PointsKind
 from finchie_parser.parsers.esun import EsunParser
 
 PAGE_1 = """親愛的 王＊明 您好：
@@ -74,3 +74,22 @@ def test_esun_flags_a_statement_that_does_not_add_up() -> None:
     statement = EsunParser().parse(FakeDocument([PAGE_1, tampered]), ocr=None).statement
     assert not statement.reconciliation.balanced
     assert statement.reconciliation.computed == Decimal(1226)
+
+
+# 點數明細 on page 1; its headings are an image, so only the figures are text.
+POINTS = """28 點 122 點 0 點 0 點 150 點
+※e point統計區間為2026/3/7~2026/4/7。
+※您有e point點數即將到期：2026/4共0點、2026/5共35點，將依效期每日到期清除，實際到期點數依系統為準。"""
+
+
+def test_esun_reads_its_e_points_and_each_months_expiring_ones() -> None:
+    parsed = EsunParser().parse(FakeDocument([PAGE_1 + "\n" + POINTS, PAGE_2]), ocr=None)
+    [program] = parsed.statement.points
+    assert (program.name, program.closing) == ("e point", Decimal(150))
+    lines = [(line.label, line.kind, line.amount) for line in program.lines]
+    assert lines == [("本期加點", PointsKind.EARN, Decimal(122))]
+    assert [(e.amount, e.by) for e in program.expiries] == [
+        (Decimal(0), date(2026, 4, 30)),
+        (Decimal(35), date(2026, 5, 31)),
+    ]
+    assert parsed.warnings == []

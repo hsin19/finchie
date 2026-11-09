@@ -64,6 +64,7 @@ func (m *MAX) Fetch(ctx context.Context) (Snapshot, error) {
 			continue
 		}
 		worth.Add(worth, new(big.Rat).Mul(amount, price))
+		snapshot.price(a.Currency, "TWD", price)
 	}
 	if priced {
 		snapshot.Valuation = &Value{Unit: "TWD", Amount: worth}

@@ -27,13 +27,14 @@ const (
 
 // Kinds of statement, as stored in statements.kind, and of account, in accounts.kind (ADR 0013): a
 // card bill reports a credit card account, a deposit statement deposit accounts, a securities
-// statement a brokerage account (ADR 0017). An exchange account has no statements: its API reports
-// snapshots (ADR 0018).
+// statement a brokerage account (ADR 0017), and a card bill the bank's points too (ADR 0019). An
+// exchange account has no statements: its API reports snapshots (ADR 0018).
 const (
 	KindCreditCard = "credit_card"
 	KindDeposit    = "deposit"
 	KindSecurities = "securities"
 	KindExchange   = "exchange"
+	KindPoints     = "points"
 )
 
 // ErrInvalidResponse means the parser returned something that breaks the contract; retrying won't help.
@@ -46,6 +47,12 @@ var kinds = map[parserv1.TransactionKind]string{
 	parserv1.TransactionKind_TRANSACTION_KIND_REFUND:                  "refund",
 	parserv1.TransactionKind_TRANSACTION_KIND_REBATE:                  "rebate",
 	parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT:                 "payment",
+}
+
+var pointsKinds = map[parserv1.PointsLineKind]string{
+	parserv1.PointsLineKind_POINTS_LINE_KIND_EARN:   "earn",
+	parserv1.PointsLineKind_POINTS_LINE_KIND_ADJUST: "adjust",
+	parserv1.PointsLineKind_POINTS_LINE_KIND_REDEEM: "redeem",
 }
 
 var depositKinds = map[parserv1.DepositLineKind]string{
@@ -67,8 +74,10 @@ type stored struct {
 // storedAccount is what the statement reports of one account; ids are filled in when stored.
 type storedAccount struct {
 	account  dbq.UpsertAccountParams
-	lines    []dbq.InsertTransactionsParams
-	balances []dbq.InsertBalanceParams
+	lines    []storedLine
+	balances []storedBalance
+	// What will lapse of a points account's units (ADR 0019).
+	expiries []storedExpiry
 }
 
 // Store replaces everything previously derived from the document with the parser's result, in one
@@ -127,6 +136,7 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 		}
 		var lines []dbq.InsertTransactionsParams
 		var accountIDs []int64
+		var unitIDs []map[string]int64
 		for _, reported := range result.accounts {
 			// Found, or created the first time a statement reports it (ADR 0013).
 			accountID, err := queries.UpsertAccount(ctx, reported.account)
@@ -134,14 +144,26 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 				return fmt.Errorf("find account: %w", err)
 			}
 			accountIDs = append(accountIDs, accountID)
+			// Likewise its units (ADR 0020).
+			units, err := reported.unitIDs(ctx, queries)
+			if err != nil {
+				return err
+			}
+			unitIDs = append(unitIDs, units)
 			for _, line := range reported.lines {
-				line.StatementID, line.AccountID = statementID, accountID
-				lines = append(lines, line)
+				line.StatementID, line.AccountID, line.UnitID = statementID, accountID, units[line.unit]
+				lines = append(lines, line.InsertTransactionsParams)
 			}
 			for _, balance := range reported.balances {
-				balance.StatementID, balance.AccountID = statementID, accountID
-				if err := queries.InsertBalance(ctx, balance); err != nil {
+				balance.StatementID, balance.AccountID, balance.UnitID = statementID, accountID, units[balance.unit]
+				if err := queries.InsertBalance(ctx, balance.InsertBalanceParams); err != nil {
 					return fmt.Errorf("record balance: %w", err)
+				}
+			}
+			for _, expiry := range reported.expiries {
+				expiry.StatementID, expiry.AccountID, expiry.UnitID = statementID, accountID, units[expiry.unit]
+				if err := queries.InsertExpiry(ctx, expiry.InsertExpiryParams); err != nil {
+					return fmt.Errorf("record expiry: %w", err)
 				}
 			}
 		}
@@ -152,7 +174,7 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 			this := span{id: statementID, documentID: documentID, start: statement.PeriodStart.Time, end: statement.ClosingDate.Time}
 			for i, reported := range result.accounts {
 				// Each section reports one currency, and always its closing balance.
-				if err := trimOverlaps(ctx, queries, this, accountIDs[i], reported.balances[0].Unit); err != nil {
+				if err := trimOverlaps(ctx, queries, this, accountIDs[i], unitIDs[i][reported.balances[0].unit]); err != nil {
 					return err
 				}
 			}
@@ -188,15 +210,27 @@ func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse)
 		if err != nil {
 			return stored{}, err
 		}
-		for i := range lines {
-			lines[i].Unit = *statement.Currency
-		}
 		// A bank's card lines belong to its credit_card account, which holds no balance: what the bill
 		// says is owed stays on the bill (ADR 0013).
-		return stored{statement: statement, accounts: []storedAccount{{
-			account: dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindCreditCard},
-			lines:   lines,
-		}}}, nil
+		card := storedAccount{account: dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindCreditCard}}
+		for _, line := range lines {
+			card.lines = append(card.lines, storedLine{unit: *statement.Currency, InsertTransactionsParams: line})
+		}
+		accounts := []storedAccount{card}
+		// Its points lines follow its card lines: a statement numbers its lines once.
+		next := int32(0)
+		if len(lines) > 0 {
+			next = lines[len(lines)-1].LineNo + 1
+		}
+		points, err := convertPoints(bill, statement.ClosingDate, next)
+		if err != nil {
+			return stored{}, err
+		}
+		if points != nil {
+			points.account = dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindPoints}
+			accounts = append(accounts, *points)
+		}
+		return stored{statement: statement, accounts: accounts}, nil
 	case deposit != nil && bill == nil && securities == nil:
 		return convertDeposit(documentID, deposit)
 	case securities != nil && bill == nil && deposit == nil:
@@ -265,6 +299,47 @@ func convert(documentID int64, s *parserv1.Statement) (dbq.InsertStatementParams
 	return statement, transactions, nil
 }
 
+// convertPoints takes a card bill's programs: each one's closing as the balance of its unit on the
+// closing date, its period's movements as lines on that date, and what it says will lapse (ADR 0019).
+// Nil when the bill reports none.
+func convertPoints(s *parserv1.Statement, closing pgtype.Date, lineNo int32) (*storedAccount, error) {
+	if len(s.GetPoints()) == 0 {
+		return nil, nil
+	}
+	var errs []error
+	var points storedAccount
+	for i, p := range s.GetPoints() {
+		if p.GetName() == "" {
+			errs = append(errs, fmt.Errorf("points program %d: name is missing", i))
+		}
+		balance := storedBalance{unit: p.GetName(), InsertBalanceParams: dbq.InsertBalanceParams{AsOf: closing}}
+		balance.Amount, errs = requiredNumeric(p.GetClosing(), fmt.Sprintf("points program %d closing", i), errs)
+		points.balances = append(points.balances, balance)
+		for j, l := range p.GetLines() {
+			kind, ok := pointsKinds[l.GetKind()]
+			if !ok {
+				errs = append(errs, fmt.Errorf("points program %d line %d: kind %s", i, j, l.GetKind()))
+			}
+			line := storedLine{unit: p.GetName(), InsertTransactionsParams: dbq.InsertTransactionsParams{
+				LineNo: lineNo, TransactionDate: closing, Description: l.GetLabel(), Kind: kind,
+			}}
+			lineNo++
+			line.Amount, errs = requiredNumeric(l.GetAmount(), fmt.Sprintf("points program %d line %d amount", i, j), errs)
+			points.lines = append(points.lines, line)
+		}
+		for j, e := range p.GetExpiries() {
+			expiry := storedExpiry{unit: p.GetName()}
+			expiry.Amount, errs = requiredNumeric(e.GetAmount(), fmt.Sprintf("points program %d expiry %d amount", i, j), errs)
+			expiry.LapsesBy, errs = requiredDate(e.GetBy(), fmt.Sprintf("points program %d expiry %d date", i, j), errs)
+			points.expiries = append(points.expiries, expiry)
+		}
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidResponse, errors.Join(errs...))
+	}
+	return &points, nil
+}
+
 // convertDeposit takes a deposit statement: its lines and closing balances by account, and an opening
 // balance where printed, as the balance at the end of the day before its period (ADR 0013).
 func convertDeposit(documentID int64, d *parserv1.DepositStatement) (stored, error) {
@@ -303,14 +378,16 @@ func convertDeposit(documentID int64, d *parserv1.DepositStatement) (stored, err
 		}}
 		var closing pgtype.Numeric
 		closing, errs = requiredNumeric(a.GetClosingBalance(), where+" closing balance", errs)
-		reported.balances = append(reported.balances, dbq.InsertBalanceParams{Unit: a.GetCurrency(), AsOf: statement.ClosingDate, Amount: closing})
+		reported.balances = append(reported.balances, storedBalance{unit: a.GetCurrency(),
+			InsertBalanceParams: dbq.InsertBalanceParams{AsOf: statement.ClosingDate, Amount: closing}})
 		opening, err := numeric(a.GetOpeningBalance())
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s opening balance: %w", where, err))
 		}
 		if opening.Valid && statement.PeriodStart.Valid {
 			dayBefore := pgtype.Date{Time: statement.PeriodStart.Time.AddDate(0, 0, -1), Valid: true}
-			reported.balances = append(reported.balances, dbq.InsertBalanceParams{Unit: a.GetCurrency(), AsOf: dayBefore, Amount: opening})
+			reported.balances = append(reported.balances, storedBalance{unit: a.GetCurrency(),
+				InsertBalanceParams: dbq.InsertBalanceParams{AsOf: dayBefore, Amount: opening}})
 		}
 
 		for j, l := range a.GetLines() {
@@ -319,14 +396,13 @@ func convertDeposit(documentID int64, d *parserv1.DepositStatement) (stored, err
 			if !ok {
 				errs = append(errs, fmt.Errorf("%s: kind %s", at, l.GetKind()))
 			}
-			row := dbq.InsertTransactionsParams{
+			row := storedLine{unit: a.GetCurrency(), InsertTransactionsParams: dbq.InsertTransactionsParams{
 				LineNo:       lineNo,
-				Unit:         a.GetCurrency(),
 				Description:  l.GetDescription(),
 				Kind:         kind,
 				Memo:         optionalString(l.GetMemo()),
 				Counterparty: optionalString(l.GetCounterparty()),
-			}
+			}}
 			lineNo++
 			row.TransactionDate, errs = requiredDate(l.GetDate(), at+" date", errs)
 			row.Amount, errs = requiredNumeric(l.GetAmount(), at+" amount", errs)

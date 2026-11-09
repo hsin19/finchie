@@ -12,6 +12,13 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class PointsLineKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    POINTS_LINE_KIND_UNSPECIFIED: _ClassVar[PointsLineKind]
+    POINTS_LINE_KIND_EARN: _ClassVar[PointsLineKind]
+    POINTS_LINE_KIND_ADJUST: _ClassVar[PointsLineKind]
+    POINTS_LINE_KIND_REDEEM: _ClassVar[PointsLineKind]
+
 class TransactionKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     TRANSACTION_KIND_UNSPECIFIED: _ClassVar[TransactionKind]
@@ -34,6 +41,10 @@ class TradeSide(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     TRADE_SIDE_UNSPECIFIED: _ClassVar[TradeSide]
     TRADE_SIDE_BUY: _ClassVar[TradeSide]
     TRADE_SIDE_SELL: _ClassVar[TradeSide]
+POINTS_LINE_KIND_UNSPECIFIED: PointsLineKind
+POINTS_LINE_KIND_EARN: PointsLineKind
+POINTS_LINE_KIND_ADJUST: PointsLineKind
+POINTS_LINE_KIND_REDEEM: PointsLineKind
 TRANSACTION_KIND_UNSPECIFIED: TransactionKind
 TRANSACTION_KIND_PURCHASE: TransactionKind
 TRANSACTION_KIND_FOREIGN_TRANSACTION_FEE: TransactionKind
@@ -128,7 +139,7 @@ class ParseDocumentResponse(_message.Message):
     def __init__(self, parser: _Optional[str] = ..., parser_version: _Optional[str] = ..., statement: _Optional[_Union[Statement, _Mapping]] = ..., warnings: _Optional[_Iterable[str]] = ..., deposit_statement: _Optional[_Union[DepositStatement, _Mapping]] = ..., securities_statement: _Optional[_Union[SecuritiesStatement, _Mapping]] = ...) -> None: ...
 
 class Statement(_message.Message):
-    __slots__ = ("institution", "closing_date", "due_date", "currency", "total_due", "transactions", "reconciliation")
+    __slots__ = ("institution", "closing_date", "due_date", "currency", "total_due", "transactions", "reconciliation", "points")
     INSTITUTION_FIELD_NUMBER: _ClassVar[int]
     CLOSING_DATE_FIELD_NUMBER: _ClassVar[int]
     DUE_DATE_FIELD_NUMBER: _ClassVar[int]
@@ -136,6 +147,7 @@ class Statement(_message.Message):
     TOTAL_DUE_FIELD_NUMBER: _ClassVar[int]
     TRANSACTIONS_FIELD_NUMBER: _ClassVar[int]
     RECONCILIATION_FIELD_NUMBER: _ClassVar[int]
+    POINTS_FIELD_NUMBER: _ClassVar[int]
     institution: str
     closing_date: _date_pb2.Date
     due_date: _date_pb2.Date
@@ -143,7 +155,38 @@ class Statement(_message.Message):
     total_due: _decimal_pb2.Decimal
     transactions: _containers.RepeatedCompositeFieldContainer[Transaction]
     reconciliation: Reconciliation
-    def __init__(self, institution: _Optional[str] = ..., closing_date: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., due_date: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., currency: _Optional[str] = ..., total_due: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., transactions: _Optional[_Iterable[_Union[Transaction, _Mapping]]] = ..., reconciliation: _Optional[_Union[Reconciliation, _Mapping]] = ...) -> None: ...
+    points: _containers.RepeatedCompositeFieldContainer[PointsProgram]
+    def __init__(self, institution: _Optional[str] = ..., closing_date: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., due_date: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., currency: _Optional[str] = ..., total_due: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., transactions: _Optional[_Iterable[_Union[Transaction, _Mapping]]] = ..., reconciliation: _Optional[_Union[Reconciliation, _Mapping]] = ..., points: _Optional[_Iterable[_Union[PointsProgram, _Mapping]]] = ...) -> None: ...
+
+class PointsProgram(_message.Message):
+    __slots__ = ("name", "closing", "expiries", "lines")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    CLOSING_FIELD_NUMBER: _ClassVar[int]
+    EXPIRIES_FIELD_NUMBER: _ClassVar[int]
+    LINES_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    closing: _decimal_pb2.Decimal
+    expiries: _containers.RepeatedCompositeFieldContainer[PointsExpiry]
+    lines: _containers.RepeatedCompositeFieldContainer[PointsLine]
+    def __init__(self, name: _Optional[str] = ..., closing: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., expiries: _Optional[_Iterable[_Union[PointsExpiry, _Mapping]]] = ..., lines: _Optional[_Iterable[_Union[PointsLine, _Mapping]]] = ...) -> None: ...
+
+class PointsLine(_message.Message):
+    __slots__ = ("label", "kind", "amount")
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    AMOUNT_FIELD_NUMBER: _ClassVar[int]
+    label: str
+    kind: PointsLineKind
+    amount: _decimal_pb2.Decimal
+    def __init__(self, label: _Optional[str] = ..., kind: _Optional[_Union[PointsLineKind, str]] = ..., amount: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ...) -> None: ...
+
+class PointsExpiry(_message.Message):
+    __slots__ = ("amount", "by")
+    AMOUNT_FIELD_NUMBER: _ClassVar[int]
+    BY_FIELD_NUMBER: _ClassVar[int]
+    amount: _decimal_pb2.Decimal
+    by: _date_pb2.Date
+    def __init__(self, amount: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., by: _Optional[_Union[_date_pb2.Date, _Mapping]] = ...) -> None: ...
 
 class Transaction(_message.Message):
     __slots__ = ("transaction_date", "posting_date", "description", "kind", "amount", "original_amount", "original_currency", "country", "card_last4")

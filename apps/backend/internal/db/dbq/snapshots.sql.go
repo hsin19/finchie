@@ -44,15 +44,15 @@ func (q *Queries) ClearValuation(ctx context.Context, arg ClearValuationParams) 
 }
 
 const implySoldOut = `-- name: ImplySoldOut :exec
-INSERT INTO balances (account_id, unit, as_of, amount)
-SELECT $1, prev.unit, $2::date, 0
-FROM (SELECT DISTINCT ON (b.unit) b.unit, b.amount
+INSERT INTO balances (account_id, unit_id, as_of, amount)
+SELECT $1, prev.unit_id, $2::date, 0
+FROM (SELECT DISTINCT ON (b.unit_id) b.unit_id, b.amount
       FROM balances b
       WHERE b.account_id = $1 AND b.as_of < $2::date
-      ORDER BY b.unit, b.as_of DESC, b.id DESC) prev
+      ORDER BY b.unit_id, b.as_of DESC, b.id DESC) prev
 WHERE prev.amount <> 0
   AND NOT EXISTS (SELECT 1 FROM balances s
-                  WHERE s.account_id = $1 AND s.as_of = $2::date AND s.unit = prev.unit
+                  WHERE s.account_id = $1 AND s.as_of = $2::date AND s.unit_id = prev.unit_id
                     AND s.statement_id IS NULL)
 `
 
@@ -69,13 +69,13 @@ func (q *Queries) ImplySoldOut(ctx context.Context, arg ImplySoldOutParams) erro
 }
 
 const insertSnapshot = `-- name: InsertSnapshot :exec
-INSERT INTO balances (account_id, unit, as_of, amount)
-SELECT $1, unnest($2::text[]), $3::date, unnest($4::numeric[])
+INSERT INTO balances (account_id, unit_id, as_of, amount)
+SELECT $1, unnest($2::bigint[]), $3::date, unnest($4::numeric[])
 `
 
 type InsertSnapshotParams struct {
 	AccountID int64
-	Units     []string
+	UnitIds   []int64
 	AsOf      pgtype.Date
 	Amounts   []pgtype.Numeric
 }
@@ -83,7 +83,7 @@ type InsertSnapshotParams struct {
 func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) error {
 	_, err := q.db.Exec(ctx, insertSnapshot,
 		arg.AccountID,
-		arg.Units,
+		arg.UnitIds,
 		arg.AsOf,
 		arg.Amounts,
 	)
@@ -91,14 +91,14 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 }
 
 const insertValuation = `-- name: InsertValuation :exec
-INSERT INTO valuations (account_id, as_of, unit, amount)
+INSERT INTO valuations (account_id, as_of, unit_id, amount)
 VALUES ($1, $2::date, $3, $4)
 `
 
 type InsertValuationParams struct {
 	AccountID int64
 	AsOf      pgtype.Date
-	Unit      string
+	UnitID    int64
 	Amount    pgtype.Numeric
 }
 
@@ -106,7 +106,7 @@ func (q *Queries) InsertValuation(ctx context.Context, arg InsertValuationParams
 	_, err := q.db.Exec(ctx, insertValuation,
 		arg.AccountID,
 		arg.AsOf,
-		arg.Unit,
+		arg.UnitID,
 		arg.Amount,
 	)
 	return err

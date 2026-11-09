@@ -6,12 +6,12 @@ from decimal import Decimal
 import pycountry
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import Kind, Reconciliation, Statement, Transaction
+from finchie_parser.model import Kind, PointsExpiry, PointsProgram, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr, OcrLine
-from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.base import Parsed, StatementParser, earned, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, iso_date, month_day
+from finchie_parser.text import amount, iso_date, month_day, month_end
 
 # HSBC renders every label and every transaction description as an image; the text layer only
 # carries dates and numbers. Page 1 lists the due date first, then the closing date.
@@ -35,6 +35,12 @@ _CARRIED_BALANCE, _NEW_CHARGES, _TOTAL_DUE = 3, 4, 5
 # Description column, in PDF points.
 _DESCRIPTION_LEFT, _DESCRIPTION_RIGHT = 120.0, 335.0
 
+# 滙豐旅遊積分, the box right of page 1's summary (ADR 0019). Its labels are images like the rest, so its
+# figures are read by position, top to bottom: 上月結餘積分, 本期新增積分, 本期使用積分(含調整), 本期積分總結餘,
+# 次月到期點數. In PDF points: right of the summary's figures, above the notice under it.
+_POINTS_NAME = "滙豐旅遊積分"
+_POINTS_LEFT, _POINTS_BOTTOM = 450.0, 330.0
+
 
 @dataclass
 class _Row:
@@ -48,7 +54,7 @@ class _Row:
 
 class HsbcParser(StatementParser):
     name = "hsbc.credit_card"
-    version = "2"
+    version = "3"
     institution = "hsbc"
     # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
     sender_domains = ("hsbc.com.tw",)
@@ -87,6 +93,7 @@ class HsbcParser(StatementParser):
             total_due=numbers[_TOTAL_DUE - 1],
             transactions=transactions,
             reconciliation=Reconciliation(computed, numbers[_NEW_CHARGES - 1], "消費/新增款項/循環息/其他費用小計"),
+            points=_points(document, closing, warnings),
         )
         return Parsed(statement, warnings)
 
@@ -167,3 +174,29 @@ def _text_on_baseline(lines: list[OcrLine], baseline: float) -> str:
 def _alpha2(alpha3: str) -> str:
     country = pycountry.countries.get(alpha_3=alpha3)
     return country.alpha_2 if country else ""
+
+
+def _points(document: Document, closing: date, warnings: list[str]) -> list[PointsProgram]:
+    """The travel points box, where the card has one; next month's expiring points lapse by its last day."""
+    figures = [
+        word
+        for word in sorted(document.page_words(0), key=lambda w: w.top)
+        if word.x0 >= _POINTS_LEFT and word.top < _POINTS_BOTTOM and _NUMBER.match(word.text)
+    ]
+    if not figures:
+        return []
+    if len(figures) != 5:
+        warnings.append(f"{_POINTS_NAME}: {len(figures)} figures in its box, not 5; points not read")
+        return []
+    opening, added, spent, balance, lapsing = (amount(word.text) for word in figures)
+    year, month = (closing.year + 1, 1) if closing.month == 12 else (closing.year, closing.month + 1)
+    return [
+        points_program(
+            _POINTS_NAME,
+            opening=opening,
+            lines=(earned("本期新增積分", added), used("本期使用積分(含調整)", spent)),
+            closing=balance,
+            expiries=[PointsExpiry(lapsing, month_end(year, month))],
+            warnings=warnings,
+        )
+    ]

@@ -26,6 +26,9 @@ type Snapshot struct {
 	Holdings map[string]*big.Rat
 	// Nil when the exchange gives none, or cannot price everything held.
 	Valuation *Value
+	// What one of each coin held is worth at the exchange's own markets, in NT$ or USDT as it prices
+	// them (ADR 0020).
+	Prices map[string]Value
 }
 
 type Value struct {
@@ -44,6 +47,18 @@ func (s *Snapshot) add(unit string, amount *big.Rat) {
 		return
 	}
 	s.Holdings[unit] = new(big.Rat).Set(amount)
+}
+
+// price keeps what one of unit is worth in quote; a unit is not priced in itself.
+func (s *Snapshot) price(unit, quote string, amount *big.Rat) {
+	unit, quote = strings.ToUpper(unit), strings.ToUpper(quote)
+	if unit == quote {
+		return
+	}
+	if s.Prices == nil {
+		s.Prices = map[string]Value{}
+	}
+	s.Prices[unit] = Value{Unit: quote, Amount: amount}
 }
 
 // Exchange reads one exchange's snapshot. Every call it makes succeeds, or it returns an error: a snapshot
@@ -106,17 +121,7 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[FetchArgs]) error {
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", job.Args.Institution, err)
 	}
-	return Store(ctx, w.pool, job.Args.Institution, Today(w.now()), snapshot)
-}
-
-// taipei is the owner's day (ADR 0004). Taiwan has kept UTC+8 without daylight saving since 1979, and a
-// fixed zone needs no time zone database in the image.
-var taipei = time.FixedZone("Asia/Taipei", 8*60*60)
-
-// Today is the date in Taipei at t, as a date without time zone.
-func Today(t time.Time) time.Time {
-	y, m, d := t.In(taipei).Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return Store(ctx, w.pool, job.Args.Institution, w.now(), snapshot)
 }
 
 // decimal is an amount as an API prints it, a JSON string or number, kept as text until read exactly;

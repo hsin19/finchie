@@ -5,6 +5,7 @@ import {
 } from "vitest";
 import {
     formatAmount,
+    formatPrice,
     negate,
     roundWhole,
     sign,
@@ -54,6 +55,20 @@ describe("formatAmount", () => {
 
     it("rejects anything but a decimal", () => {
         expect(() => formatAmount("1e3")).toThrow();
+    });
+});
+
+describe("formatPrice", () => {
+    it.each([
+        ["32.8538370571241164", "32.85"],
+        ["3000000", "3,000,000"],
+        ["1", "1"],
+        ["0.5", "0.50"],
+        ["0.000144510061", "0.0001445"],
+        ["0.00014351", "0.0001435"],
+        ["0", "0"],
+    ])("%s → %s", (input, expected) => {
+        expect(formatPrice(input)).toBe(expected);
     });
 });
 

@@ -4,15 +4,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/riverqueue/river"
 
+	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
 // The feed's shape; the figures are made up.
-const sample = `{"date": "2026-11-07", "twd": {"twd": 1, "usd": 0.030503548, "USDT": 0.0305, "btc": 4.0260888e-7, "xyz": 0}}`
+const sample = `{"date": "2026-11-07", "twd": {"twd": 1, "usd": 0.030503548, "USDT": 0.0305, "btc": 4.0260888e-7, "xyz": 0, "eur": 0.027}}`
 
 func TestRatesComeFromTheMirrorWhenTheFirstFeedFailsAndAreKeptExactly(t *testing.T) {
 	pool := testdb.Pool(t)
@@ -25,6 +25,10 @@ func TestRatesComeFromTheMirrorWhenTheFirstFeedFailsAndAreKeptExactly(t *testing
 	}))
 	defer mirror.Close()
 
+	// The units some account holds or held; not EUR.
+	if _, err := dbq.New(pool).EnsureUnits(t.Context(), dbq.EnsureUnitsParams{Kind: "money", Symbols: []string{"USD", "USDT", "BTC", "XYZ"}}); err != nil {
+		t.Fatal(err)
+	}
 	worker := NewWorker(pool, mirror.Client(), []string{down.URL, mirror.URL})
 	for range 2 { // a second run the same day replaces, not duplicates
 		if err := worker.Work(t.Context(), &river.Job[FetchArgs]{}); err != nil {
@@ -32,22 +36,31 @@ func TestRatesComeFromTheMirrorWhenTheFirstFeedFailsAndAreKeptExactly(t *testing
 		}
 	}
 
-	rows, err := pool.Query(t.Context(), "SELECT day, unit, per_twd::text FROM exchange_rates ORDER BY unit")
+	rows, err := pool.Query(t.Context(), `
+		SELECT to_char(p.as_of AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') || ' ' || p.source || ' ' || p.amount::text || ' '
+		       || u.symbol || ' = ' || p.quote_amount::text || ' ' || q.symbol
+		FROM prices p JOIN units u ON u.id = p.unit_id JOIN units q ON q.id = p.quote_unit_id
+		WHERE u.kind = 'money'
+		ORDER BY u.symbol`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got []string
 	for rows.Next() {
-		var day time.Time
-		var unit, rate string
-		if err := rows.Scan(&day, &unit, &rate); err != nil {
+		var row string
+		if err := rows.Scan(&row); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, day.Format(time.DateOnly)+" "+unit+" "+rate)
+		got = append(got, row)
 	}
-	// Upper case, the rate as printed, a tiny one in exponent notation exactly, and no zero rate: nothing
-	// could be divided by it.
-	want := []string{"2026-11-07 BTC 0.00000040260888", "2026-11-07 TWD 1", "2026-11-07 USD 0.030503548", "2026-11-07 USDT 0.0305"}
+	// Upper case, the rate as printed, a tiny one in exponent notation exactly, as of the start of the
+	// feed's day in Taipei; no zero rate, since nothing could be divided by it, no NT$ in itself, and no
+	// unit no account holds.
+	want := []string{
+		"2026-11-07 00:00 fawaz 0.00000040260888 BTC = 1 TWD",
+		"2026-11-07 00:00 fawaz 0.030503548 USD = 1 TWD",
+		"2026-11-07 00:00 fawaz 0.0305 USDT = 1 TWD",
+	}
 	if len(got) != len(want) {
 		t.Fatalf("rates = %v, want %v", got, want)
 	}

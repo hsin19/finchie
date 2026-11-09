@@ -38,6 +38,40 @@ class Reconciliation:
 
 
 @dataclass(frozen=True)
+class PointsExpiry:
+    """Points the bill says will lapse by a date (ADR 0019)."""
+
+    amount: Decimal
+    by: date
+
+
+class PointsKind(StrEnum):
+    EARN = "earn"
+    ADJUST = "adjust"
+    REDEEM = "redeem"
+
+
+@dataclass(frozen=True)
+class PointsLine:
+    """A period's movement as the bill totals it, under the bill's own label (ADR 0019)."""
+
+    label: str
+    kind: PointsKind
+    # Seen from the account: added positive, used negative.
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class PointsProgram:
+    """A rewards program on a card bill, its points a unit of their own (ADR 0019)."""
+
+    name: str
+    closing: Decimal
+    expiries: list[PointsExpiry] = field(default_factory=list)
+    lines: list[PointsLine] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Statement:
     institution: str
     closing_date: date
@@ -46,6 +80,7 @@ class Statement:
     total_due: Decimal
     transactions: list[Transaction]
     reconciliation: Reconciliation
+    points: list[PointsProgram] = field(default_factory=list)
 
 
 class DepositKind(StrEnum):

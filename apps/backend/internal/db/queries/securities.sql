@@ -26,36 +26,23 @@ WITH statements_of AS (
     WHERE s.kind = 'securities'
       AND (EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = s.id AND b.account_id = @account_id)
            OR EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = s.id AND t.account_id = @account_id))
-), units AS (
-    SELECT unit FROM balances WHERE account_id = @account_id
+), held AS (
+    SELECT unit_id FROM balances WHERE account_id = @account_id
     UNION
-    SELECT unit FROM transactions WHERE account_id = @account_id
+    SELECT unit_id FROM transactions WHERE account_id = @account_id
 )
-INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
-SELECT @account_id, u.unit, so.closing_date, 0, so.id
+INSERT INTO balances (account_id, unit_id, as_of, amount, statement_id)
+SELECT @account_id, h.unit_id, so.closing_date, 0, so.id
 FROM statements_of so
-CROSS JOIN units u
-WHERE NOT EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = so.id AND b.account_id = @account_id AND b.unit = u.unit);
-
--- name: HeldSecurities :many
--- The securities some account holds or held, by name: the quotes worth keeping.
-SELECT DISTINCT b.unit
-FROM balances b
-JOIN accounts a ON a.id = b.account_id
-WHERE a.kind = 'securities'
-ORDER BY b.unit;
-
--- name: UpsertQuotes :exec
-INSERT INTO quotes (day, name, code, market, close)
-SELECT unnest(@days::date[]), unnest(@names::text[]), unnest(@codes::text[]), unnest(@markets::text[]),
-       unnest(@closes::numeric[])
-ON CONFLICT (day, name) DO UPDATE SET code = EXCLUDED.code, market = EXCLUDED.market, close = EXCLUDED.close;
+CROSS JOIN held h
+WHERE NOT EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = so.id AND b.account_id = @account_id AND b.unit_id = h.unit_id);
 
 -- name: AccountTrades :many
 -- A securities account's trades in the order they happened, for working out each position's cost
 -- (ADR 0017).
-SELECT t.unit, t.transaction_date, t.kind, t.amount AS shares, tr.amount, tr.fee, tr.tax
+SELECT u.symbol AS unit, t.transaction_date, t.kind, t.amount AS shares, tr.amount, tr.fee, tr.tax
 FROM transactions t
+JOIN units u ON u.id = t.unit_id
 JOIN trades tr ON tr.transaction_id = t.id
 WHERE t.account_id = @account_id
 ORDER BY t.transaction_date, t.statement_id, t.line_no;

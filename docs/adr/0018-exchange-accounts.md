@@ -63,7 +63,7 @@ The API says which one it used. Holdings at Finchie's own rates come first, so a
 - `accounts.kind` gains `exchange` and `balances.statement_id` becomes nullable; the backend gains the `valuations` table and the `fetch_exchange` jobs. It calls `max-api.maicoin.com`, `api.binance.com`, and `api.bitget.com`.
 - Money a deposit account sends to MAX has no line on the other side to link to, so it counts as spending (ADR 0016); coins moved between exchanges show only as changed holdings. Both wait for deposits and withdrawals as lines.
 - An exchange has a worth, not a return.
-- A coin the rate feed does not list (MAX's own token, BGB, most small coins) has no worth of its own, though the exchange priced it when checking its wallet; only the account's valuation counts it. Keeping each coin's price with the snapshot would give it one.
+- A coin the rate feed does not list (MAX's own token, BGB, most small coins) has no worth of its own, though the exchange priced it when checking its wallet; only the account's valuation counts it. Keeping each coin's price with the snapshot would give it one (ADR 0020 does: each coin held has the exchange's price, in NT$ or USDT).
 - A snapshot adds one balance per unit and day: a few dozen rows a day.
 - Bitget is moving accounts to its unified account, whose API is v3; an account moved over may need its endpoints changed.
 - The keys join the secrets in `AGENTS.md`.

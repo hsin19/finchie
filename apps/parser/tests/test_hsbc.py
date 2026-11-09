@@ -6,6 +6,7 @@ from fakes import FakeDocument, FakeOcr
 
 from finchie_parser.model import Kind
 from finchie_parser.parsers.hsbc import HsbcParser
+from finchie_parser.pdf import Word
 
 PAGE_1 = """1/2
 HSBC Traveller s Infinite Credit Card
@@ -152,3 +153,35 @@ def test_hsbc_without_readable_words_keeps_payments_and_foreign_transaction_fees
     assert [tx.kind for tx in statement.transactions] == [Kind.PAYMENT] * 2 + [Kind.FOREIGN_TRANSACTION_FEE] * 5
     assert statement.reconciliation.balanced
     assert statement.reconciliation.computed == Decimal(2232)
+
+
+# Page 1's summary as positioned words: its own figures at the left, the travel points box at the right,
+# both drawn without labels (ADR 0019). Positions as on the real page, in PDF points.
+def summary_words(*points: str) -> list[Word]:
+    left = [
+        Word("2026/04/22", 141.4, 192.7, 230.6),
+        Word("2026/04/07", 141.4, 192.7, 243.6),
+        Word("1,500", 345.4, 377.0, 269.7),
+    ]
+    tops = (247.6, 264.4, 281.5, 298.5, 312.7)
+    box = [Word(text, 572.6 - 6 * len(text), 572.6, top) for text, top in zip(points, tops, strict=False)]
+    return left + box + [Word("(", 456.5, 459.4, 281.5), Word(")", 486.7, 489.6, 281.5)]
+
+
+def test_hsbc_reads_its_travel_points_box_by_position() -> None:
+    document = FakeDocument([PAGE_1, PAGE_2], words={0: summary_words("10,770", "18,077", "0", "28,847", "120")})
+    parsed = HsbcParser().parse(document, ocr=None)
+    [program] = parsed.statement.points
+    assert (program.name, program.closing) == ("滙豐旅遊積分", Decimal(28847))
+    assert [(line.label, line.amount) for line in program.lines] == [("本期新增積分", Decimal(18077))]
+    # Next month's expiring points, by its last day.
+    assert [(e.amount, e.by) for e in program.expiries] == [(Decimal(120), date(2026, 5, 31))]
+    assert not any("滙豐旅遊積分" in w for w in parsed.warnings)
+
+
+def test_hsbc_card_without_a_points_box_has_no_points_and_a_broken_box_is_a_warning() -> None:
+    assert HsbcParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None).statement.points == []
+    broken = FakeDocument([PAGE_1, PAGE_2], words={0: summary_words("10,770", "18,077", "0")})
+    parsed = HsbcParser().parse(broken, ocr=None)
+    assert parsed.statement.points == []
+    assert "滙豐旅遊積分: 3 figures in its box, not 5; points not read" in parsed.warnings

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,19 @@ func TestMAXHoldsItsSpotWalletWorthItsOwnMarketsInNTD(t *testing.T) {
 	// 1000 + 0.15 × 3,000,000 + 15 × 0.5 × 32 + 100 × 32.
 	if v := snapshot.Valuation; v == nil || v.Unit != "TWD" || v.Amount.FloatString(2) != "454440.00" {
 		t.Fatalf("valuation = %+v", v)
+	}
+	// Each coin's price in NT$, at its TWD market or its USDT one; NT$ has none.
+	assertPrices(t, snapshot, map[string]string{"BTC": "3000000 TWD", "MAX": "16 TWD", "USDT": "32 TWD"})
+}
+
+func assertPrices(t *testing.T, snapshot Snapshot, want map[string]string) {
+	t.Helper()
+	got := map[string]string{}
+	for coin, p := range snapshot.Prices {
+		got[coin] = p.Amount.RatString() + " " + p.Unit
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("prices = %v, want %v", got, want)
 	}
 }
 

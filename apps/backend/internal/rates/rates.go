@@ -1,4 +1,5 @@
-// Package rates keeps daily reference rates to NT$ for comparing balances in different units (ADR 0015).
+// Package rates keeps daily reference rates to NT$ for comparing balances in different units (ADR 0015),
+// as prices of the money units some account holds or held (ADR 0020).
 package rates
 
 import (
@@ -18,7 +19,9 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 	"github.com/hsin19/finchie/apps/backend/internal/numeric"
+	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
 // Feeds are tried in order: Fawaz Ahmed's currency API on jsDelivr, then its Cloudflare Pages mirror.
@@ -26,6 +29,9 @@ var Feeds = []string{
 	"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/twd.json",
 	"https://latest.currency-api.pages.dev/v1/currencies/twd.json",
 }
+
+// Source names the feed's prices.
+const Source = "fawaz"
 
 // FetchArgs is the periodic job that keeps today's rates.
 type FetchArgs struct{}
@@ -65,7 +71,7 @@ func (w *Worker) Work(ctx context.Context, _ *river.Job[FetchArgs]) error {
 			errs = append(errs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
-		if err := dbq.New(w.pool).UpsertRates(ctx, params); err != nil {
+		if err := dbq.New(w.pool).UpsertPrices(ctx, params); err != nil {
 			return fmt.Errorf("store rates: %w", err)
 		}
 		return nil
@@ -79,40 +85,44 @@ type feed struct {
 	TWD  map[string]json.Number `json:"twd"`
 }
 
-func (w *Worker) fetch(ctx context.Context, url string) (dbq.UpsertRatesParams, error) {
+func (w *Worker) fetch(ctx context.Context, url string) (dbq.UpsertPricesParams, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return dbq.UpsertRatesParams{}, fmt.Errorf("request: %w", err)
+		return dbq.UpsertPricesParams{}, fmt.Errorf("request: %w", err)
 	}
 	response, err := w.client.Do(request)
 	if err != nil {
-		return dbq.UpsertRatesParams{}, fmt.Errorf("get: %w", err)
+		return dbq.UpsertPricesParams{}, fmt.Errorf("get: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }() // read-only: nothing to lose if closing fails
 	if response.StatusCode != http.StatusOK {
-		return dbq.UpsertRatesParams{}, fmt.Errorf("status %s", response.Status)
+		return dbq.UpsertPricesParams{}, fmt.Errorf("status %s", response.Status)
 	}
 	// A rate is a decimal string kept exactly, never a float (ADR 0004).
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
 	decoder.UseNumber()
 	var body feed
 	if err := decoder.Decode(&body); err != nil {
-		return dbq.UpsertRatesParams{}, fmt.Errorf("decode: %w", err)
+		return dbq.UpsertPricesParams{}, fmt.Errorf("decode: %w", err)
 	}
 	return parse(body)
 }
 
-func parse(body feed) (dbq.UpsertRatesParams, error) {
+// parse reads the feed as prices: of each unit, the rate is how much one NT$ buys, as of the start of the
+// feed's day in Taipei. The store keeps the units some account holds or held.
+func parse(body feed) (dbq.UpsertPricesParams, error) {
 	day, err := time.Parse(time.DateOnly, body.Date)
 	if err != nil {
-		return dbq.UpsertRatesParams{}, fmt.Errorf("date %q: %w", body.Date, err)
+		return dbq.UpsertPricesParams{}, fmt.Errorf("date %q: %w", body.Date, err)
 	}
 	units := make([]string, 0, len(body.TWD))
 	for unit := range body.TWD {
 		units = append(units, unit)
 	}
 	sort.Strings(units)
-	params := dbq.UpsertRatesParams{Day: pgtype.Date{Time: day, Valid: true}}
+	asOf := pgtype.Timestamptz{Time: taipei.At(day, 0, 0), Valid: true}
+	one := pgtype.Numeric{Int: big.NewInt(1), Valid: true}
+	params := dbq.UpsertPricesParams{Source: Source, Kind: ingest.UnitMoney}
 	for _, unit := range units {
 		// The feed prints a tiny rate in exponent notation (BTC: 4.0260888e-7), read exactly all the same.
 		// A unit priced at zero (or a value that is no number) cannot be divided by: left out.
@@ -124,11 +134,14 @@ func parse(body feed) (dbq.UpsertRatesParams, error) {
 		if err != nil {
 			continue
 		}
-		params.Units = append(params.Units, strings.ToUpper(unit))
-		params.PerTwd = append(params.PerTwd, rate)
+		params.Symbols = append(params.Symbols, strings.ToUpper(unit))
+		params.AsOf = append(params.AsOf, asOf)
+		params.Amounts = append(params.Amounts, rate)
+		params.Quotes = append(params.Quotes, "TWD")
+		params.QuoteAmounts = append(params.QuoteAmounts, one)
 	}
-	if len(params.Units) == 0 {
-		return dbq.UpsertRatesParams{}, errors.New("no rates in the feed")
+	if len(params.Symbols) == 0 {
+		return dbq.UpsertPricesParams{}, errors.New("no rates in the feed")
 	}
 	return params, nil
 }

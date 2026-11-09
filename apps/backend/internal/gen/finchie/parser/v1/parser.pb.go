@@ -24,6 +24,61 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type PointsLineKind int32
+
+const (
+	PointsLineKind_POINTS_LINE_KIND_UNSPECIFIED PointsLineKind = 0
+	// Earned, a bonus included.
+	PointsLineKind_POINTS_LINE_KIND_EARN PointsLineKind = 1
+	// An adjustment, either way.
+	PointsLineKind_POINTS_LINE_KIND_ADJUST PointsLineKind = 2
+	// Used or redeemed.
+	PointsLineKind_POINTS_LINE_KIND_REDEEM PointsLineKind = 3
+)
+
+// Enum value maps for PointsLineKind.
+var (
+	PointsLineKind_name = map[int32]string{
+		0: "POINTS_LINE_KIND_UNSPECIFIED",
+		1: "POINTS_LINE_KIND_EARN",
+		2: "POINTS_LINE_KIND_ADJUST",
+		3: "POINTS_LINE_KIND_REDEEM",
+	}
+	PointsLineKind_value = map[string]int32{
+		"POINTS_LINE_KIND_UNSPECIFIED": 0,
+		"POINTS_LINE_KIND_EARN":        1,
+		"POINTS_LINE_KIND_ADJUST":      2,
+		"POINTS_LINE_KIND_REDEEM":      3,
+	}
+)
+
+func (x PointsLineKind) Enum() *PointsLineKind {
+	p := new(PointsLineKind)
+	*p = x
+	return p
+}
+
+func (x PointsLineKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PointsLineKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_finchie_parser_v1_parser_proto_enumTypes[0].Descriptor()
+}
+
+func (PointsLineKind) Type() protoreflect.EnumType {
+	return &file_finchie_parser_v1_parser_proto_enumTypes[0]
+}
+
+func (x PointsLineKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PointsLineKind.Descriptor instead.
+func (PointsLineKind) EnumDescriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{0}
+}
+
 type TransactionKind int32
 
 const (
@@ -71,11 +126,11 @@ func (x TransactionKind) String() string {
 }
 
 func (TransactionKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_finchie_parser_v1_parser_proto_enumTypes[0].Descriptor()
+	return file_finchie_parser_v1_parser_proto_enumTypes[1].Descriptor()
 }
 
 func (TransactionKind) Type() protoreflect.EnumType {
-	return &file_finchie_parser_v1_parser_proto_enumTypes[0]
+	return &file_finchie_parser_v1_parser_proto_enumTypes[1]
 }
 
 func (x TransactionKind) Number() protoreflect.EnumNumber {
@@ -84,7 +139,7 @@ func (x TransactionKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TransactionKind.Descriptor instead.
 func (TransactionKind) EnumDescriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{0}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{1}
 }
 
 // Only what the bank's own wording says; card payments and transfers between
@@ -125,11 +180,11 @@ func (x DepositLineKind) String() string {
 }
 
 func (DepositLineKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_finchie_parser_v1_parser_proto_enumTypes[1].Descriptor()
+	return file_finchie_parser_v1_parser_proto_enumTypes[2].Descriptor()
 }
 
 func (DepositLineKind) Type() protoreflect.EnumType {
-	return &file_finchie_parser_v1_parser_proto_enumTypes[1]
+	return &file_finchie_parser_v1_parser_proto_enumTypes[2]
 }
 
 func (x DepositLineKind) Number() protoreflect.EnumNumber {
@@ -138,7 +193,7 @@ func (x DepositLineKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DepositLineKind.Descriptor instead.
 func (DepositLineKind) EnumDescriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{1}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{2}
 }
 
 type TradeSide int32
@@ -174,11 +229,11 @@ func (x TradeSide) String() string {
 }
 
 func (TradeSide) Descriptor() protoreflect.EnumDescriptor {
-	return file_finchie_parser_v1_parser_proto_enumTypes[2].Descriptor()
+	return file_finchie_parser_v1_parser_proto_enumTypes[3].Descriptor()
 }
 
 func (TradeSide) Type() protoreflect.EnumType {
-	return &file_finchie_parser_v1_parser_proto_enumTypes[2]
+	return &file_finchie_parser_v1_parser_proto_enumTypes[3]
 }
 
 func (x TradeSide) Number() protoreflect.EnumNumber {
@@ -187,7 +242,7 @@ func (x TradeSide) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TradeSide.Descriptor instead.
 func (TradeSide) EnumDescriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{2}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{3}
 }
 
 type ParseDocumentRequest struct {
@@ -658,8 +713,10 @@ type Statement struct {
 	TotalDue       *decimal.Decimal `protobuf:"bytes,5,opt,name=total_due,json=totalDue,proto3" json:"total_due,omitempty"`
 	Transactions   []*Transaction   `protobuf:"bytes,6,rep,name=transactions,proto3" json:"transactions,omitempty"`
 	Reconciliation *Reconciliation  `protobuf:"bytes,7,opt,name=reconciliation,proto3" json:"reconciliation,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The rewards programs the bill reports (ADR 0019).
+	Points        []*PointsProgram `protobuf:"bytes,8,rep,name=points,proto3" json:"points,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Statement) Reset() {
@@ -741,6 +798,203 @@ func (x *Statement) GetReconciliation() *Reconciliation {
 	return nil
 }
 
+func (x *Statement) GetPoints() []*PointsProgram {
+	if x != nil {
+		return x.Points
+	}
+	return nil
+}
+
+// A rewards program on a card bill, its points a unit of their own (ADR 0019).
+type PointsProgram struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// As the bill prints it, e.g. "小樹點(信用卡)": the program's unit.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// At the closing date. Whether opening, added, and used add up to it is the
+	// parser's to check, and a warning when they do not.
+	Closing  *decimal.Decimal `protobuf:"bytes,2,opt,name=closing,proto3" json:"closing,omitempty"`
+	Expiries []*PointsExpiry  `protobuf:"bytes,3,rep,name=expiries,proto3" json:"expiries,omitempty"`
+	// The period's movements as the bill totals them: one per column with a
+	// figure. Points that lapse show in none (ADR 0019).
+	Lines         []*PointsLine `protobuf:"bytes,4,rep,name=lines,proto3" json:"lines,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PointsProgram) Reset() {
+	*x = PointsProgram{}
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PointsProgram) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PointsProgram) ProtoMessage() {}
+
+func (x *PointsProgram) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PointsProgram.ProtoReflect.Descriptor instead.
+func (*PointsProgram) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PointsProgram) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PointsProgram) GetClosing() *decimal.Decimal {
+	if x != nil {
+		return x.Closing
+	}
+	return nil
+}
+
+func (x *PointsProgram) GetExpiries() []*PointsExpiry {
+	if x != nil {
+		return x.Expiries
+	}
+	return nil
+}
+
+func (x *PointsProgram) GetLines() []*PointsLine {
+	if x != nil {
+		return x.Lines
+	}
+	return nil
+}
+
+type PointsLine struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The bill's own label for the column, e.g. "本期兌/轉換".
+	Label string         `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	Kind  PointsLineKind `protobuf:"varint,2,opt,name=kind,proto3,enum=finchie.parser.v1.PointsLineKind" json:"kind,omitempty"`
+	// Seen from the account: points added positive, used negative.
+	Amount        *decimal.Decimal `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PointsLine) Reset() {
+	*x = PointsLine{}
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PointsLine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PointsLine) ProtoMessage() {}
+
+func (x *PointsLine) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PointsLine.ProtoReflect.Descriptor instead.
+func (*PointsLine) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PointsLine) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *PointsLine) GetKind() PointsLineKind {
+	if x != nil {
+		return x.Kind
+	}
+	return PointsLineKind_POINTS_LINE_KIND_UNSPECIFIED
+}
+
+func (x *PointsLine) GetAmount() *decimal.Decimal {
+	if x != nil {
+		return x.Amount
+	}
+	return nil
+}
+
+// Points the bill says will lapse by a date, as printed: one date's, one
+// month's (by its last day), or several months' together.
+type PointsExpiry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Amount        *decimal.Decimal       `protobuf:"bytes,1,opt,name=amount,proto3" json:"amount,omitempty"`
+	By            *date.Date             `protobuf:"bytes,2,opt,name=by,proto3" json:"by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PointsExpiry) Reset() {
+	*x = PointsExpiry{}
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PointsExpiry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PointsExpiry) ProtoMessage() {}
+
+func (x *PointsExpiry) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PointsExpiry.ProtoReflect.Descriptor instead.
+func (*PointsExpiry) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PointsExpiry) GetAmount() *decimal.Decimal {
+	if x != nil {
+		return x.Amount
+	}
+	return nil
+}
+
+func (x *PointsExpiry) GetBy() *date.Date {
+	if x != nil {
+		return x.By
+	}
+	return nil
+}
+
 // Amounts follow the statement's sign: charges positive, credits negative
 // (ADR 0004).
 type Transaction struct {
@@ -765,7 +1019,7 @@ type Transaction struct {
 
 func (x *Transaction) Reset() {
 	*x = Transaction{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[7]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +1031,7 @@ func (x *Transaction) String() string {
 func (*Transaction) ProtoMessage() {}
 
 func (x *Transaction) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[7]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +1044,7 @@ func (x *Transaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Transaction.ProtoReflect.Descriptor instead.
 func (*Transaction) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{7}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Transaction) GetTransactionDate() *date.Date {
@@ -871,7 +1125,7 @@ type Reconciliation struct {
 
 func (x *Reconciliation) Reset() {
 	*x = Reconciliation{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[8]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -883,7 +1137,7 @@ func (x *Reconciliation) String() string {
 func (*Reconciliation) ProtoMessage() {}
 
 func (x *Reconciliation) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[8]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -896,7 +1150,7 @@ func (x *Reconciliation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reconciliation.ProtoReflect.Descriptor instead.
 func (*Reconciliation) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{8}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Reconciliation) GetBalanced() bool {
@@ -944,7 +1198,7 @@ type DepositStatement struct {
 
 func (x *DepositStatement) Reset() {
 	*x = DepositStatement{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[9]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -956,7 +1210,7 @@ func (x *DepositStatement) String() string {
 func (*DepositStatement) ProtoMessage() {}
 
 func (x *DepositStatement) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[9]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -969,7 +1223,7 @@ func (x *DepositStatement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DepositStatement.ProtoReflect.Descriptor instead.
 func (*DepositStatement) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{9}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DepositStatement) GetInstitution() string {
@@ -1023,7 +1277,7 @@ type DepositAccount struct {
 
 func (x *DepositAccount) Reset() {
 	*x = DepositAccount{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[10]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1035,7 +1289,7 @@ func (x *DepositAccount) String() string {
 func (*DepositAccount) ProtoMessage() {}
 
 func (x *DepositAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[10]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1048,7 +1302,7 @@ func (x *DepositAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DepositAccount.ProtoReflect.Descriptor instead.
 func (*DepositAccount) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{10}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DepositAccount) GetNumber() string {
@@ -1120,7 +1374,7 @@ type DepositLine struct {
 
 func (x *DepositLine) Reset() {
 	*x = DepositLine{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[11]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1132,7 +1386,7 @@ func (x *DepositLine) String() string {
 func (*DepositLine) ProtoMessage() {}
 
 func (x *DepositLine) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[11]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1145,7 +1399,7 @@ func (x *DepositLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DepositLine.ProtoReflect.Descriptor instead.
 func (*DepositLine) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{11}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DepositLine) GetDate() *date.Date {
@@ -1220,7 +1474,7 @@ type SecuritiesStatement struct {
 
 func (x *SecuritiesStatement) Reset() {
 	*x = SecuritiesStatement{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[12]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1232,7 +1486,7 @@ func (x *SecuritiesStatement) String() string {
 func (*SecuritiesStatement) ProtoMessage() {}
 
 func (x *SecuritiesStatement) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[12]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1245,7 +1499,7 @@ func (x *SecuritiesStatement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecuritiesStatement.ProtoReflect.Descriptor instead.
 func (*SecuritiesStatement) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{12}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SecuritiesStatement) GetInstitution() string {
@@ -1316,7 +1570,7 @@ type SecuritiesHolding struct {
 
 func (x *SecuritiesHolding) Reset() {
 	*x = SecuritiesHolding{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[13]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1328,7 +1582,7 @@ func (x *SecuritiesHolding) String() string {
 func (*SecuritiesHolding) ProtoMessage() {}
 
 func (x *SecuritiesHolding) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[13]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1341,7 +1595,7 @@ func (x *SecuritiesHolding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecuritiesHolding.ProtoReflect.Descriptor instead.
 func (*SecuritiesHolding) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{13}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SecuritiesHolding) GetName() string {
@@ -1384,7 +1638,7 @@ type SecuritiesTrade struct {
 
 func (x *SecuritiesTrade) Reset() {
 	*x = SecuritiesTrade{}
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[14]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1396,7 +1650,7 @@ func (x *SecuritiesTrade) String() string {
 func (*SecuritiesTrade) ProtoMessage() {}
 
 func (x *SecuritiesTrade) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v1_parser_proto_msgTypes[14]
+	mi := &file_finchie_parser_v1_parser_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1409,7 +1663,7 @@ func (x *SecuritiesTrade) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecuritiesTrade.ProtoReflect.Descriptor instead.
 func (*SecuritiesTrade) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{14}
+	return file_finchie_parser_v1_parser_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SecuritiesTrade) GetDate() *date.Date {
@@ -1528,7 +1782,7 @@ const file_finchie_parser_v1_parser_proto_rawDesc = "" +
 	"\tstatement\x18\x03 \x01(\v2\x1c.finchie.parser.v1.StatementR\tstatement\x12\x1a\n" +
 	"\bwarnings\x18\x04 \x03(\tR\bwarnings\x12P\n" +
 	"\x11deposit_statement\x18\x05 \x01(\v2#.finchie.parser.v1.DepositStatementR\x10depositStatement\x12Y\n" +
-	"\x14securities_statement\x18\x06 \x01(\v2&.finchie.parser.v1.SecuritiesStatementR\x13securitiesStatement\"\xef\x02\n" +
+	"\x14securities_statement\x18\x06 \x01(\v2&.finchie.parser.v1.SecuritiesStatementR\x13securitiesStatement\"\xa9\x03\n" +
 	"\tStatement\x12 \n" +
 	"\vinstitution\x18\x01 \x01(\tR\vinstitution\x124\n" +
 	"\fclosing_date\x18\x02 \x01(\v2\x11.google.type.DateR\vclosingDate\x12,\n" +
@@ -1536,7 +1790,21 @@ const file_finchie_parser_v1_parser_proto_rawDesc = "" +
 	"\bcurrency\x18\x04 \x01(\tR\bcurrency\x121\n" +
 	"\ttotal_due\x18\x05 \x01(\v2\x14.google.type.DecimalR\btotalDue\x12B\n" +
 	"\ftransactions\x18\x06 \x03(\v2\x1e.finchie.parser.v1.TransactionR\ftransactions\x12I\n" +
-	"\x0ereconciliation\x18\a \x01(\v2!.finchie.parser.v1.ReconciliationR\x0ereconciliation\"\xae\x03\n" +
+	"\x0ereconciliation\x18\a \x01(\v2!.finchie.parser.v1.ReconciliationR\x0ereconciliation\x128\n" +
+	"\x06points\x18\b \x03(\v2 .finchie.parser.v1.PointsProgramR\x06points\"\xc5\x01\n" +
+	"\rPointsProgram\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12.\n" +
+	"\aclosing\x18\x02 \x01(\v2\x14.google.type.DecimalR\aclosing\x12;\n" +
+	"\bexpiries\x18\x03 \x03(\v2\x1f.finchie.parser.v1.PointsExpiryR\bexpiries\x123\n" +
+	"\x05lines\x18\x04 \x03(\v2\x1d.finchie.parser.v1.PointsLineR\x05lines\"\x87\x01\n" +
+	"\n" +
+	"PointsLine\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x125\n" +
+	"\x04kind\x18\x02 \x01(\x0e2!.finchie.parser.v1.PointsLineKindR\x04kind\x12,\n" +
+	"\x06amount\x18\x03 \x01(\v2\x14.google.type.DecimalR\x06amount\"_\n" +
+	"\fPointsExpiry\x12,\n" +
+	"\x06amount\x18\x01 \x01(\v2\x14.google.type.DecimalR\x06amount\x12!\n" +
+	"\x02by\x18\x02 \x01(\v2\x11.google.type.DateR\x02by\"\xae\x03\n" +
 	"\vTransaction\x12<\n" +
 	"\x10transaction_date\x18\x01 \x01(\v2\x11.google.type.DateR\x0ftransactionDate\x124\n" +
 	"\fposting_date\x18\x02 \x01(\v2\x11.google.type.DateR\vpostingDate\x12 \n" +
@@ -1600,7 +1868,12 @@ const file_finchie_parser_v1_parser_proto_rawDesc = "" +
 	"\x03tax\x18\t \x01(\v2\x14.google.type.DecimalR\x03tax\x12&\n" +
 	"\x03net\x18\n" +
 	" \x01(\v2\x14.google.type.DecimalR\x03net\x12.\n" +
-	"\aprepaid\x18\v \x01(\v2\x14.google.type.DecimalR\aprepaid*\xf9\x01\n" +
+	"\aprepaid\x18\v \x01(\v2\x14.google.type.DecimalR\aprepaid*\x87\x01\n" +
+	"\x0ePointsLineKind\x12 \n" +
+	"\x1cPOINTS_LINE_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15POINTS_LINE_KIND_EARN\x10\x01\x12\x1b\n" +
+	"\x17POINTS_LINE_KIND_ADJUST\x10\x02\x12\x1b\n" +
+	"\x17POINTS_LINE_KIND_REDEEM\x10\x03*\xf9\x01\n" +
 	"\x0fTransactionKind\x12 \n" +
 	"\x1cTRANSACTION_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19TRANSACTION_KIND_PURCHASE\x10\x01\x12,\n" +
@@ -1635,86 +1908,98 @@ func file_finchie_parser_v1_parser_proto_rawDescGZIP() []byte {
 	return file_finchie_parser_v1_parser_proto_rawDescData
 }
 
-var file_finchie_parser_v1_parser_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_finchie_parser_v1_parser_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_finchie_parser_v1_parser_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_finchie_parser_v1_parser_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_finchie_parser_v1_parser_proto_goTypes = []any{
-	(TransactionKind)(0),          // 0: finchie.parser.v1.TransactionKind
-	(DepositLineKind)(0),          // 1: finchie.parser.v1.DepositLineKind
-	(TradeSide)(0),                // 2: finchie.parser.v1.TradeSide
-	(*ParseDocumentRequest)(nil),  // 3: finchie.parser.v1.ParseDocumentRequest
-	(*OpenDocumentRequest)(nil),   // 4: finchie.parser.v1.OpenDocumentRequest
-	(*OpenDocumentResponse)(nil),  // 5: finchie.parser.v1.OpenDocumentResponse
-	(*Email)(nil),                 // 6: finchie.parser.v1.Email
-	(*File)(nil),                  // 7: finchie.parser.v1.File
-	(*ParseDocumentResponse)(nil), // 8: finchie.parser.v1.ParseDocumentResponse
-	(*Statement)(nil),             // 9: finchie.parser.v1.Statement
-	(*Transaction)(nil),           // 10: finchie.parser.v1.Transaction
-	(*Reconciliation)(nil),        // 11: finchie.parser.v1.Reconciliation
-	(*DepositStatement)(nil),      // 12: finchie.parser.v1.DepositStatement
-	(*DepositAccount)(nil),        // 13: finchie.parser.v1.DepositAccount
-	(*DepositLine)(nil),           // 14: finchie.parser.v1.DepositLine
-	(*SecuritiesStatement)(nil),   // 15: finchie.parser.v1.SecuritiesStatement
-	(*SecuritiesHolding)(nil),     // 16: finchie.parser.v1.SecuritiesHolding
-	(*SecuritiesTrade)(nil),       // 17: finchie.parser.v1.SecuritiesTrade
-	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
-	(*date.Date)(nil),             // 19: google.type.Date
-	(*decimal.Decimal)(nil),       // 20: google.type.Decimal
+	(PointsLineKind)(0),           // 0: finchie.parser.v1.PointsLineKind
+	(TransactionKind)(0),          // 1: finchie.parser.v1.TransactionKind
+	(DepositLineKind)(0),          // 2: finchie.parser.v1.DepositLineKind
+	(TradeSide)(0),                // 3: finchie.parser.v1.TradeSide
+	(*ParseDocumentRequest)(nil),  // 4: finchie.parser.v1.ParseDocumentRequest
+	(*OpenDocumentRequest)(nil),   // 5: finchie.parser.v1.OpenDocumentRequest
+	(*OpenDocumentResponse)(nil),  // 6: finchie.parser.v1.OpenDocumentResponse
+	(*Email)(nil),                 // 7: finchie.parser.v1.Email
+	(*File)(nil),                  // 8: finchie.parser.v1.File
+	(*ParseDocumentResponse)(nil), // 9: finchie.parser.v1.ParseDocumentResponse
+	(*Statement)(nil),             // 10: finchie.parser.v1.Statement
+	(*PointsProgram)(nil),         // 11: finchie.parser.v1.PointsProgram
+	(*PointsLine)(nil),            // 12: finchie.parser.v1.PointsLine
+	(*PointsExpiry)(nil),          // 13: finchie.parser.v1.PointsExpiry
+	(*Transaction)(nil),           // 14: finchie.parser.v1.Transaction
+	(*Reconciliation)(nil),        // 15: finchie.parser.v1.Reconciliation
+	(*DepositStatement)(nil),      // 16: finchie.parser.v1.DepositStatement
+	(*DepositAccount)(nil),        // 17: finchie.parser.v1.DepositAccount
+	(*DepositLine)(nil),           // 18: finchie.parser.v1.DepositLine
+	(*SecuritiesStatement)(nil),   // 19: finchie.parser.v1.SecuritiesStatement
+	(*SecuritiesHolding)(nil),     // 20: finchie.parser.v1.SecuritiesHolding
+	(*SecuritiesTrade)(nil),       // 21: finchie.parser.v1.SecuritiesTrade
+	(*timestamppb.Timestamp)(nil), // 22: google.protobuf.Timestamp
+	(*date.Date)(nil),             // 23: google.type.Date
+	(*decimal.Decimal)(nil),       // 24: google.type.Decimal
 }
 var file_finchie_parser_v1_parser_proto_depIdxs = []int32{
-	6,  // 0: finchie.parser.v1.OpenDocumentResponse.email:type_name -> finchie.parser.v1.Email
-	7,  // 1: finchie.parser.v1.OpenDocumentResponse.files:type_name -> finchie.parser.v1.File
-	18, // 2: finchie.parser.v1.Email.date:type_name -> google.protobuf.Timestamp
-	9,  // 3: finchie.parser.v1.ParseDocumentResponse.statement:type_name -> finchie.parser.v1.Statement
-	12, // 4: finchie.parser.v1.ParseDocumentResponse.deposit_statement:type_name -> finchie.parser.v1.DepositStatement
-	15, // 5: finchie.parser.v1.ParseDocumentResponse.securities_statement:type_name -> finchie.parser.v1.SecuritiesStatement
-	19, // 6: finchie.parser.v1.Statement.closing_date:type_name -> google.type.Date
-	19, // 7: finchie.parser.v1.Statement.due_date:type_name -> google.type.Date
-	20, // 8: finchie.parser.v1.Statement.total_due:type_name -> google.type.Decimal
-	10, // 9: finchie.parser.v1.Statement.transactions:type_name -> finchie.parser.v1.Transaction
-	11, // 10: finchie.parser.v1.Statement.reconciliation:type_name -> finchie.parser.v1.Reconciliation
-	19, // 11: finchie.parser.v1.Transaction.transaction_date:type_name -> google.type.Date
-	19, // 12: finchie.parser.v1.Transaction.posting_date:type_name -> google.type.Date
-	0,  // 13: finchie.parser.v1.Transaction.kind:type_name -> finchie.parser.v1.TransactionKind
-	20, // 14: finchie.parser.v1.Transaction.amount:type_name -> google.type.Decimal
-	20, // 15: finchie.parser.v1.Transaction.original_amount:type_name -> google.type.Decimal
-	20, // 16: finchie.parser.v1.Reconciliation.computed:type_name -> google.type.Decimal
-	20, // 17: finchie.parser.v1.Reconciliation.stated:type_name -> google.type.Decimal
-	19, // 18: finchie.parser.v1.DepositStatement.period_start:type_name -> google.type.Date
-	19, // 19: finchie.parser.v1.DepositStatement.period_end:type_name -> google.type.Date
-	13, // 20: finchie.parser.v1.DepositStatement.accounts:type_name -> finchie.parser.v1.DepositAccount
-	20, // 21: finchie.parser.v1.DepositAccount.opening_balance:type_name -> google.type.Decimal
-	20, // 22: finchie.parser.v1.DepositAccount.closing_balance:type_name -> google.type.Decimal
-	14, // 23: finchie.parser.v1.DepositAccount.lines:type_name -> finchie.parser.v1.DepositLine
-	11, // 24: finchie.parser.v1.DepositAccount.reconciliation:type_name -> finchie.parser.v1.Reconciliation
-	19, // 25: finchie.parser.v1.DepositLine.date:type_name -> google.type.Date
-	20, // 26: finchie.parser.v1.DepositLine.amount:type_name -> google.type.Decimal
-	20, // 27: finchie.parser.v1.DepositLine.balance:type_name -> google.type.Decimal
-	1,  // 28: finchie.parser.v1.DepositLine.kind:type_name -> finchie.parser.v1.DepositLineKind
-	19, // 29: finchie.parser.v1.SecuritiesStatement.period_start:type_name -> google.type.Date
-	19, // 30: finchie.parser.v1.SecuritiesStatement.period_end:type_name -> google.type.Date
-	19, // 31: finchie.parser.v1.SecuritiesStatement.holdings_date:type_name -> google.type.Date
-	16, // 32: finchie.parser.v1.SecuritiesStatement.holdings:type_name -> finchie.parser.v1.SecuritiesHolding
-	17, // 33: finchie.parser.v1.SecuritiesStatement.trades:type_name -> finchie.parser.v1.SecuritiesTrade
-	11, // 34: finchie.parser.v1.SecuritiesStatement.reconciliation:type_name -> finchie.parser.v1.Reconciliation
-	20, // 35: finchie.parser.v1.SecuritiesHolding.shares:type_name -> google.type.Decimal
-	19, // 36: finchie.parser.v1.SecuritiesTrade.date:type_name -> google.type.Date
-	2,  // 37: finchie.parser.v1.SecuritiesTrade.side:type_name -> finchie.parser.v1.TradeSide
-	20, // 38: finchie.parser.v1.SecuritiesTrade.shares:type_name -> google.type.Decimal
-	20, // 39: finchie.parser.v1.SecuritiesTrade.price:type_name -> google.type.Decimal
-	20, // 40: finchie.parser.v1.SecuritiesTrade.amount:type_name -> google.type.Decimal
-	20, // 41: finchie.parser.v1.SecuritiesTrade.fee:type_name -> google.type.Decimal
-	20, // 42: finchie.parser.v1.SecuritiesTrade.tax:type_name -> google.type.Decimal
-	20, // 43: finchie.parser.v1.SecuritiesTrade.net:type_name -> google.type.Decimal
-	20, // 44: finchie.parser.v1.SecuritiesTrade.prepaid:type_name -> google.type.Decimal
-	3,  // 45: finchie.parser.v1.ParserService.ParseDocument:input_type -> finchie.parser.v1.ParseDocumentRequest
-	4,  // 46: finchie.parser.v1.ParserService.OpenDocument:input_type -> finchie.parser.v1.OpenDocumentRequest
-	8,  // 47: finchie.parser.v1.ParserService.ParseDocument:output_type -> finchie.parser.v1.ParseDocumentResponse
-	5,  // 48: finchie.parser.v1.ParserService.OpenDocument:output_type -> finchie.parser.v1.OpenDocumentResponse
-	47, // [47:49] is the sub-list for method output_type
-	45, // [45:47] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	7,  // 0: finchie.parser.v1.OpenDocumentResponse.email:type_name -> finchie.parser.v1.Email
+	8,  // 1: finchie.parser.v1.OpenDocumentResponse.files:type_name -> finchie.parser.v1.File
+	22, // 2: finchie.parser.v1.Email.date:type_name -> google.protobuf.Timestamp
+	10, // 3: finchie.parser.v1.ParseDocumentResponse.statement:type_name -> finchie.parser.v1.Statement
+	16, // 4: finchie.parser.v1.ParseDocumentResponse.deposit_statement:type_name -> finchie.parser.v1.DepositStatement
+	19, // 5: finchie.parser.v1.ParseDocumentResponse.securities_statement:type_name -> finchie.parser.v1.SecuritiesStatement
+	23, // 6: finchie.parser.v1.Statement.closing_date:type_name -> google.type.Date
+	23, // 7: finchie.parser.v1.Statement.due_date:type_name -> google.type.Date
+	24, // 8: finchie.parser.v1.Statement.total_due:type_name -> google.type.Decimal
+	14, // 9: finchie.parser.v1.Statement.transactions:type_name -> finchie.parser.v1.Transaction
+	15, // 10: finchie.parser.v1.Statement.reconciliation:type_name -> finchie.parser.v1.Reconciliation
+	11, // 11: finchie.parser.v1.Statement.points:type_name -> finchie.parser.v1.PointsProgram
+	24, // 12: finchie.parser.v1.PointsProgram.closing:type_name -> google.type.Decimal
+	13, // 13: finchie.parser.v1.PointsProgram.expiries:type_name -> finchie.parser.v1.PointsExpiry
+	12, // 14: finchie.parser.v1.PointsProgram.lines:type_name -> finchie.parser.v1.PointsLine
+	0,  // 15: finchie.parser.v1.PointsLine.kind:type_name -> finchie.parser.v1.PointsLineKind
+	24, // 16: finchie.parser.v1.PointsLine.amount:type_name -> google.type.Decimal
+	24, // 17: finchie.parser.v1.PointsExpiry.amount:type_name -> google.type.Decimal
+	23, // 18: finchie.parser.v1.PointsExpiry.by:type_name -> google.type.Date
+	23, // 19: finchie.parser.v1.Transaction.transaction_date:type_name -> google.type.Date
+	23, // 20: finchie.parser.v1.Transaction.posting_date:type_name -> google.type.Date
+	1,  // 21: finchie.parser.v1.Transaction.kind:type_name -> finchie.parser.v1.TransactionKind
+	24, // 22: finchie.parser.v1.Transaction.amount:type_name -> google.type.Decimal
+	24, // 23: finchie.parser.v1.Transaction.original_amount:type_name -> google.type.Decimal
+	24, // 24: finchie.parser.v1.Reconciliation.computed:type_name -> google.type.Decimal
+	24, // 25: finchie.parser.v1.Reconciliation.stated:type_name -> google.type.Decimal
+	23, // 26: finchie.parser.v1.DepositStatement.period_start:type_name -> google.type.Date
+	23, // 27: finchie.parser.v1.DepositStatement.period_end:type_name -> google.type.Date
+	17, // 28: finchie.parser.v1.DepositStatement.accounts:type_name -> finchie.parser.v1.DepositAccount
+	24, // 29: finchie.parser.v1.DepositAccount.opening_balance:type_name -> google.type.Decimal
+	24, // 30: finchie.parser.v1.DepositAccount.closing_balance:type_name -> google.type.Decimal
+	18, // 31: finchie.parser.v1.DepositAccount.lines:type_name -> finchie.parser.v1.DepositLine
+	15, // 32: finchie.parser.v1.DepositAccount.reconciliation:type_name -> finchie.parser.v1.Reconciliation
+	23, // 33: finchie.parser.v1.DepositLine.date:type_name -> google.type.Date
+	24, // 34: finchie.parser.v1.DepositLine.amount:type_name -> google.type.Decimal
+	24, // 35: finchie.parser.v1.DepositLine.balance:type_name -> google.type.Decimal
+	2,  // 36: finchie.parser.v1.DepositLine.kind:type_name -> finchie.parser.v1.DepositLineKind
+	23, // 37: finchie.parser.v1.SecuritiesStatement.period_start:type_name -> google.type.Date
+	23, // 38: finchie.parser.v1.SecuritiesStatement.period_end:type_name -> google.type.Date
+	23, // 39: finchie.parser.v1.SecuritiesStatement.holdings_date:type_name -> google.type.Date
+	20, // 40: finchie.parser.v1.SecuritiesStatement.holdings:type_name -> finchie.parser.v1.SecuritiesHolding
+	21, // 41: finchie.parser.v1.SecuritiesStatement.trades:type_name -> finchie.parser.v1.SecuritiesTrade
+	15, // 42: finchie.parser.v1.SecuritiesStatement.reconciliation:type_name -> finchie.parser.v1.Reconciliation
+	24, // 43: finchie.parser.v1.SecuritiesHolding.shares:type_name -> google.type.Decimal
+	23, // 44: finchie.parser.v1.SecuritiesTrade.date:type_name -> google.type.Date
+	3,  // 45: finchie.parser.v1.SecuritiesTrade.side:type_name -> finchie.parser.v1.TradeSide
+	24, // 46: finchie.parser.v1.SecuritiesTrade.shares:type_name -> google.type.Decimal
+	24, // 47: finchie.parser.v1.SecuritiesTrade.price:type_name -> google.type.Decimal
+	24, // 48: finchie.parser.v1.SecuritiesTrade.amount:type_name -> google.type.Decimal
+	24, // 49: finchie.parser.v1.SecuritiesTrade.fee:type_name -> google.type.Decimal
+	24, // 50: finchie.parser.v1.SecuritiesTrade.tax:type_name -> google.type.Decimal
+	24, // 51: finchie.parser.v1.SecuritiesTrade.net:type_name -> google.type.Decimal
+	24, // 52: finchie.parser.v1.SecuritiesTrade.prepaid:type_name -> google.type.Decimal
+	4,  // 53: finchie.parser.v1.ParserService.ParseDocument:input_type -> finchie.parser.v1.ParseDocumentRequest
+	5,  // 54: finchie.parser.v1.ParserService.OpenDocument:input_type -> finchie.parser.v1.OpenDocumentRequest
+	9,  // 55: finchie.parser.v1.ParserService.ParseDocument:output_type -> finchie.parser.v1.ParseDocumentResponse
+	6,  // 56: finchie.parser.v1.ParserService.OpenDocument:output_type -> finchie.parser.v1.OpenDocumentResponse
+	55, // [55:57] is the sub-list for method output_type
+	53, // [53:55] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_finchie_parser_v1_parser_proto_init() }
@@ -1727,8 +2012,8 @@ func file_finchie_parser_v1_parser_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_finchie_parser_v1_parser_proto_rawDesc), len(file_finchie_parser_v1_parser_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   15,
+			NumEnums:      4,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

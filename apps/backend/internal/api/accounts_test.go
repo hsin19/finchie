@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 	gdate "google.golang.org/genproto/googleapis/type/date"
@@ -19,6 +18,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/exchanges"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
 // Synthetic figures (ADR 0006).
@@ -150,7 +150,7 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
 	deposit := accountNamed(t, accounts, savings)
-	if deposit.Kind != Deposit || *deposit.Label != "臺幣活存" || deposit.Continuity != Checked {
+	if deposit.Kind != AccountKindDeposit || *deposit.Label != "臺幣活存" || deposit.Continuity != Checked {
 		t.Fatalf("deposit account = %+v", deposit)
 	}
 	if len(deposit.Balances) != 1 || deposit.Balances[0].Amount != "2500" || deposit.Balances[0].AsOf.String() != "2026-11-30" {
@@ -164,7 +164,7 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 	}
 	// A card bill holds no balance and is no account the owner has: it is not listed (ADR 0013).
 	for _, a := range accounts {
-		if a.Kind == CreditCard {
+		if a.Kind == AccountKindCreditCard {
 			t.Fatalf("card account listed: %+v", a)
 		}
 	}
@@ -193,19 +193,8 @@ func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testi
 	e, pool := newAPI(t, 1<<20)
 	ctx := t.Context()
 	queries := dbq.New(pool)
-	rate := func(day, unit, perTWD string) {
-		t.Helper()
-		var n pgtype.Numeric
-		if err := n.Scan(perTWD); err != nil {
-			t.Fatal(err)
-		}
-		d, _ := time.Parse(time.DateOnly, day)
-		if err := queries.UpsertRates(ctx, dbq.UpsertRatesParams{Day: pgtype.Date{Time: d, Valid: true}, Units: []string{unit}, PerTwd: []pgtype.Numeric{n}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rate("2026-11-06", "USD", "0.025")
-	rate("2026-11-07", "USD", "0.03125") // the newest: 1 USD is NT$32
+	rate(t, pool, "2026-11-06", "USD", "0.025")
+	rate(t, pool, "2026-11-07", "USD", "0.03125") // the newest: 1 USD is NT$32
 	doc, err := queries.UpsertDocument(ctx, dbq.UpsertDocumentParams{Sha256: []byte("fx"), Filename: "fx.eml", ContentType: "message/rfc822", Content: []byte("From: bank")})
 	if err != nil {
 		t.Fatal(err)
@@ -229,12 +218,12 @@ func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testi
 	}
 
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
-	// NT$ is worth itself, with no rate to name.
-	if twd := accountNamed(t, accounts, savings); *twd.Worth != "1000.00" || *twd.Balances[0].Worth != "1000" || twd.Balances[0].RateDay != nil {
+	// NT$ is worth itself, with no price to name.
+	if twd := accountNamed(t, accounts, savings); *twd.Worth != "1000.00" || *twd.Balances[0].Worth != "1000.00" || twd.Balances[0].Price != nil {
 		t.Fatalf("NT$ account = %+v", twd)
 	}
 	dollars := accountNamed(t, accounts, "7777777***777")
-	if *dollars.Balances[0].Worth != "336.00" || dollars.Balances[0].RateDay.String() != "2026-11-07" || *dollars.Worth != "336.00" {
+	if *dollars.Balances[0].Worth != "336.00" || *dollars.Balances[0].Price.Twd != "32" || *dollars.Worth != "336.00" {
 		t.Fatalf("US$ account = %+v", dollars)
 	}
 	// No rate for JPY: its balance has no worth, and so neither has the account.
@@ -358,7 +347,7 @@ func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 		*transfer.Counterpart.AccountNumber != "876543****9234" {
 		t.Fatalf("transfer counterpart = %+v", transfer.Counterpart)
 	}
-	if card.Counterpart == nil || card.Counterpart.AccountKind != CreditCard || card.Counterpart.AccountId != nil || card.Counterpart.Institution != "esun" {
+	if card.Counterpart == nil || card.Counterpart.AccountKind != AccountKindCreditCard || card.Counterpart.AccountId != nil || card.Counterpart.Institution != "esun" {
 		t.Fatalf("card payment counterpart = %+v", card.Counterpart)
 	}
 	statements := decode[[]Statement](t, get(t, e, "/api/statements"))
@@ -388,27 +377,19 @@ func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSp
 		},
 		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: dec("0"), Stated: dec("0"), StatedLabel: "應收付金額"},
 	}})
-	day := func(d int) pgtype.Date {
-		return pgtype.Date{Time: time.Date(2026, 11, d, 0, 0, 0, 0, time.UTC), Valid: true}
-	}
-	price := func(s string) pgtype.Numeric {
-		var n pgtype.Numeric
-		_ = n.Scan(s)
-		return n
-	}
-	if err := dbq.New(pool).UpsertQuotes(t.Context(), dbq.UpsertQuotesParams{
-		Days: []pgtype.Date{day(5), day(6)}, Names: []string{"範例電子", "範例電子"}, Codes: []string{"1234", "1234"},
-		Markets: []string{"twse", "twse"}, Closes: []pgtype.Numeric{price("49.00"), price("50.50")},
-	}); err != nil {
+	closed := func(d int) time.Time { return taipei.At(time.Date(2026, 11, d, 0, 0, 0, 0, time.UTC), 13, 30) }
+	price(t, pool, "security", "範例電子", "twse", closed(5), "1", "TWD", "49.00")
+	price(t, pool, "security", "範例電子", "twse", closed(6), "1", "TWD", "50.50")
+	if _, err := pool.Exec(t.Context(), "UPDATE units SET code = '1234', market = 'twse' WHERE kind = 'security' AND symbol = '範例電子'"); err != nil {
 		t.Fatal(err)
 	}
 
 	account := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), "12**345")
-	if account.Kind != Securities || account.Continuity != Checked || len(account.Balances) != 1 {
+	if account.Kind != AccountKindSecurities || account.Continuity != Checked || len(account.Balances) != 1 {
 		t.Fatalf("account = %+v", account)
 	}
 	held := account.Balances[0]
-	if held.Unit != "範例電子" || *held.Worth != "176750.00" || *held.Code != "1234" || *held.Price != "50.50" || held.RateDay.String() != "2026-11-06" {
+	if held.Unit != "範例電子" || *held.Worth != "176750.00" || *held.Code != "1234" || held.Price.Quoted != "50.5" || !held.Price.AsOf.Equal(closed(6)) {
 		t.Fatalf("holding = %+v, worth %v", held, *held.Worth)
 	}
 	// Held before this, the oldest statement: what either cost is not known.
@@ -436,18 +417,9 @@ func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSp
 func TestAnExchangeIsWorthItsHoldingsElseItsValuationOfTheSameDay(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	ctx := t.Context()
-	var perTWD []pgtype.Numeric
-	for _, rate := range []string{"0.03125", "0.0000003125"} { // 1 USDT is NT$32, 1 BTC NT$3,200,000
-		var n pgtype.Numeric
-		if err := n.Scan(rate); err != nil {
-			t.Fatal(err)
-		}
-		perTWD = append(perTWD, n)
-	}
+	rate(t, pool, "2026-11-07", "USDT", "0.03125")     // 1 USDT is NT$32
+	rate(t, pool, "2026-11-07", "BTC", "0.0000003125") // 1 BTC NT$3,200,000
 	day := func(s string) time.Time { d, _ := time.Parse(time.DateOnly, s); return d }
-	if err := dbq.New(pool).UpsertRates(ctx, dbq.UpsertRatesParams{Day: pgtype.Date{Time: day("2026-11-07"), Valid: true}, Units: []string{"USDT", "BTC"}, PerTwd: perTWD}); err != nil {
-		t.Fatal(err)
-	}
 	snapshot := func(on string, valuation string, pairs ...string) {
 		t.Helper()
 		s := exchanges.Snapshot{Holdings: map[string]*big.Rat{}}
@@ -465,7 +437,7 @@ func TestAnExchangeIsWorthItsHoldingsElseItsValuationOfTheSameDay(t *testing.T) 
 	exchange := func() AccountDetail {
 		t.Helper()
 		accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
-		if len(accounts) != 1 || accounts[0].Kind != Exchange || accounts[0].Continuity != Unknown {
+		if len(accounts) != 1 || accounts[0].Kind != AccountKindExchange || accounts[0].Continuity != Unknown {
 			t.Fatalf("accounts = %+v", accounts)
 		}
 		detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", accounts[0].Id)))
@@ -496,5 +468,114 @@ func TestAnExchangeIsWorthItsHoldingsElseItsValuationOfTheSameDay(t *testing.T) 
 	snapshot("2026-11-10", "", "USDT", "100", "DUST", "5")
 	if a := exchange(); a.Worth != nil || a.WorthFrom != nil {
 		t.Fatalf("no valuation of the day: worth %v from %v", a.Worth, a.WorthFrom)
+	}
+}
+
+// cathayBill is a Cathay card bill closing on the first of the month, with its points programs.
+func cathayBill(month int32, programs ...*parserv1.PointsProgram) *parserv1.ParseDocumentResponse {
+	return &parserv1.ParseDocumentResponse{Parser: "cathay.credit_card", Statement: &parserv1.Statement{
+		Institution: "cathay", ClosingDate: &gdate.Date{Year: 2026, Month: month, Day: 1}, DueDate: &gdate.Date{Year: 2026, Month: month, Day: 17},
+		Currency: "TWD", TotalDue: &decimal.Decimal{Value: "0"}, Points: programs,
+		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "0"}, Stated: &decimal.Decimal{Value: "0"}, StatedLabel: "x"},
+	}}
+}
+
+func program(name, closing string, expiries ...*parserv1.PointsExpiry) *parserv1.PointsProgram {
+	return &parserv1.PointsProgram{Name: name, Closing: &decimal.Decimal{Value: closing}, Expiries: expiries}
+}
+
+// withLines gives a program its period's movements.
+func withLines(p *parserv1.PointsProgram, lines ...*parserv1.PointsLine) *parserv1.PointsProgram {
+	p.Lines = lines
+	return p
+}
+
+func pointsLine(label string, kind parserv1.PointsLineKind, amount string) *parserv1.PointsLine {
+	return &parserv1.PointsLine{Label: label, Kind: kind, Amount: &decimal.Decimal{Value: amount}}
+}
+
+func lapsing(amount string, year, month, day int32) *parserv1.PointsExpiry {
+	return &parserv1.PointsExpiry{Amount: &decimal.Decimal{Value: amount}, By: &gdate.Date{Year: year, Month: month, Day: day}}
+}
+
+func TestACardBillsPointsAreAPointsAccountWithWhatTheNewestBillSaysWillLapse(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	// Stored newest first: the older bill's expiries must not come back.
+	store(t, pool, "november", cathayBill(11,
+		withLines(program("小樹點(信用卡)", "3253", lapsing("0", 2026, 11, 30), lapsing("669", 2099, 10, 31)),
+			pointsLine("本期新增/扣除", parserv1.PointsLineKind_POINTS_LINE_KIND_EARN, "64"),
+			pointsLine("本期兌/轉換", parserv1.PointsLineKind_POINTS_LINE_KIND_REDEEM, "-1")),
+		program("亞洲萬里通里數", "0")))
+	store(t, pool, "october", cathayBill(10,
+		program("小樹點(信用卡)", "3190", lapsing("88", 2099, 10, 31), lapsing("700", 2099, 9, 30)),
+		program("亞洲萬里通里數", "500")))
+	// A bill gone by, and an amount of 0, are left out; so is the program the bank now reports at 0.
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	var points *Account
+	for i := range accounts {
+		if accounts[i].Kind == AccountKindPoints {
+			points = &accounts[i]
+		}
+	}
+	// The bills list every movement but points that lapse: 小樹點 joins up, the miles that went without a
+	// line are a gap, points lost (ADR 0019).
+	if points == nil || points.Institution != "cathay" || points.Continuity != Checked {
+		t.Fatalf("accounts = %+v", accounts)
+	}
+	if len(points.Gaps) != 1 || points.Gaps[0].Unit != "亞洲萬里通里數" || points.Gaps[0].Unseen != "-500" {
+		t.Fatalf("gaps = %+v", points.Gaps)
+	}
+	if len(points.Balances) != 1 || points.Balances[0].Unit != "小樹點(信用卡)" || points.Balances[0].Amount != "3253" {
+		t.Fatalf("balances = %+v", points.Balances)
+	}
+	if len(points.Expiries) != 1 || points.Expiries[0].Amount != "669" || points.Expiries[0].By.String() != "2099-10-31" {
+		t.Fatalf("expiries = %+v", points.Expiries)
+	}
+	// At the owner's NT$1 a point the migration gives 小樹點 (ADR 0020).
+	if points.Worth == nil || *points.Worth != "3253.00" {
+		t.Fatalf("worth = %v", points.Worth)
+	}
+	detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", points.Id)))
+	if len(detail.Expiries) != 1 || len(detail.History) != 4 {
+		t.Fatalf("detail expiries %+v, history %+v", detail.Expiries, detail.History)
+	}
+	lines := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", points.Id)))
+	if len(lines) != 2 || lines[0].Kind != string(Redeem) || lines[0].Amount != "-1" || lines[1].Description != "本期新增/扣除" || lines[1].Date.String() != "2026-11-01" {
+		t.Fatalf("lines = %+v", lines)
+	}
+	// Listed in search, but points are not money: neither spent nor received.
+	search := decode[TransactionSearch](t, get(t, e, "/api/transactions"))
+	if search.Total != 2 || len(search.Flows) != 0 {
+		t.Fatalf("search: total %d, flows %+v", search.Total, search.Flows)
+	}
+
+	// Re-parsing the newest bill without its points takes them with it: the older bill's report stands.
+	store(t, pool, "november", cathayBill(11))
+	points2 := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", points.Id)))
+	held := map[string]string{}
+	for _, b := range points2.Balances {
+		held[b.Unit] = b.Amount
+	}
+	// Soonest first.
+	if len(points2.Expiries) != 2 || points2.Expiries[0].Amount != "700" || held["小樹點(信用卡)"] != "3190" || held["亞洲萬里通里數"] != "500" {
+		t.Fatalf("after re-parse: expiries %+v, balances %+v", points2.Expiries, points2.Balances)
+	}
+}
+
+func TestANewerBillThatPrintsNothingLapsingSaysNothingWill(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	store(t, pool, "october", cathayBill(10, program("小樹點(信用卡)", "3190", lapsing("88", 2099, 10, 31))))
+	store(t, pool, "november", cathayBill(11, program("小樹點(信用卡)", "0")))
+	if p := pointsOf(t, e); len(p.Expiries) != 0 {
+		t.Fatalf("expiries = %+v", p.Expiries)
+	}
+}
+
+func TestAnAccountWhoseSourcesSayItHoldsNothingIsWorthNothing(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	store(t, pool, "empty", cathayBill(10, program("小樹點(信用卡)", "0")))
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	if len(accounts) != 1 || len(accounts[0].Balances) != 0 || accounts[0].Worth == nil || *accounts[0].Worth != "0.00" {
+		t.Fatalf("accounts = %+v", accounts)
 	}
 }

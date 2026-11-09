@@ -92,8 +92,8 @@ func TestADepositStatementIsStoredInTheAccountsItCovers(t *testing.T) {
 	}
 
 	var salary struct{ kind, unit, amount, balance, memo, counterparty string }
-	if err := pool.QueryRow(ctx, `SELECT t.kind, t.unit, t.amount::text, t.balance::text, t.memo, t.counterparty
-		FROM transactions t JOIN accounts a ON a.id = t.account_id
+	if err := pool.QueryRow(ctx, `SELECT t.kind, u.symbol, t.amount::text, t.balance::text, t.memo, t.counterparty
+		FROM transactions t JOIN accounts a ON a.id = t.account_id JOIN units u ON u.id = t.unit_id
 		WHERE a.number = '1234567***890' AND t.line_no = 0`).Scan(
 		&salary.kind, &salary.unit, &salary.amount, &salary.balance, &salary.memo, &salary.counterparty); err != nil {
 		t.Fatal(err)
@@ -103,8 +103,8 @@ func TestADepositStatementIsStoredInTheAccountsItCovers(t *testing.T) {
 		t.Fatalf("salary line = %+v", salary)
 	}
 
-	balances, err := pool.Query(ctx, `SELECT a.number, b.unit, b.as_of, b.amount::text FROM balances b
-		JOIN accounts a ON a.id = b.account_id ORDER BY a.number, b.as_of`)
+	balances, err := pool.Query(ctx, `SELECT a.number, u.symbol, b.as_of, b.amount::text FROM balances b
+		JOIN accounts a ON a.id = b.account_id JOIN units u ON u.id = b.unit_id ORDER BY a.number, b.as_of`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestAdjoiningStatementsKeepEachOthersBalancesWhicheverArrivesFirst(t *testi
 	storeDeposit(t, pool, "october.eml", october)
 	storeDeposit(t, pool, "september.eml", september)
 	var n int
-	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM balances WHERE as_of = '2026-09-30' AND unit = 'TWD'").Scan(&n); err != nil {
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM balances b JOIN units u ON u.id = b.unit_id WHERE b.as_of = '2026-09-30' AND u.symbol = 'TWD'").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {

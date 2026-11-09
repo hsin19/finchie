@@ -255,6 +255,28 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Account" }
+    post:
+      operationId: createAccount
+      summary: An account the owner keeps by hand
+      description: |
+        Of any kind but a card's (ADR 0019): its institution `owner`, and the name it is opened with its
+        own (`label`), as a bank's account has the bank's; no two accounts go by one name the owner gave.
+        It holds what `PUT /api/accounts/{id}/holdings` says.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountCreated" }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
 
   /api/accounts/{id}:
     get:
@@ -276,7 +298,8 @@ paths:
       description: |
         Both optional (ADR 0016): a field left out stays as it is, an empty string clears it. A full
         number must fit the masked number the bank prints, digit for digit; links are worked out
-        again, since it fits counterparties too.
+        again, since it fits counterparties too. No two accounts go by one name the owner gave (`409`);
+        cleared, an account goes by its own again.
       parameters:
         - $ref: "#/components/parameters/Id"
       requestBody:
@@ -289,6 +312,83 @@ paths:
           description: Updated
         "400":
           $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+
+  /api/accounts/{id}/holdings:
+    put:
+      operationId: updateHoldings
+      summary: What an account the owner keeps holds today, and what will lapse
+      description: |
+        Only for an account the owner opened (ADR 0019): today's snapshot of the whole account, as an
+        exchange's is (ADR 0018). A later one the same day replaces it, and a unit it held before and
+        no longer lists is at 0. Each unit is of the kind the account holds (money, securities by name,
+        points, ADR 0020); what will lapse replaces all the account had.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HoldingsUpdate" }
+      responses:
+        "204":
+          description: Updated
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+
+  /api/units:
+    get:
+      operationId: listUnits
+      summary: The units amounts are counted in
+      description: Every unit a source has reported or the owner has named (ADR 0020), optionally of one kind.
+      parameters:
+        - name: kind
+          in: query
+          schema: { $ref: "#/components/schemas/UnitKind" }
+      responses:
+        "200":
+          description: Units by kind and symbol
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Unit" }
+
+  /api/units/{id}/price:
+    put:
+      operationId: setUnitPrice
+      summary: What one unit is worth, by the owner's word
+      description: |
+        A price of the owner's, as of now (ADR 0020). Like any price it counts while it is the unit's
+        newest, whatever the source: a rate or a close of a later day takes over from it. A later one the
+        same day replaces it.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnitPriceUpdate" }
+      responses:
+        "204":
+          description: Set
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: clearUnitPrice
+      summary: Withdraw every price the owner gave a unit
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Cleared
         "404":
           $ref: "#/components/responses/Problem"
 
@@ -587,7 +687,7 @@ components:
 
     AccountKind:
       type: string
-      enum: [credit_card, deposit, securities, exchange]
+      enum: [credit_card, deposit, securities, exchange, points]
 
     AccountContinuity:
       type: string
@@ -596,7 +696,7 @@ components:
 
     Account:
       type: object
-      required: [id, institution, kind, number, balances, continuity, gaps]
+      required: [id, institution, kind, number, balances, continuity, gaps, expiries]
       properties:
         id: { type: integer, format: int64 }
         institution: { type: string, example: esun }
@@ -620,6 +720,10 @@ components:
         gaps:
           type: array
           items: { $ref: "#/components/schemas/BalanceGap" }
+        expiries:
+          type: array
+          description: "What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)"
+          items: { $ref: "#/components/schemas/Expiry" }
 
     AccountDetail:
       allOf:
@@ -655,6 +759,15 @@ components:
           description: "What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known"
         since: { type: string, format: date, description: The day it was last held at none, from which cost is known }
 
+    Expiry:
+      type: object
+      description: "Points a source says will lapse by a date (ADR 0019): one date's, one month's, or several months' together"
+      required: [unit, amount, by]
+      properties:
+        unit: { type: string, example: 小樹點(信用卡) }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        by: { type: string, format: date }
+
     WorthFrom:
       type: string
       enum: [holdings, valuation]
@@ -670,24 +783,55 @@ components:
         amount: { $ref: "#/components/schemas/Decimal" }
         worth:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
-          description: "In NT$, at the newest rate of its unit; absent for a unit without one"
+          description: "In NT$, at its unit's newest price (ADR 0020); absent for a unit without one"
 
     Balance:
       type: object
       required: [unit, asOf, amount]
       properties:
-        unit: { type: string, description: "ISO 4217, or a points program's code", example: TWD }
+        unit: { type: string, description: "Its unit's symbol: ISO 4217 or a coin's ticker, a security's name, a points program's", example: TWD }
+        unitId: { type: integer, format: int64, description: "Its unit (ADR 0020), for giving it a price; on an account's newest balances" }
         asOf: { type: string, format: date, description: The end of the day it was held }
         amount: { $ref: "#/components/schemas/Decimal" }
         statementId: { type: integer, format: int64, description: "The statement that reported it; absent for a snapshot, such as an exchange's (ADR 0018)" }
         worth:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
-          description: "In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points"
-        rateDay: { type: string, format: date, description: "The day of the rate or close its worth used; absent for NT$" }
+          description: "In NT$, at its unit's newest price (ADR 0020); absent for a unit without one in NT$"
         code: { type: string, description: "A security's code, from the exchanges' lists (ADR 0017)", example: "00878" }
         price:
+          allOf: [{ $ref: "#/components/schemas/Price" }]
+          description: "Its unit's newest price, which its worth used; absent for NT$ and for a unit without one"
+
+    Price:
+      type: object
+      description: "What one unit is worth by its newest price, whatever the source (ADR 0020)"
+      required: [asOf, source, quote, quoted]
+      properties:
+        asOf: { type: string, format: date-time, description: "When the price held: the start of a rate's day, a close's 13:30, an exchange's fetch, the owner's word" }
+        source: { $ref: "#/components/schemas/PriceSource" }
+        quote: { type: string, description: The unit the source priced it in, example: USDT }
+        quoted: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: One unit in the quote unit }
+        twd:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
-          description: "A security's newest close in NT$, which its worth used"
+          description: "One unit in NT$; through the quote unit's own newest price when that is not NT$, absent when that one is not in NT$"
+
+    PriceSource:
+      type: string
+      enum: [fawaz, twse, tpex, max, binance, bitget, owner]
+      description: "The exchange-rate feed (ADR 0015), the stock exchanges' closes (ADR 0017), a crypto exchange's markets (ADR 0018), or the owner"
+
+    UnitKind:
+      type: string
+      enum: [money, security, points]
+
+    Unit:
+      type: object
+      required: [id, kind, symbol]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: "#/components/schemas/UnitKind" }
+        symbol: { type: string, example: 小樹點(信用卡) }
+        code: { type: string, description: "A security's code", example: "00878" }
 
     BalanceGap:
       type: object
@@ -699,11 +843,58 @@ components:
         to: { type: string, format: date }
         unseen: { $ref: "#/components/schemas/Decimal", description: Money that moved between them that no line shows }
 
+    AccountCreate:
+      type: object
+      required: [kind, name]
+      properties:
+        kind:
+          allOf: [{ $ref: "#/components/schemas/AccountKind" }]
+          description: "Any but credit_card"
+        name: { type: string, description: "Its own name (`label`), no other account's", example: 飯店會員 }
+
+    AccountCreated:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer, format: int64 }
+
+    HoldingsUpdate:
+      type: object
+      required: [holdings]
+      properties:
+        holdings:
+          type: array
+          items:
+            type: object
+            required: [unit, amount, expiries]
+            properties:
+              unit: { type: string, description: "Its symbol: a currency or coin, a security's name, a points program's", example: 飯店點數 }
+              amount: { $ref: "#/components/schemas/Decimal" }
+              expiries:
+                type: array
+                items:
+                  type: object
+                  required: [amount, by]
+                  properties:
+                    amount: { $ref: "#/components/schemas/Decimal" }
+                    by: { type: string, format: date }
+
+    UnitPriceUpdate:
+      type: object
+      required: [value]
+      properties:
+        value:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "What one unit is worth in the quote unit: 0 or more"
+        quote:
+          type: string
+          description: "A money unit to price it in, NT$ when left out; one with no price in NT$ gives it no worth"
+
     AccountUpdate:
       type: object
       properties:
         name: { type: string, description: "The owner's name for the account; empty clears it" }
-        fullNumber: { type: string, description: "Digits, spaces and dashes allowed; empty clears it" }
+        fullNumber: { type: string, description: "Where the source prints a masked number, its digits (spaces and dashes allowed); else any. Empty clears it" }
 
     LineCounterpart:
       type: object
@@ -767,8 +958,8 @@ components:
 
     TransactionKind:
       type: string
-      description: A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
-      enum: [purchase, foreign_transaction_fee, annual_fee, refund, rebate, payment, interest, fee, other, buy, sell]
+      description: A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
+      enum: [purchase, foreign_transaction_fee, annual_fee, refund, rebate, payment, interest, fee, other, buy, sell, earn, adjust, redeem]
 
     Transaction:
       type: object

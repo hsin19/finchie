@@ -39,12 +39,12 @@ func day(s string) time.Time {
 func rows(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
 	result, err := pool.Query(t.Context(), `
-		SELECT to_char(b.as_of, 'YYYY-MM-DD') || ' ' || b.unit || ' ' || b.amount::text
-		FROM balances b JOIN accounts a ON a.id = b.account_id
+		SELECT to_char(b.as_of, 'YYYY-MM-DD') || ' ' || u.symbol || ' ' || b.amount::text
+		FROM balances b JOIN accounts a ON a.id = b.account_id JOIN units u ON u.id = b.unit_id
 		WHERE a.institution = 'test' AND a.kind = 'exchange' AND b.statement_id IS NULL
 		UNION ALL
-		SELECT to_char(v.as_of, 'YYYY-MM-DD') || ' = ' || v.amount::text || ' ' || v.unit
-		FROM valuations v JOIN accounts a ON a.id = v.account_id
+		SELECT to_char(v.as_of, 'YYYY-MM-DD') || ' = ' || v.amount::text || ' ' || u.symbol
+		FROM valuations v JOIN accounts a ON a.id = v.account_id JOIN units u ON u.id = v.unit_id
 		WHERE a.institution = 'test'
 		ORDER BY 1`)
 	if err != nil {
@@ -90,6 +90,49 @@ func TestASnapshotReplacesTheDaysAndPutsWhatTheAccountNoLongerHoldsAtZero(t *tes
 	}
 	if got := rows(t, pool); !slices.Equal(got, want) {
 		t.Fatalf("rows =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestAnExchangesPricesAreKeptAsOfTheFetchOnePerCoinAndDay(t *testing.T) {
+	pool := testdb.Pool(t)
+	ctx := t.Context()
+	price := func(s string) *big.Rat { r, _ := new(big.Rat).SetString(s); return r }
+	at := func(hour int) time.Time { return time.Date(2026, 11, 8, hour, 0, 0, 0, time.UTC) }
+	store := func(at time.Time, btc string) {
+		t.Helper()
+		snapshot := Snapshot{Holdings: held("BTC", "0.1", "BGB", "10", "USDT", "5")}
+		snapshot.price("BTC", "USDT", price(btc))
+		snapshot.price("BGB", "USDT", price("0.85"))
+		snapshot.price("USDT", "USDT", price("1")) // never in itself
+		if err := Store(ctx, pool, "binance", at, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store(at(1), "100000")
+	store(at(7), "101000.5") // later the same day in Taipei: replaces the day's
+	result, err := pool.Query(ctx, `
+		SELECT u.symbol || ' ' || to_char(p.as_of AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI') || ' ' || p.source || ': '
+		       || p.amount::text || ' = ' || p.quote_amount::text || ' ' || q.symbol
+		FROM prices p JOIN units u ON u.id = p.unit_id JOIN units q ON q.id = p.quote_unit_id
+		WHERE p.source = 'binance'
+		ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for result.Next() {
+		var row string
+		if err := result.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, row)
+	}
+	want := []string{
+		"BGB 2026-11-08 15:00 binance: 1 = 0.85 USDT",
+		"BTC 2026-11-08 15:00 binance: 1 = 101000.5 USDT",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("prices =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 

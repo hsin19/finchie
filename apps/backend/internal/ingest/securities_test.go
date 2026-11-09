@@ -63,7 +63,9 @@ func securitiesAccount(t *testing.T, pool *pgxpool.Pool) int64 {
 func holdingsOf(t *testing.T, pool *pgxpool.Pool, account int64) []string {
 	t.Helper()
 	rows, err := pool.Query(t.Context(),
-		"SELECT unit || ' ' || to_char(as_of, 'MM-DD') || ' ' || amount::text FROM balances WHERE account_id = $1 ORDER BY as_of, unit", account)
+		`SELECT u.symbol || ' ' || to_char(b.as_of, 'MM-DD') || ' ' || b.amount::text
+		 FROM balances b JOIN units u ON u.id = b.unit_id
+		 WHERE b.account_id = $1 AND u.kind = 'security' ORDER BY b.as_of, u.symbol`, account)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +95,8 @@ func TestASecuritiesStatementStoresTradesAsSharesAndHoldingsAsBalances(t *testin
 	account := securitiesAccount(t, pool)
 
 	rows, err := pool.Query(t.Context(), `
-		SELECT t.unit, t.kind, t.amount::text, tr.amount::text, tr.net::text
-		FROM transactions t JOIN trades tr ON tr.transaction_id = t.id
+		SELECT u.symbol, t.kind, t.amount::text, tr.amount::text, tr.net::text
+		FROM transactions t JOIN trades tr ON tr.transaction_id = t.id JOIN units u ON u.id = t.unit_id
 		WHERE t.account_id = $1 ORDER BY t.line_no`, account)
 	if err != nil {
 		t.Fatal(err)

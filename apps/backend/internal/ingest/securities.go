@@ -47,7 +47,7 @@ func convertSecurities(documentID int64, s *parserv1.SecuritiesStatement) (store
 			errs = append(errs, fmt.Errorf("%s: %s listed twice", where, h.GetName()))
 		}
 		held[h.GetName()] = true
-		balance := dbq.InsertBalanceParams{Unit: h.GetName(), AsOf: statement.ClosingDate}
+		balance := storedBalance{unit: h.GetName(), InsertBalanceParams: dbq.InsertBalanceParams{AsOf: statement.ClosingDate}}
 		balance.Amount, errs = requiredNumeric(h.GetShares(), where+" shares", errs)
 		reported.balances = append(reported.balances, balance)
 	}
@@ -55,7 +55,7 @@ func convertSecurities(documentID int64, s *parserv1.SecuritiesStatement) (store
 	result := stored{}
 	for i, t := range s.GetTrades() {
 		at := fmt.Sprintf("trade %d", i)
-		line := dbq.InsertTransactionsParams{LineNo: int32(i), Unit: t.GetName(), Description: t.GetName()}
+		line := storedLine{unit: t.GetName(), InsertTransactionsParams: dbq.InsertTransactionsParams{LineNo: int32(i), Description: t.GetName()}}
 		shares := t.GetShares()
 		switch t.GetSide() {
 		case parserv1.TradeSide_TRADE_SIDE_BUY:

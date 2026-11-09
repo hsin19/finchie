@@ -44,10 +44,14 @@ func hold(t *testing.T, queries *dbq.Queries, names ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range names {
+	units, err := queries.EnsureUnits(ctx, dbq.EnsureUnitsParams{Kind: "security", Symbols: names})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unit := range units {
 		var shares pgtype.Numeric
 		_ = shares.Scan("1000")
-		if err := queries.InsertBalance(ctx, dbq.InsertBalanceParams{AccountID: account, Unit: name, AsOf: day, Amount: shares, StatementID: statement}); err != nil {
+		if err := queries.InsertBalance(ctx, dbq.InsertBalanceParams{AccountID: account, UnitID: unit.ID, AsOf: day, Amount: shares, StatementID: statement}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -56,17 +60,24 @@ func hold(t *testing.T, queries *dbq.Queries, names ...string) {
 func stored(t *testing.T, worker *Worker) []string {
 	t.Helper()
 	pool := worker.pool
-	rows, err := pool.Query(t.Context(), "SELECT to_char(day, 'YYYY-MM-DD'), name, code, market, close::text FROM quotes ORDER BY name")
+	rows, err := pool.Query(t.Context(), `
+		SELECT to_char(p.as_of AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI'), u.symbol, u.code, u.market, p.source,
+		       p.amount::text, p.quote_amount::text, q.symbol
+		FROM prices p
+		JOIN units u ON u.id = p.unit_id
+		JOIN units q ON q.id = p.quote_unit_id
+		WHERE u.kind = 'security'
+		ORDER BY u.symbol`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got []string
 	for rows.Next() {
-		var day, name, code, market, closing string
-		if err := rows.Scan(&day, &name, &code, &market, &closing); err != nil {
+		var asOf, name, code, market, source, amount, closing, quote string
+		if err := rows.Scan(&asOf, &name, &code, &market, &source, &amount, &closing, &quote); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, fmt.Sprintf("%s %s %s %s %s", day, name, code, market, closing))
+		got = append(got, fmt.Sprintf("%s %s %s %s %s: %s = %s %s", asOf, name, code, market, source, amount, closing, quote))
 	}
 	return got
 }
@@ -83,12 +94,12 @@ func TestTheClosesOfHeldSecuritiesAreKeptByNameFromBothExchanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Names as statements spell them (一, not ⼀), closes as printed; nothing for a name no one holds,
-	// nor for one that did not trade.
+	// Names as statements spell them (一, not ⼀), closes as printed, as of the close; nothing for a name
+	// no one holds, nor for one that did not trade.
 	want := []string{
-		"2026-11-06 範例一號 00999A twse 8.00",
-		"2026-11-06 範例航運 5678 tpex 25.05",
-		"2026-11-06 範例電子 1234 twse 50.50",
+		"2026-11-06 13:30 範例一號 00999A twse twse: 1 = 8.00 TWD",
+		"2026-11-06 13:30 範例航運 5678 tpex tpex: 1 = 25.05 TWD",
+		"2026-11-06 13:30 範例電子 1234 twse twse: 1 = 50.50 TWD",
 	}
 	if got := stored(t, worker); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("quotes = %v, want %v", got, want)

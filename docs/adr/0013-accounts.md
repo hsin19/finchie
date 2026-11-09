@@ -13,7 +13,7 @@ There is no account setup. A source that reports an account Finchie has not seen
 | `credit_card` | Institution: one bill | Empty | Not an account the owner has: a container for the bank's card lines, which need one to belong to. It holds no balance and is not listed among the accounts. Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
 | `deposit` | Account number | As the bank prints it, usually masked (`12345**6789*`). The parser normalizes it so one account reads the same every month | One account can hold several currencies; its balance is per currency |
 
-More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one (`securities` came with ADR 0017, `exchange` with ADR 0018).
+More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one (`securities` came with ADR 0017, `exchange` with ADR 0018, `points` with ADR 0019).
 
 An account outlives every report of it: re-parsing or deleting a document never deletes one, so whatever is attached to an account stays.
 
@@ -26,13 +26,13 @@ Balances are seen from the owner's side: money held is positive, money owed nega
 
 ### Units: money, and values that are not
 
-Every amount has a unit (ADR 0004 says a currency): the ISO 4217 code for money, or a program's own code for points and miles, one per program, since one bank's points and an airline's miles never add up. Columns that held a currency as `CHAR(3)` take a unit as `TEXT`. What a point is worth in NT$, for net worth, comes with the first points source.
+Every amount has a unit (ADR 0004 says a currency): the ISO 4217 code for money, or a program's own code for points and miles, one per program, since one bank's points and an airline's miles never add up. Columns that held a currency as `CHAR(3)` take a unit as `TEXT` (ADR 0020: a row refers to a unit in `units`, its kind and symbol). What a point is worth in NT$, for net worth, comes with the first points source (came with ADR 0020's prices).
 
 ### Values that expire
 
-Points and miles lapse, by rules of three sorts: rolling (the whole balance stays valid while the account has activity within a period), fixed (each amount earned lapses a set time after it was earned, or on a set date), or never. An account carries its rule, set by the source that knows the program, never by the owner. Only `none` exists for now, and every account has it; rolling and fixed rules, with what they need (the period, the date), come with the first points source.
+Points and miles lapse, by rules of three sorts: rolling (the whole balance stays valid while the account has activity within a period), fixed (each amount earned lapses a set time after it was earned, or on a set date), or never. An account carries its rule, set by the source that knows the program, never by the owner. Only `none` exists for now, and every account has it; rolling and fixed rules, with what they need (the period, the date), come with the first points source. (Corrected by ADR 0019: card bills print what lapses by when, which is kept as reported, so no rule is needed and every account keeps `none`.)
 
-A line's `status` is `active`, or `expired` when a value it brought lapsed, so expiry can be shown without changing or deleting the line as reported. Every line is `active` for now. A rule that spends the oldest points first may have to split a line partly spent before it lapsed; that too is for the first points source.
+A line's `status` is `active`, or `expired` when a value it brought lapsed, so expiry can be shown without changing or deleting the line as reported. Every line is `active` for now. A rule that spends the oldest points first may have to split a line partly spent before it lapsed; that too is for the first points source. (A card bill prints a period's totals, which ADR 0019 keeps as lines, one per column; none of them is a single earning to split.)
 
 ### Statements are one source
 

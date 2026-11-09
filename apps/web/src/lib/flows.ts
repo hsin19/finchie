@@ -20,14 +20,19 @@ export function isTrade(t: Pick<Transaction, "accountKind">): boolean {
     return t.accountKind === "securities";
 }
 
+/** A points line: points, not money, so neither spent nor received (ADR 0019). */
+export function isPoints(t: Pick<Transaction, "accountKind">): boolean {
+    return t.accountKind === "points";
+}
+
 /** The line's flow, net of the children folded into it. */
 export function flowOf(t: Line): string {
     return t.flow ?? (t.accountKind === "deposit" ? t.amount : negate(net(t)));
 }
 
-/** What the lines came to per unit, transfers and trades left out: TWD first. */
+/** What the lines came to per unit, transfers, trades, and points left out: TWD first. */
 export function netByUnit(lines: Line[]): { unit: string; amount: string; }[] {
-    const counted = lines.filter(t => !isTransfer(t) && !isTrade(t));
+    const counted = lines.filter(t => !isTransfer(t) && !isTrade(t) && !isPoints(t));
     const units = [...new Set(counted.map(t => t.unit ?? "TWD"))].sort((a, b) => Number(b === "TWD") - Number(a === "TWD") || a.localeCompare(b));
     return units.map(unit => ({ unit, amount: sum(counted.filter(t => (t.unit ?? "TWD") === unit).map(flowOf)) }));
 }

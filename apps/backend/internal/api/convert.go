@@ -94,7 +94,7 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 	accountKind := AccountKind(row.AccountKind)
 	tx.AccountKind = &accountKind
 	// A card bill's container is no account the owner has (ADR 0013): a card line names its card instead.
-	if accountKind != CreditCard {
+	if accountKind != AccountKindCreditCard {
 		tx.AccountId, tx.AccountNumber = &row.AccountID, &row.AccountNumber
 	}
 	if row.Balance.Valid {
@@ -156,7 +156,7 @@ func lineCounterpart(id, statementID *int64, date pgtype.Date, accountID *int64,
 		AccountKind: AccountKind(*kind), Institution: *institution, AccountName: name,
 	}
 	// A card bill's container is no account to point at (ADR 0013).
-	if counterpart.AccountKind != CreditCard {
+	if counterpart.AccountKind != AccountKindCreditCard {
 		counterpart.AccountId, counterpart.AccountNumber = accountID, number
 	}
 	return &counterpart

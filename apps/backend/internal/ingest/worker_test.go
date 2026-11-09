@@ -128,7 +128,7 @@ func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
 		t.Fatalf("account = %s %q", kind, number)
 	}
 	var lines int
-	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions WHERE account_id = $1 AND unit = 'TWD' AND status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions t JOIN units u ON u.id = t.unit_id WHERE t.account_id = $1 AND u.symbol = 'TWD' AND u.kind = 'money' AND t.status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
 		t.Fatalf("lines in the account = %d (%v)", lines, err)
 	}
 

@@ -31,9 +31,9 @@ func keeps(a, b span) bool {
 
 // trimOverlaps works out, for the account in the unit, every pair the stored statement makes with
 // another that shares days with it, and removes the lines and balances of whichever does not keep them.
-func trimOverlaps(ctx context.Context, queries *dbq.Queries, this span, accountID int64, unit string) error {
+func trimOverlaps(ctx context.Context, queries *dbq.Queries, this span, accountID, unitID int64) error {
 	others, err := queries.OverlappingDepositStatements(ctx, dbq.OverlappingDepositStatementsParams{
-		StatementID: this.id, AccountID: accountID, Unit: unit,
+		StatementID: this.id, AccountID: accountID, UnitID: unitID,
 	})
 	if err != nil {
 		return fmt.Errorf("overlapping statements: %w", err)
@@ -45,12 +45,12 @@ func trimOverlaps(ctx context.Context, queries *dbq.Queries, this span, accountI
 		}
 		from, to := pgtype.Date{Time: keeper.start, Valid: true}, pgtype.Date{Time: keeper.end, Valid: true}
 		if err := queries.TrimStatementLines(ctx, dbq.TrimStatementLinesParams{
-			StatementID: other.id, AccountID: accountID, Unit: unit, FromDate: from, ToDate: to,
+			StatementID: other.id, AccountID: accountID, UnitID: unitID, FromDate: from, ToDate: to,
 		}); err != nil {
 			return fmt.Errorf("trim lines: %w", err)
 		}
 		if err := queries.TrimStatementBalances(ctx, dbq.TrimStatementBalancesParams{
-			StatementID: other.id, AccountID: accountID, Unit: unit, FromDate: from, ToDate: to, KeeperID: keeper.id,
+			StatementID: other.id, AccountID: accountID, UnitID: unitID, FromDate: from, ToDate: to, KeeperID: keeper.id,
 		}); err != nil {
 			return fmt.Errorf("trim balances: %w", err)
 		}

@@ -36,12 +36,17 @@ func TestAccountGapsCountsAccountsWhoseBalancesDoNotJoin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	units, err := queries.EnsureUnits(ctx, dbq.EnsureUnitsParams{Kind: "money", Symbols: []string{"TWD"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	twd := units[0].ID
 	for asOf, amount := range map[string]string{"2026-08-31": "100", "2026-09-30": "250"} {
 		var n pgtype.Numeric
 		if err := n.Scan(amount); err != nil {
 			t.Fatal(err)
 		}
-		if err := queries.InsertBalance(ctx, dbq.InsertBalanceParams{AccountID: account, Unit: "TWD", AsOf: day(asOf), Amount: n, StatementID: statement}); err != nil {
+		if err := queries.InsertBalance(ctx, dbq.InsertBalanceParams{AccountID: account, UnitID: twd, AsOf: day(asOf), Amount: n, StatementID: statement}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -50,7 +55,7 @@ func TestAccountGapsCountsAccountsWhoseBalancesDoNotJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := queries.InsertTransactions(ctx, []dbq.InsertTransactionsParams{{
-		StatementID: statement, AccountID: account, Unit: "TWD", TransactionDate: day("2026-09-10"),
+		StatementID: statement, AccountID: account, UnitID: twd, TransactionDate: day("2026-09-10"),
 		Description: "轉入", Kind: "other", Amount: hundred,
 	}}); err != nil {
 		t.Fatal(err)

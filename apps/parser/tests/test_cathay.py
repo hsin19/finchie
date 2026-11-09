@@ -5,7 +5,7 @@ import pytest
 from fakes import FakeDocument
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import Kind
+from finchie_parser.model import Kind, PointsKind
 from finchie_parser.parsers.cathay import CathayParser
 
 PAGE_1 = """信用卡帳單 115年04月
@@ -135,3 +135,36 @@ def test_cathay_warns_when_payments_do_not_add_up_to_the_printed_subtotal() -> N
     assert "繳款小計" in parsed.warnings[0]
     # The new charges still reconcile: payments are not part of them.
     assert parsed.statement.reconciliation.balanced
+
+
+# 信用卡回饋總覽 on page 1; its headings are unmapped glyphs, so only the row and the note are text.
+POINTS = """小樹點(信用卡) 3,177 29 0 0 3,206
+◎提醒您，您有88點小樹點(信用卡)於本月到期；共計有669點小樹點(信用卡)將於116年3月31日前陸續到期。"""
+
+
+def test_cathay_reads_its_points_and_what_lapses_by_when() -> None:
+    parsed = CathayParser().parse(FakeDocument([PAGE_1 + "\n" + POINTS, PAGE_2]), ocr=None)
+    [program] = parsed.statement.points
+    assert (program.name, program.closing) == ("小樹點(信用卡)", Decimal(3206))
+    # The closing month's by its last day; the next twelve months' together, that month's included.
+    assert [(e.amount, e.by) for e in program.expiries] == [
+        (Decimal(88), date(2026, 4, 30)),
+        (Decimal(669), date(2027, 3, 31)),
+    ]
+    assert parsed.warnings == []
+
+
+def test_cathay_takes_redeemed_points_off_and_warns_when_they_do_not_add_up() -> None:
+    parsed = CathayParser().parse(FakeDocument([PAGE_1 + "\n小樹點(信用卡) 3,161 107 0 100 3,170", PAGE_2]), ocr=None)
+    [program] = parsed.statement.points
+    assert program.closing == Decimal(3170)
+    # Only columns with a figure are lines, under the bill's labels; points used are negative.
+    assert [(line.label, line.kind, line.amount) for line in program.lines] == [
+        ("本期新增/扣除", PointsKind.EARN, Decimal(107)),
+        ("本期兌/轉換", PointsKind.REDEEM, Decimal(-100)),
+    ]
+    assert parsed.warnings == ["小樹點(信用卡): opening 3161 plus added less used is 3168, but the bill prints 3170"]
+
+
+def test_cathay_bill_without_a_points_table_has_no_points() -> None:
+    assert parse().points == []

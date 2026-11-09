@@ -21,15 +21,15 @@ JOIN statements o ON o.id <> s.id
     AND o.period_start <= s.closing_date
     AND o.closing_date >= s.period_start
 WHERE s.id = @statement_id
-  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = @account_id AND t.unit = @unit)
-    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = @account_id AND b.unit = @unit));
+  AND (EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = o.id AND t.account_id = @account_id AND t.unit_id = @unit_id)
+    OR EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = o.id AND b.account_id = @account_id AND b.unit_id = @unit_id));
 
 -- name: TrimStatementLines :exec
 -- A statement's lines of an account in a currency on the days another statement keeps.
 DELETE FROM transactions
 WHERE statement_id = @statement_id
   AND account_id = @account_id
-  AND unit = @unit
+  AND unit_id = @unit_id
   AND transaction_date BETWEEN @from_date AND @to_date;
 
 -- name: TrimStatementBalances :exec
@@ -39,11 +39,11 @@ WHERE statement_id = @statement_id
 DELETE FROM balances b
 WHERE b.statement_id = @statement_id::bigint
   AND b.account_id = @account_id
-  AND b.unit = @unit
+  AND b.unit_id = @unit_id
   AND b.as_of <= @to_date
   AND (b.as_of >= @from_date OR EXISTS (
       SELECT 1 FROM balances k
-      WHERE k.statement_id = @keeper_id::bigint AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of));
+      WHERE k.statement_id = @keeper_id::bigint AND k.account_id = b.account_id AND k.unit_id = b.unit_id AND k.as_of = b.as_of));
 
 -- name: InsertStatement :one
 -- The bill's columns are null for a deposit statement (ADR 0013).
@@ -54,9 +54,9 @@ VALUES (@document_id, @institution, @kind, @period_start, @closing_date, @due_da
 RETURNING id;
 
 -- name: InsertTransactions :copyfrom
-INSERT INTO transactions (statement_id, account_id, unit, line_no, transaction_date, posting_date, description, kind,
+INSERT INTO transactions (statement_id, account_id, unit_id, line_no, transaction_date, posting_date, description, kind,
                           amount, original_amount, original_currency, country, card_last4, memo, counterparty, balance)
-VALUES (@statement_id, @account_id, @unit, @line_no, @transaction_date, @posting_date, @description, @kind,
+VALUES (@statement_id, @account_id, @unit_id, @line_no, @transaction_date, @posting_date, @description, @kind,
         @amount, @original_amount, @original_currency, @country, @card_last4, @memo, @counterparty, @balance);
 
 -- name: ListStatements :many
@@ -87,7 +87,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, t.unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
        (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -100,6 +100,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id

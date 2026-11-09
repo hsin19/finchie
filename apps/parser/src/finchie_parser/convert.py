@@ -14,6 +14,8 @@ from finchie_parser.model import (
     DepositStatement,
     Kind,
     ParseResult,
+    PointsKind,
+    PointsProgram,
     Reconciliation,
     SecuritiesStatement,
     SecuritiesTrade,
@@ -83,6 +85,26 @@ def _statement(statement: Statement) -> pb.Statement:
         total_due=_decimal(statement.total_due),
         transactions=[_transaction(tx) for tx in statement.transactions],
         reconciliation=_reconciliation(reconciliation),
+        points=[_points_program(program) for program in statement.points],
+    )
+
+
+_POINTS_KINDS = {
+    PointsKind.EARN: pb.POINTS_LINE_KIND_EARN,
+    PointsKind.ADJUST: pb.POINTS_LINE_KIND_ADJUST,
+    PointsKind.REDEEM: pb.POINTS_LINE_KIND_REDEEM,
+}
+
+
+def _points_program(program: PointsProgram) -> pb.PointsProgram:
+    return pb.PointsProgram(
+        name=program.name,
+        closing=_decimal(program.closing),
+        expiries=[pb.PointsExpiry(amount=_decimal(e.amount), by=_date(e.by)) for e in program.expiries],
+        lines=[
+            pb.PointsLine(label=line.label, kind=_POINTS_KINDS[line.kind], amount=_decimal(line.amount))
+            for line in program.lines
+        ],
     )
 
 

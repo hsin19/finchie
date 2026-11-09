@@ -12,8 +12,9 @@ import (
 )
 
 const accountTrades = `-- name: AccountTrades :many
-SELECT t.unit, t.transaction_date, t.kind, t.amount AS shares, tr.amount, tr.fee, tr.tax
+SELECT u.symbol AS unit, t.transaction_date, t.kind, t.amount AS shares, tr.amount, tr.fee, tr.tax
 FROM transactions t
+JOIN units u ON u.id = t.unit_id
 JOIN trades tr ON tr.transaction_id = t.id
 WHERE t.account_id = $1
 ORDER BY t.transaction_date, t.statement_id, t.line_no
@@ -72,35 +73,6 @@ func (q *Queries) ClearEmptyHoldings(ctx context.Context, accountID int64) error
 	return err
 }
 
-const heldSecurities = `-- name: HeldSecurities :many
-SELECT DISTINCT b.unit
-FROM balances b
-JOIN accounts a ON a.id = b.account_id
-WHERE a.kind = 'securities'
-ORDER BY b.unit
-`
-
-// The securities some account holds or held, by name: the quotes worth keeping.
-func (q *Queries) HeldSecurities(ctx context.Context) ([]string, error) {
-	rows, err := q.db.Query(ctx, heldSecurities)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var unit string
-		if err := rows.Scan(&unit); err != nil {
-			return nil, err
-		}
-		items = append(items, unit)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const implyEmptyHoldings = `-- name: ImplyEmptyHoldings :exec
 WITH statements_of AS (
     SELECT DISTINCT s.id, s.closing_date
@@ -108,16 +80,16 @@ WITH statements_of AS (
     WHERE s.kind = 'securities'
       AND (EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = s.id AND b.account_id = $1)
            OR EXISTS (SELECT 1 FROM transactions t WHERE t.statement_id = s.id AND t.account_id = $1))
-), units AS (
-    SELECT unit FROM balances WHERE account_id = $1
+), held AS (
+    SELECT unit_id FROM balances WHERE account_id = $1
     UNION
-    SELECT unit FROM transactions WHERE account_id = $1
+    SELECT unit_id FROM transactions WHERE account_id = $1
 )
-INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
-SELECT $1, u.unit, so.closing_date, 0, so.id
+INSERT INTO balances (account_id, unit_id, as_of, amount, statement_id)
+SELECT $1, h.unit_id, so.closing_date, 0, so.id
 FROM statements_of so
-CROSS JOIN units u
-WHERE NOT EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = so.id AND b.account_id = $1 AND b.unit = u.unit)
+CROSS JOIN held h
+WHERE NOT EXISTS (SELECT 1 FROM balances b WHERE b.statement_id = so.id AND b.account_id = $1 AND b.unit_id = h.unit_id)
 `
 
 // A securities statement's holdings are the whole account: every security the account has held or
@@ -163,32 +135,6 @@ func (q *Queries) InsertTrades(ctx context.Context, arg InsertTradesParams) erro
 		arg.Nets,
 		arg.Prepaids,
 		arg.StatementID,
-	)
-	return err
-}
-
-const upsertQuotes = `-- name: UpsertQuotes :exec
-INSERT INTO quotes (day, name, code, market, close)
-SELECT unnest($1::date[]), unnest($2::text[]), unnest($3::text[]), unnest($4::text[]),
-       unnest($5::numeric[])
-ON CONFLICT (day, name) DO UPDATE SET code = EXCLUDED.code, market = EXCLUDED.market, close = EXCLUDED.close
-`
-
-type UpsertQuotesParams struct {
-	Days    []pgtype.Date
-	Names   []string
-	Codes   []string
-	Markets []string
-	Closes  []pgtype.Numeric
-}
-
-func (q *Queries) UpsertQuotes(ctx context.Context, arg UpsertQuotesParams) error {
-	_, err := q.db.Exec(ctx, upsertQuotes,
-		arg.Days,
-		arg.Names,
-		arg.Codes,
-		arg.Markets,
-		arg.Closes,
 	)
 	return err
 }

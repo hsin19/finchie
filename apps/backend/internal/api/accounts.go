@@ -41,9 +41,18 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 		return nil, fmt.Errorf("latest valuations: %w", err)
 	}
 
+	expiries, err := queries.LatestExpiries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest expiries: %w", err)
+	}
+
 	valuationOf := map[int64]*dbq.LatestValuationsRow{}
 	for i := range valuations {
 		valuationOf[valuations[i].AccountID] = &valuations[i]
+	}
+	expiriesOf := map[int64][]Expiry{}
+	for _, e := range expiries {
+		expiriesOf[e.AccountID] = append(expiriesOf[e.AccountID], toExpiry(e))
 	}
 	balancesOf := map[int64][]Balance{}
 	for _, b := range latest {
@@ -60,7 +69,9 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 	}
 	accounts := make(ListAccounts200JSONResponse, 0, len(rows))
 	for _, row := range rows {
-		accounts = append(accounts, toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID], unshown[row.ID], valuationOf[row.ID]))
+		account := toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID], unshown[row.ID], valuationOf[row.ID])
+		account.Expiries = append(account.Expiries, expiriesOf[row.ID]...)
+		accounts = append(accounts, account)
 	}
 	return accounts, nil
 }
@@ -89,6 +100,10 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	valuations, err := queries.LatestValuations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("latest valuations: %w", err)
+	}
+	expiryRows, err := queries.LatestExpiries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest expiries: %w", err)
 	}
 
 	history := make([]Balance, 0, len(rows))
@@ -126,11 +141,16 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		held = &list
 	}
 	account := toAccount(row, latest, gaps, unshown, valuation)
+	for _, e := range expiryRows {
+		if e.AccountID == request.Id {
+			account.Expiries = append(account.Expiries, toExpiry(e))
+		}
+	}
 	return GetAccount200JSONResponse(AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
 		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
-		Gaps: account.Gaps, History: history, Positions: held,
+		Gaps: account.Gaps, Expiries: account.Expiries, History: history, Positions: held,
 	}), nil
 }
 
@@ -173,13 +193,18 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 // line of, as one whose statements print only its balance: nothing could show that move, so the account
 // cannot be checked (ADR 0013). An exchange reports what it holds and nothing else (ADR 0018).
 func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, unshown bool, valuation *dbq.LatestValuationsRow) Account {
+	// Only what statements report has lines to join balances with: snapshots alone, an exchange's or the
+	// owner's, cannot be checked (ADR 0018, ADR 0019).
+	reportedByStatements := slices.ContainsFunc(balances, func(b Balance) bool { return b.StatementId != nil })
 	continuity := Unknown
-	if (row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities) && !unshown {
+	checkable := row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities || row.Kind == ingest.KindPoints
+	if checkable && reportedByStatements && !unshown {
 		continuity = Checked
 	}
 	newest := newestDay(balances)
-	if row.Kind == ingest.KindSecurities || row.Kind == ingest.KindExchange {
-		// A security or a coin at 0 is one the account no longer holds (ADR 0017, ADR 0018).
+	reported := len(balances) > 0
+	if row.Kind == ingest.KindSecurities || row.Kind == ingest.KindExchange || row.Kind == ingest.KindPoints {
+		// A security, a coin, or a program at 0 is one the account no longer holds (ADR 0017, 0018, 0019).
 		balances = slices.DeleteFunc(balances, func(b Balance) bool { return isZero(b.Amount) })
 	}
 	if balances == nil {
@@ -191,14 +216,22 @@ func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, uns
 	account := Account{
 		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
 		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Balances: balances, Continuity: continuity,
-		Gaps: gaps,
+		Gaps: gaps, Expiries: []Expiry{},
 	}
 	if valuation != nil {
 		v := toValuation(*valuation)
 		account.Valuation = &v
 	}
 	account.Worth, account.WorthFrom = worthOf(balances, account.Valuation, newest)
+	if reported && len(balances) == 0 {
+		// Its sources say it holds nothing at all.
+		account.Worth, account.WorthFrom = ptr("0.00"), ptr(WorthFromHoldings)
+	}
 	return account
+}
+
+func toExpiry(e dbq.LatestExpiriesRow) Expiry {
+	return Expiry{Unit: e.Unit, Amount: decimalString(e.Amount), By: openapi_types.Date{Time: e.LapsesBy.Time}}
 }
 
 // newestDay is the day of the newest of the account's balances, zero ones included: a snapshot lists a
@@ -222,21 +255,25 @@ func toValuation(v dbq.LatestValuationsRow) Valuation {
 	return valuation
 }
 
-// toLatestBalance adds the balance's worth in NT$ at the newest rate of its unit (ADR 0015).
+// toLatestBalance adds the balance's unit, its newest price, and its worth in NT$ at that price (ADR 0020).
 func toLatestBalance(b dbq.LatestBalancesRow) Balance {
 	balance := toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID)
+	balance.UnitId = &b.UnitID
+	balance.Code = b.Code
 	if b.Worth.Valid {
 		worth := decimalString(b.Worth)
 		balance.Worth = &worth
 	}
-	if b.RateDay.Valid && b.Unit != "TWD" {
-		balance.RateDay = &openapi_types.Date{Time: b.RateDay.Time}
-	}
-	if b.Code != "" {
-		balance.Code = &b.Code
-	}
-	if b.Price.Valid {
-		price := decimalString(b.Price)
+	// NT$ is worth itself, with no price of its own.
+	if b.PriceSource != nil && b.PriceQuote != nil {
+		price := Price{
+			AsOf: b.PricedAt.Time, Source: PriceSource(*b.PriceSource), Quote: *b.PriceQuote,
+			Quoted: decimalString(b.PriceQuoted),
+		}
+		if b.PriceTwd.Valid {
+			twd := decimalString(b.PriceTwd)
+			price.Twd = &twd
+		}
 		balance.Price = &price
 	}
 	return balance
@@ -316,16 +353,27 @@ func (s *Server) UpdateAccount(ctx context.Context, request UpdateAccountRequest
 	}
 	if full := request.Body.FullNumber; full != nil {
 		params.SetFullNumber = true
-		digits := strings.NewReplacer(" ", "", "-", "").Replace(*full)
-		if digits != "" {
-			if !fitsMasked(row.Number, digits) {
-				return UpdateAccount400JSONResponse{ProblemJSONResponse{Message: fmt.Sprintf(
-					"%s does not fit %s: the full number has its digits, and the same ones where the bank prints them", *full, row.Number)}}, nil
-			}
+		switch digits := strings.NewReplacer(" ", "", "-", "").Replace(*full); {
+		case digits == "":
+		case row.Number == "":
+			// No source prints a number of the account to fit, such as one the owner keeps (ADR 0019).
+			trimmed := strings.TrimSpace(*full)
+			params.FullNumber = &trimmed
+		case !fitsMasked(row.Number, digits):
+			return UpdateAccount400JSONResponse{ProblemJSONResponse{Message: fmt.Sprintf(
+				"%s does not fit %s: the full number has its digits, and the same ones where the bank prints them", *full, row.Number)}}, nil
+		default:
 			params.FullNumber = &digits
 		}
 	}
-	if _, err := queries.UpdateAccountDetails(ctx, params); err != nil {
+	if _, err := queries.UpdateAccountDetails(ctx, params); nameTaken(err) {
+		// Cleared, the account goes by its own name again, which another may have taken meanwhile.
+		taken := deref(row.Label)
+		if params.Name != nil {
+			taken = *params.Name
+		}
+		return UpdateAccount409JSONResponse(ProblemJSONResponse{Message: fmt.Sprintf("an account named %s exists already", taken)}), nil
+	} else if err != nil {
 		return nil, fmt.Errorf("update account: %w", err)
 	}
 	// A full number fits counterparties (ADR 0016): work the links out again with it.

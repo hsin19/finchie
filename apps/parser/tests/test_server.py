@@ -12,7 +12,17 @@ from finchie.parser.v1 import parser_pb2 as pb
 from finchie.parser.v1 import parser_pb2_grpc
 from finchie_parser import server as server_module
 from finchie_parser.errors import UnsupportedDocumentError
-from finchie_parser.model import Kind, ParseResult, Reconciliation, Statement, Transaction
+from finchie_parser.model import (
+    Kind,
+    ParseResult,
+    PointsExpiry,
+    PointsKind,
+    PointsLine,
+    PointsProgram,
+    Reconciliation,
+    Statement,
+    Transaction,
+)
 from finchie_parser.settings import Settings
 
 
@@ -117,6 +127,14 @@ def test_result_is_converted_to_proto(channel: grpc.Channel, monkeypatch: pytest
             Transaction(date(2026, 9, 23), "PAYMENT", Kind.PAYMENT, Decimal(-69019)),
         ],
         reconciliation=Reconciliation(Decimal(28009), Decimal(28009), "new charges"),
+        points=[
+            PointsProgram(
+                "小樹點(信用卡)",
+                Decimal(3206),
+                [PointsExpiry(Decimal(88), date(2026, 4, 30))],
+                [PointsLine("本期兌/轉換", PointsKind.REDEEM, Decimal(-1))],
+            )
+        ],
     )
     monkeypatch.setattr(
         server_module, "parse_document", lambda *_, **__: ParseResult("hsbc.credit_card", "1", statement, [])
@@ -134,6 +152,12 @@ def test_result_is_converted_to_proto(channel: grpc.Channel, monkeypatch: pytest
     assert payment.kind == pb.TRANSACTION_KIND_PAYMENT
     assert not payment.HasField("posting_date")
     assert not payment.HasField("original_amount")
+    [program] = response.statement.points
+    assert (program.name, program.closing.value) == ("小樹點(信用卡)", "3206")
+    [expiry] = program.expiries
+    assert (expiry.amount.value, expiry.by.year, expiry.by.month, expiry.by.day) == ("88", 2026, 4, 30)
+    [line] = program.lines
+    assert (line.label, line.kind, line.amount.value) == ("本期兌/轉換", pb.POINTS_LINE_KIND_REDEEM, "-1")
 
 
 def test_open_document_returns_the_email_and_its_attachments_decrypted_by_the_banks_rule() -> None:

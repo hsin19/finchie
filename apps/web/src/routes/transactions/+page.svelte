@@ -30,6 +30,7 @@ import {
 } from "#lib/filters.js";
 import {
     flowOf,
+    isPoints,
     isTrade,
     isTransfer,
     netByUnit,
@@ -231,8 +232,8 @@ const days = $derived.by(() => {
 // moved between the owner's own lines is muted.
 function amountTone(t: Transaction) {
     if (refundedInFull(t) || isTransfer(t)) return "text-mute";
-    // Shares, not money (ADR 0017).
-    if (isTrade(t)) return "text-ink";
+    // Shares or points, not money (ADR 0017, ADR 0019).
+    if (isTrade(t) || isPoints(t)) return "text-ink";
     if (sign(flowOf(t)) > 0) return "text-pos";
     return t.kind === "purchase" || t.kind === "other" ? "text-ink" : tone[kinds[t.kind].tone];
 }
@@ -301,6 +302,7 @@ onKeys({
             {#if breakdown(t)}<div class="text-[12px] text-dim">帳單上 {breakdown(t)}{refundedInFull(t) ? " · 已全額刷退" : ""}</div>{/if}
             {#if isTransfer(t)}<div class="text-[12px] text-mute">在自己的帳戶之間移動：不算支出或收入</div>{/if}
             {#if isTrade(t)}<div class="text-[12px] text-mute">股數：買賣不算支出或收入，手續費和稅算進成本</div>{/if}
+            {#if isPoints(t)}<div class="text-[12px] text-mute">點數：帳單上這一期的合計，不算支出或收入</div>{/if}
         </div>
         <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
             <dt class="text-mute">date</dt>

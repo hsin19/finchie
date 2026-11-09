@@ -43,10 +43,14 @@ func seedStatement(t *testing.T, pool *pgxpool.Pool, institution, closing string
 	if err != nil {
 		t.Fatal(err)
 	}
+	units, err := ingest.Units(ctx, queries, ingest.UnitMoney, "TWD")
+	if err != nil {
+		t.Fatal(err)
+	}
 	rows := make([]dbq.InsertTransactionsParams, 0, len(lines))
 	for i, l := range lines {
 		rows = append(rows, dbq.InsertTransactionsParams{
-			StatementID: id, AccountID: account, Unit: "TWD", LineNo: int32(i + 1), TransactionDate: pgDate(t, l.date), Description: l.description,
+			StatementID: id, AccountID: account, UnitID: units["TWD"], LineNo: int32(i + 1), TransactionDate: pgDate(t, l.date), Description: l.description,
 			Kind: l.kind, Amount: numeric(t, l.amount),
 			OriginalCurrency: optional(l.currency), Country: optional(l.country), CardLast4: optional(l.card),
 		})
@@ -269,16 +273,16 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	for _, item := range all.Items {
 		items[item.Description] = item
 	}
-	if shop := items["SHOP"]; shop.Amount != "6350" || *shop.Flow != "-6350" || *shop.AccountKind != CreditCard || shop.AccountId != nil {
+	if shop := items["SHOP"]; shop.Amount != "6350" || *shop.Flow != "-6350" || *shop.AccountKind != AccountKindCreditCard || shop.AccountId != nil {
 		t.Fatalf("card purchase = %+v", shop)
 	}
-	if salary := items["薪資"]; *salary.Flow != "60000" || *salary.AccountKind != Deposit || *salary.AccountId != esun.Id || *salary.AccountNumber != savings {
+	if salary := items["薪資"]; *salary.Flow != "60000" || *salary.AccountKind != AccountKindDeposit || *salary.AccountId != esun.Id || *salary.AccountNumber != savings {
 		t.Fatalf("salary = %+v", salary)
 	}
 	if out := items["行銀跨行轉優"]; out.Counterpart == nil || *out.Counterpart.AccountId != taishin.Id || *out.Memo != "房租" {
 		t.Fatalf("transfer = %+v", out)
 	}
-	if paid := items["玉山卡款扣繳"]; paid.Counterpart == nil || paid.Counterpart.AccountKind != CreditCard {
+	if paid := items["玉山卡款扣繳"]; paid.Counterpart == nil || paid.Counterpart.AccountKind != AccountKindCreditCard {
 		t.Fatalf("card payment = %+v", paid)
 	}
 	// Without the outflow, the line it went to is a row of its own.
@@ -325,7 +329,7 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	}
 	// The document says what it produced, so the upload page needs no card bill to count its lines.
 	stored := decode[Document](t, get(t, e, fmt.Sprintf("/api/documents/%d", deposit)))
-	if stored.StatementKind == nil || *stored.StatementKind != Deposit || stored.LineCount != 4 || stored.AccountCount != 1 {
+	if stored.StatementKind == nil || *stored.StatementKind != AccountKindDeposit || stored.LineCount != 4 || stored.AccountCount != 1 {
 		t.Fatalf("document = kind %v, %d lines, %d accounts", stored.StatementKind, stored.LineCount, stored.AccountCount)
 	}
 }

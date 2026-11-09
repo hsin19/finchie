@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from fakes import FakeDocument
 
-from finchie_parser.model import Kind
+from finchie_parser.model import Kind, PointsKind
 from finchie_parser.parsers.taishin import TaishinParser
 
 PAGE_1 = """115年 03月 信用卡電子帳單
@@ -130,3 +130,57 @@ def test_taishin_never_joins_a_description_across_a_page_break() -> None:
         ("健身中心", Kind.PURCHASE, Decimal(1800), "1111"),
     ]
     assert statement.reconciliation.balanced
+
+
+POINTS = """台新Point
+亞洲萬里通里數
+(信用卡)點數
+上期結餘點數/里數 2,175 **
+新增回饋 129 **
+活動回饋/調整 0 **
+本期使用點數/里數 -2,175 **
+本期結餘回饋 129 **
+■台新Point(信用卡)點數到期提醒：您有129點將於
+117/01/31到期，請至台新銀行網站查詢/兌換。"""
+
+
+def test_taishin_reads_its_points_with_used_points_printed_negative() -> None:
+    parsed = TaishinParser().parse(FakeDocument([PAGE_1 + "\n" + POINTS, PAGE_2]), ocr=None)
+    [program] = parsed.statement.points
+    assert (program.name, program.closing) == ("台新Point(信用卡)", Decimal(129))
+    assert [(line.label, line.kind, line.amount) for line in program.lines] == [
+        ("新增回饋", PointsKind.EARN, Decimal(129)),
+        ("本期使用點數/里數", PointsKind.REDEEM, Decimal(-2175)),
+    ]
+    assert [(e.amount, e.by) for e in program.expiries] == [(Decimal(129), date(2028, 1, 31))]
+    assert parsed.warnings == []
+
+
+def test_taishin_takes_the_expiry_only_from_its_reminder() -> None:
+    promotion = "活動期間您有500點將於117/12/31到期前加碼回饋。\n"
+    parsed = TaishinParser().parse(FakeDocument([PAGE_1 + "\n" + promotion + POINTS, PAGE_2]), ocr=None)
+    [program] = parsed.statement.points
+    assert [(e.amount, e.by) for e in program.expiries] == [(Decimal(129), date(2028, 1, 31))]
+
+
+def test_taishin_reads_each_column_with_figures_as_a_program_under_its_name_of_the_time() -> None:
+    # Before 2022-07 the points were 大集大利點數; a card that earns miles fills the second column.
+    old = """准及調整額度之權利。
+大集大利點數 亞洲萬里通里數
+上期結餘點數/里數 0 1,000
+新增回饋 0 200
+活動回饋/調整 0 0
+本期使用點數/里數 0 -300
+本期結餘回饋 0 900
+■【大集大利點數到期提醒】 您有0點將於110/01/31到期,請至下述網址查詢/兌換。"""
+    parsed = TaishinParser().parse(FakeDocument([PAGE_1 + "\n" + old, PAGE_2]), ocr=None)
+    programs = [(p.name, p.closing, [(e.amount, e.by) for e in p.expiries]) for p in parsed.statement.points]
+    assert programs == [
+        ("大集大利點數", Decimal(0), [(Decimal(0), date(2021, 1, 31))]),
+        ("亞洲萬里通里數", Decimal(900), []),
+    ]
+    assert parsed.warnings == []
+
+
+def test_taishin_bill_without_a_points_table_has_no_points() -> None:
+    assert parse().points == []

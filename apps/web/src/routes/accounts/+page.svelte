@@ -1,14 +1,18 @@
 <script lang="ts">
 import {
     type AccountSort,
+    describePrice,
     isSmallAccount,
+    lapsesSoon,
     leftOut,
     listedBalances,
+    shownNumber,
     sortAccounts,
     totalWorth,
     unpaidBills,
 } from "#lib/accounts.js";
 import type { Account } from "#lib/api/client.js";
+import NewAccount from "#lib/components/NewAccount.svelte";
 import {
     accountKinds,
     accountName,
@@ -28,15 +32,27 @@ import type { PageProps } from "./$types";
 let { data }: PageProps = $props();
 
 const hideSmall = $derived(!data.all);
+// The form for an account kept by hand; not a filter, so not in the URL.
+let adding = $state(false);
+// For telling points that lapse soon; the page is not open across days.
+// The owner's day, wherever the browser is (ADR 0004).
+const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" });
 
 // By kind, in a fixed order. Card bills are no accounts the owner has and are not listed (ADR 0013).
 // Small accounts are left out of the list, never out of the totals.
 const groups = $derived(
-    (["deposit", "securities", "exchange"] as const)
+    (["deposit", "securities", "exchange", "points"] as const)
         .map(kind => {
             const accounts = data.accounts.filter(a => a.kind === kind);
             const listed = hideSmall ? accounts.filter(a => !isSmallAccount(a)) : accounts;
-            return { kind, accounts: sortAccounts(listed, data.sort), hidden: accounts.length - listed.length, worth: totalWorth(accounts) };
+            return {
+                kind,
+                accounts: sortAccounts(listed, data.sort),
+                hidden: accounts.length - listed.length,
+                worth: totalWorth(accounts),
+                // Points until the owner gives them a value (ADR 0019).
+                worthless: accounts.every(a => a.worth === undefined),
+            };
         })
         .filter(group => group.accounts.length + group.hidden > 0),
 );
@@ -70,11 +86,13 @@ function href(account: Account) {
 {#if gapped.length > 0}
     <section class="panel border-neg px-3.5 py-2.5">
         <h2 class="label text-neg">GAPS · 餘額接不起來（{gapped.length}）</h2>
-        <p class="mt-1 text-dim">兩筆餘額之間有錢進出、卻沒有明細：多半是少了一期對帳單。找到那封信上傳，就會接起來。</p>
+        <p class="mt-1 text-dim">
+            兩筆餘額之間有錢進出、卻沒有明細：多半是少了一期對帳單，找到那封信上傳就會接起來。點數帳戶的缺口多半是點數過期了。
+        </p>
         <ul class="mt-1.5">
             {#each gapped as account (account.id)}
                 <li>
-                    <a href={href(account)}>{institution(account.institution).name} {accountName(account)} {account.fullNumber ?? account.number}</a>
+                    <a href={href(account)}>{institution(account.institution).name} {accountName(account)} {shownNumber(account)}</a>
                     <span class="text-mute">· {account.gaps.length} 段</span>
                 </li>
             {/each}
@@ -89,7 +107,7 @@ function href(account: Account) {
     </div>
     <div>
         <div class="label">DEPOSITS · 存款</div>
-        <div>≈ NT${formatAmount(deposits.total)}{deposits.missing ? `（${deposits.missing} 個帳戶沒有匯率，不計）` : ""}</div>
+        <div>≈ NT${formatAmount(deposits.total)}{deposits.missing ? `（${deposits.missing} 個帳戶沒有價格，不計）` : ""}</div>
     </div>
     {#if brokerages.length > 0}
         <div>
@@ -100,7 +118,7 @@ function href(account: Account) {
     {#if exchangeAccounts.length > 0}
         <div>
             <div class="label">EXCHANGES · 交易所</div>
-            <div>≈ NT${formatAmount(exchanges.total)}{exchanges.missing ? `（${exchanges.missing} 個交易所有幣種沒有匯率、也沒有交易所估值，不計）` : ""}</div>
+            <div>≈ NT${formatAmount(exchanges.total)}{exchanges.missing ? `（${exchanges.missing} 個交易所有幣種沒有價格、也沒有交易所估值，不計）` : ""}</div>
         </div>
     {/if}
     <div>
@@ -137,14 +155,23 @@ function href(account: Account) {
         隱藏 &lt; NT$1,000
     </label>
     <span>外幣以最新匯率折合新臺幣比較</span>
+    {#if !adding}
+        <button type="button" class="ml-auto text-dim hover:text-ink" onclick={() => (adding = true)}>＋ 新增帳戶</button>
+    {/if}
 </div>
+
+{#if adding}<NewAccount onclose={() => (adding = false)} />{/if}
 
 {#each groups as group (group.kind)}
     <section class="panel px-3.5 pt-1 pb-2.5">
         <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
             <h1 class="label">ACCOUNTS · {accountKinds[group.kind].label}（{group.accounts.length}）</h1>
             <span class="text-[12px] text-mute">
-                合計 ≈ NT${formatAmount(group.worth.total)}{group.worth.missing ? `（${group.worth.missing} 個帳戶沒有匯率，不計）` : ""}
+                {#if group.worthless}
+                    沒有價值，不計入淨值
+                {:else}
+                    合計 ≈ NT${formatAmount(group.worth.total)}{group.worth.missing ? `（${group.worth.missing} 個帳戶沒有價格，不計）` : ""}
+                {/if}
                 {#if group.hidden > 0}· 另 {group.hidden} 個 &lt; NT$1,000 未列出{/if}
             </span>
         </div>
@@ -174,17 +201,20 @@ function href(account: Account) {
                         {@const note = leftOut(view)}
                         <!-- An account holding NT$ alone is worth its balance: no worth line of its own. -->
                         {@const ntdOnly = account.balances.length === 1 && account.balances[0].unit === "TWD"}
+                        <!-- A worth line only where something has a worth: not for points no one has valued. -->
+                        {@const worthLine = !ntdOnly && (account.worth !== undefined || account.balances.some(b => b.worth !== undefined))}
+                        {@const lapsing = account.expiries[0]}
                         <tr class="border-t border-rule align-top hover:bg-raised">
                             <td class="py-2.5 pr-2">{institution(account.institution).name}</td>
                             <td class="px-2 py-2.5">
                                 <a href={href(account)}>{accountName(account)}</a>
-                                {#if account.number}<span class="text-mute">{account.fullNumber ?? account.number}</span>{/if}
+                                {#if shownNumber(account)}<span class="text-mute">{shownNumber(account)}</span>{/if}
                             </td>
                             <td class="px-2 py-2.5 text-right">
-                                {#if !ntdOnly}
+                                {#if worthLine}
                                     <div
                                         class={account.worth !== undefined && sign(account.worth) < 0 ? "text-neg" : "text-accent-soft"}
-                                        title={account.worthFrom === "valuation" ? "有幣種沒有匯率：取交易所的估值" : "各項折合新臺幣加總"}
+                                        title={account.worthFrom === "valuation" ? "有幣種沒有價格：取交易所的估值" : "各項折合新臺幣加總"}
                                     >
                                         {#if account.worth !== undefined}
                                             ≈ {formatAmount(roundWhole(account.worth))} <span class="text-mute">TWD</span>
@@ -198,16 +228,21 @@ function href(account: Account) {
                                         {formatAmount(balance.amount)} <span class="text-mute">{balance.unit}{balance.code ? ` ${balance.code}` : ""}</span>
                                     </div>
                                     {#if balance.unit !== "TWD" && balance.worth !== undefined}
-                                        <div class="text-[12px] text-mute" title={balance.price ? `${balance.rateDay} 收盤 ${balance.price}` : `${balance.rateDay} 的匯率`}>
+                                        <div class="text-[12px] text-mute" title={balance.price ? describePrice(balance.unit, balance.price) : ""}>
                                             ≈ NT${formatAmount(balance.worth)}
                                         </div>
                                     {/if}
                                 {/each}
                                 {#if note}<div class="text-[12px] text-mute">{note}</div>{/if}
+                                {#if lapsing}
+                                    <div class="text-[12px] {lapsesSoon(lapsing.by, today) ? 'text-neg' : 'text-mute'}">
+                                        {formatAmount(lapsing.amount)} {lapsing.unit} {lapsing.by} 前到期
+                                    </div>
+                                {/if}
                             </td>
                             <td class="px-2 py-2.5 text-dim">
                                 <!-- Keeps each date beside its balance below the account's worth line. -->
-                                {#if !ntdOnly}<div aria-hidden="true" class="invisible">·</div>{/if}
+                                {#if worthLine}<div aria-hidden="true" class="invisible">·</div>{/if}
                                 {#each rows as balance (balance.unit)}
                                     <div>{balance.asOf}</div>
                                     <!-- Keeps each date beside its balance when a worth line follows the balance. -->

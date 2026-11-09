@@ -108,6 +108,46 @@ message Statement {
   google.type.Decimal total_due = 5;
   repeated Transaction transactions = 6;
   Reconciliation reconciliation = 7;
+  // The rewards programs the bill reports (ADR 0019).
+  repeated PointsProgram points = 8;
+}
+
+// A rewards program on a card bill, its points a unit of their own (ADR 0019).
+message PointsProgram {
+  // As the bill prints it, e.g. "小樹點(信用卡)": the program's unit.
+  string name = 1;
+  // At the closing date. Whether opening, added, and used add up to it is the
+  // parser's to check, and a warning when they do not.
+  google.type.Decimal closing = 2;
+  repeated PointsExpiry expiries = 3;
+  // The period's movements as the bill totals them: one per column with a
+  // figure. Points that lapse show in none (ADR 0019).
+  repeated PointsLine lines = 4;
+}
+
+message PointsLine {
+  // The bill's own label for the column, e.g. "本期兌/轉換".
+  string label = 1;
+  PointsLineKind kind = 2;
+  // Seen from the account: points added positive, used negative.
+  google.type.Decimal amount = 3;
+}
+
+enum PointsLineKind {
+  POINTS_LINE_KIND_UNSPECIFIED = 0;
+  // Earned, a bonus included.
+  POINTS_LINE_KIND_EARN = 1;
+  // An adjustment, either way.
+  POINTS_LINE_KIND_ADJUST = 2;
+  // Used or redeemed.
+  POINTS_LINE_KIND_REDEEM = 3;
+}
+
+// Points the bill says will lapse by a date, as printed: one date's, one
+// month's (by its last day), or several months' together.
+message PointsExpiry {
+  google.type.Decimal amount = 1;
+  google.type.Date by = 2;
 }
 
 // Amounts follow the statement's sign: charges positive, credits negative

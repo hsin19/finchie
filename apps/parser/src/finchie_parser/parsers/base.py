@@ -7,7 +7,17 @@ from typing import ClassVar
 
 from finchie_parser.documents import Mail
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import AnyStatement, DepositLine, Kind, Reconciliation, Transaction
+from finchie_parser.model import (
+    AnyStatement,
+    DepositLine,
+    Kind,
+    PointsExpiry,
+    PointsKind,
+    PointsLine,
+    PointsProgram,
+    Reconciliation,
+    Transaction,
+)
 from finchie_parser.ocr import Ocr
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
@@ -62,6 +72,40 @@ class StatementParser(ABC):
 
 def sum_new_charges(transactions: Iterable[Transaction]) -> Decimal:
     return sum((tx.amount for tx in transactions if tx.kind is not Kind.PAYMENT), Decimal(0))
+
+
+def earned(label: str, value: Decimal) -> PointsLine:
+    return PointsLine(label, PointsKind.EARN, value)
+
+
+def adjusted(label: str, value: Decimal) -> PointsLine:
+    return PointsLine(label, PointsKind.ADJUST, value)
+
+
+def used(label: str, value: Decimal) -> PointsLine:
+    """Points used, taken by their size: one bank prints them positive, another negative (ADR 0019)."""
+    return PointsLine(label, PointsKind.REDEEM, -abs(value))
+
+
+def points_program(
+    name: str,
+    *,
+    opening: Decimal,
+    lines: Iterable[PointsLine],
+    closing: Decimal,
+    expiries: Sequence[PointsExpiry] = (),
+    warnings: list[str],
+) -> PointsProgram:
+    """A program as the bill prints it, checked: its opening and its lines must give its closing (ADR 0019).
+
+    Only columns with a figure are lines. When the figures do not add up, a warning says so and the
+    closing stays as printed (ADR 0005).
+    """
+    moved = [line for line in lines if line.amount != 0]
+    computed = opening + sum((line.amount for line in moved), Decimal(0))
+    if computed != closing:
+        warnings.append(f"{name}: opening {opening} plus added less used is {computed}, but the bill prints {closing}")
+    return PointsProgram(name, closing, list(expiries), moved)
 
 
 def find(pattern: re.Pattern[str], texts: Iterable[str], what: str) -> re.Match[str]:

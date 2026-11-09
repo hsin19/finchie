@@ -52,10 +52,30 @@ export function sign(value: string): -1 | 0 | 1 {
 
 /** To the nearest whole unit, halves away from zero: "296380.87" → "296381", "-2.5" → "-3". */
 export function roundWhole(value: string): string {
+    return roundTo(value, 0);
+}
+
+/** To `places` decimals, halves away from zero: ("32.8538", 2) → "32.85"; fewer decimals stay as they are. */
+export function roundTo(value: string, places: number): string {
     const { units, scale } = parse(value);
-    const factor = 10n ** BigInt(scale);
+    if (scale <= places) return render({ units, scale });
+    const factor = 10n ** BigInt(scale - places);
     const magnitude = ((units < 0n ? -units : units) * 2n + factor) / (2n * factor);
-    return render({ units: units < 0n ? -magnitude : magnitude, scale: 0 });
+    return render({ units: units < 0n ? -magnitude : magnitude, scale: places });
+}
+
+/**
+ * A price for display: two decimals from 1 up, else four significant digits, which a coin worth a
+ * fraction of a cent needs: "32.8538370571241164" → "32.85", "0.000144510061" → "0.0001445".
+ */
+export function formatPrice(value: string): string {
+    const { units, scale } = parse(value);
+    const magnitude = units < 0n ? -units : units;
+    const whole = magnitude / 10n ** BigInt(scale);
+    if (whole > 0n || magnitude === 0n) return formatAmount(roundTo(value, 2));
+    // Leading zeros of the fraction, then four digits.
+    const leading = scale - magnitude.toString().length;
+    return formatAmount(roundTo(value, leading + 4));
 }
 
 /** For proportions only (bar widths, percentages); never for arithmetic on money. */

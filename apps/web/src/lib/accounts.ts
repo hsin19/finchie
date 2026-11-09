@@ -1,10 +1,13 @@
 import type {
     Account,
     Balance,
+    Price,
     Statement,
 } from "#lib/api/client.js";
+import { priceSources } from "#lib/labels.js";
 import {
     formatAmount,
+    formatPrice,
     negate,
     roundWhole,
     sign,
@@ -87,16 +90,21 @@ export function listedBalances(account: Account, hideSmall: boolean): ListedBala
     const sorted = holdingsByWorth(account.balances.filter(b => sign(b.amount) !== 0));
     if (!hideSmall) return { listed: sorted, others: 0, unpriced: 0 };
     const priced = sorted.filter(b => b.worth !== undefined);
+    if (priced.length === 0) {
+        // Nothing to weigh by worth, such as a points account's programs (ADR 0019): the first few.
+        const listed = sorted.slice(0, LISTED_BALANCES);
+        return { listed, others: 0, unpriced: sorted.length - listed.length };
+    }
     const listed = priced.filter(b => !small(b.worth!)).slice(0, LISTED_BALANCES);
     const others = priced.filter(b => !listed.includes(b) && sign(b.worth!) !== 0);
     return { listed, others: others.length, othersAtMost: others[0]?.worth, unpriced: sorted.length - priced.length };
 }
 
-/** "另 11 種 ≤ NT$3,193、32 種沒有匯率", or "" when nothing is left out. */
+/** "另 11 種 ≤ NT$3,193、32 種沒有價格", or "" when nothing is left out. */
 export function leftOut({ others, othersAtMost, unpriced }: ListedBalances): string {
     const parts: string[] = [];
     if (others > 0 && othersAtMost !== undefined) parts.push(`${others} 種 ≤ NT$${formatAmount(roundWhole(othersAtMost))}`);
-    if (unpriced > 0) parts.push(`${unpriced} 種沒有匯率`);
+    if (unpriced > 0) parts.push(`${unpriced} 種沒有價格`);
     return parts.length > 0 ? `另 ${parts.join("、")}` : "";
 }
 
@@ -119,4 +127,43 @@ export function historyByDay(history: Balance[]): { asOf: string; balances: Bala
     const days = new Map<string, Balance[]>();
     for (const b of history) days.set(b.asOf, [...(days.get(b.asOf) ?? []), b]);
     return [...days].sort(([a], [b]) => b.localeCompare(a)).map(([asOf, balances]) => ({ asOf, balances }));
+}
+
+const taipei = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+});
+
+/** When a price held, in Taipei: its day, and its time unless it is the start of the day (a rate's). */
+export function pricedAt(price: Price): string {
+    return taipei.format(new Date(price.asOf)).replace(/ 00:00$/, "");
+}
+
+/**
+ * A unit's price in words (ADR 0020): "1 USD ≈ NT$32.85 · 匯率 2026-11-07", or through its quote unit,
+ * "1 BGB = 0.85 USDT ≈ NT$27.93 · Bitget 2026-11-09 14:00".
+ */
+export function describePrice(unit: string, price: Price): string {
+    const quoted = price.quote === "TWD" ? `≈ NT$${formatPrice(price.quoted)}` : `= ${formatPrice(price.quoted)} ${price.quote}`;
+    const twd = price.quote === "TWD" ? "" : price.twd !== undefined ? ` ≈ NT$${formatPrice(price.twd)}` : `（${price.quote} 沒有新臺幣價格）`;
+    return `1 ${unit} ${quoted}${twd} · ${priceSources[price.source]} ${pricedAt(price)}`;
+}
+
+/**
+ * The number an account shows: the owner's full one where they gave it, else the one its source prints; ""
+ * for neither, as for an account the owner keeps until they give it one.
+ */
+export function shownNumber(account: Pick<Account, "number" | "fullNumber">): string {
+    return account.fullNumber ?? account.number;
+}
+
+/** Whether points lapse within this many days of `today` (YYYY-MM-DD): soon enough to stand out. */
+export function lapsesSoon(by: string, today: string, days = 60): boolean {
+    const limit = new Date(`${today}T00:00:00Z`);
+    limit.setUTCDate(limit.getUTCDate() + days);
+    return by <= limit.toISOString().slice(0, 10);
 }

@@ -1,7 +1,9 @@
 <script lang="ts">
 import {
+    describePrice,
     historyByDay,
     holdingsByWorth,
+    shownNumber,
 } from "#lib/accounts.js";
 import {
     api,
@@ -10,6 +12,8 @@ import {
     unwrap,
 } from "#lib/api/client.js";
 import Counterpart from "#lib/components/Counterpart.svelte";
+import HoldingsForm from "#lib/components/HoldingsForm.svelte";
+import UnitPrices from "#lib/components/UnitPrices.svelte";
 import {
     accountKinds,
     accountName,
@@ -33,6 +37,10 @@ const bank = $derived(institution(account.institution));
 const brokerage = $derived(account.kind === "securities");
 // An exchange account holds coins and reports nothing but snapshots of them (ADR 0018).
 const exchange = $derived(account.kind === "exchange");
+// A points account's bills print its programs' balances, their totals as lines, and what will lapse (ADR 0019).
+const points = $derived(account.kind === "points");
+// One the owner opened and keeps by hand: its number is its unit (ADR 0019).
+const owned = $derived(account.institution === "owner");
 const holdings = $derived(holdingsByWorth(account.balances));
 const unpriced = $derived(account.balances.filter(b => b.worth === undefined).length);
 const snapshots = $derived(historyByDay(account.history));
@@ -89,7 +97,7 @@ function amountTone(value: string) {
     <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h1 class="text-[16px] font-bold">
             {bank.name} {accountName(account)}
-            {#if account.number}<span class="font-normal text-mute">{account.fullNumber ?? account.number}</span>{/if}
+            {#if shownNumber(account)}<span class="font-normal text-mute">{shownNumber(account)}</span>{/if}
         </h1>
         <span class="flex gap-3 text-[12px]">
             {#if !editing}<button type="button" class="text-dim hover:text-ink" onclick={edit}>編輯名稱與帳號</button>{/if}
@@ -99,12 +107,12 @@ function amountTone(value: string) {
     {#if editing}
         <form class="mt-2 flex flex-wrap items-end gap-3" onsubmit={save}>
             <label class="flex flex-col gap-1 text-[12px] text-mute">
-                名稱（空白則用銀行的「{account.label ?? accountKinds[account.kind].label}」）
+                名稱（空白則用「{account.label ?? accountKinds[account.kind].label}」）
                 <input class="control min-h-9 w-56 text-ink" bind:value={name} placeholder={account.label ?? ""} />
             </label>
             <label class="flex flex-col gap-1 text-[12px] text-mute">
-                完整帳號（要和 {account.number} 露出的數字對得上）
-                <input class="control min-h-9 w-56 text-ink" bind:value={fullNumber} inputmode="numeric" placeholder={account.number} />
+                {account.number ? `完整帳號（要和 ${account.number} 露出的數字對得上）` : "帳號"}
+                <input class="control min-h-9 w-56 text-ink" bind:value={fullNumber} inputmode={account.number ? "numeric" : "text"} placeholder={account.number} />
             </label>
             <button type="submit" class="control min-h-9 border-accent px-3">儲存</button>
             <button type="button" class="control min-h-9 px-3" onclick={() => (editing = false)}>取消</button>
@@ -121,10 +129,10 @@ function amountTone(value: string) {
         {:else if exchange}
             <div>
                 <div class="label">WORTH · 市值</div>
-                <div class="text-[18px] text-ink">{account.worth !== undefined ? `≈ NT$${formatAmount(account.worth)}` : "有幣種沒有匯率"}</div>
+                <div class="text-[18px] text-ink">{account.worth !== undefined ? `≈ NT$${formatAmount(account.worth)}` : "有幣種沒有價格"}</div>
                 <div class="text-[12px] text-mute">
                     {#if account.worthFrom === "valuation" && account.valuation}
-                        取交易所估值 {formatAmount(account.valuation.amount)} {account.valuation.unit}：{unpriced} 種沒有匯率
+                        取交易所估值 {formatAmount(account.valuation.amount)} {account.valuation.unit}：{unpriced} 種沒有價格
                     {:else}
                         {holdings.length} 種，到 {account.balances[0]?.asOf ?? "—"} 為止
                     {/if}
@@ -135,6 +143,11 @@ function amountTone(value: string) {
                 <div>
                     <div class="label">BALANCE · {balance.unit}</div>
                     <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</div>
+                    {#if balance.unit !== "TWD" && balance.worth !== undefined}
+                        <div class="text-[12px] text-mute" title={balance.price ? describePrice(balance.unit, balance.price) : ""}>
+                            ≈ NT${formatAmount(balance.worth)}{balance.price?.source === "owner" ? "（自訂價格）" : ""}
+                        </div>
+                    {/if}
                     <div class="text-[12px] text-mute">{balance.asOf} 為止</div>
                 </div>
             {/each}
@@ -165,7 +178,13 @@ function amountTone(value: string) {
 {#if account.gaps.length > 0}
     <section class="panel border-neg px-3.5 py-2.5">
         <h2 class="label text-neg">GAPS · 餘額接不起來</h2>
-        <p class="mt-1 text-dim">這兩個日期之間有錢進出、卻沒有任何明細：多半是少了一期對帳單。上傳那期之後就會接起來。</p>
+        <p class="mt-1 text-dim">
+            {
+                points
+                ? "這兩期之間少了點數，帳單卻沒列出：多半是點數過期了（過期的點數不會出現在任何欄位），或少了一期帳單。"
+                : "這兩個日期之間有錢進出、卻沒有任何明細：多半是少了一期對帳單。上傳那期之後就會接起來。"
+            }
+        </p>
         <table class="mt-1.5 border-collapse">
             <tbody>
                 {#each account.gaps as gap (`${gap.unit}:${gap.to}`)}
@@ -199,8 +218,8 @@ function amountTone(value: string) {
                     <tr class="border-t border-rule">
                         <td class="py-1.5 pr-4">{balance.unit}</td>
                         <td class="px-2 py-1.5 text-right">{formatAmount(balance.amount)}</td>
-                        <td class="py-1.5 pl-4 text-right text-dim" title={balance.rateDay ? `${balance.rateDay} 的匯率` : ""}>
-                            {balance.worth !== undefined ? formatAmount(balance.worth) : "沒有匯率"}
+                        <td class="py-1.5 pl-4 text-right text-dim" title={balance.price ? describePrice(balance.unit, balance.price) : ""}>
+                            {balance.worth !== undefined ? formatAmount(balance.worth) : "沒有價格"}
                         </td>
                     </tr>
                 {:else}
@@ -236,7 +255,9 @@ function amountTone(value: string) {
                         <tr class="border-t border-rule">
                             <td class="py-2 pr-2">{position.unit} <span class="text-mute">{position.code ?? ""}</span></td>
                             <td class="px-2 py-2 text-right">{sign(position.shares) === 0 ? "出清" : formatAmount(position.shares)}</td>
-                            <td class="px-2 py-2 text-right text-dim" title={close?.rateDay ?? ""}>{close?.price ? formatAmount(close.price) : ""}</td>
+                            <td class="px-2 py-2 text-right text-dim" title={close?.price ? describePrice(close.unit, close.price) : ""}>
+                                {close?.price ? formatAmount(close.price.quoted) : ""}
+                            </td>
                             <td class="px-2 py-2 text-right">{sign(position.shares) === 0 ? "" : position.worth !== undefined ? formatAmount(position.worth) : "—"}</td>
                             <td class="px-2 py-2 text-right text-dim" title={position.cost !== undefined ? `${position.since} 起的成交` : unknownCost}>
                                 {position.cost !== undefined ? formatAmount(position.cost) : sign(position.shares) === 0 ? "" : "不知道"}
@@ -259,12 +280,40 @@ function amountTone(value: string) {
     </section>
 {/if}
 
-<!-- An exchange reports no lines at all (ADR 0018). -->
-{#if !exchange}
+{#if points}
+    <section class="panel px-3.5 pt-1 pb-2.5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
+            <h2 class="label">EXPIRING · 即將到期</h2>
+            <span class="text-[12px] text-mute">{owned ? "你輸入的" : "照最新一期帳單 · 同一行可能是幾個月加起來"}</span>
+        </div>
+        <table class="border-collapse">
+            <tbody>
+                {#each account.expiries as expiry (`${expiry.unit}:${expiry.by}`)}
+                    <tr class="border-t border-rule">
+                        <td class="py-1.5 pr-4 text-dim">{expiry.by} 前</td>
+                        <td class="py-1.5 pr-2 text-right text-ink">{formatAmount(expiry.amount)}</td>
+                        <td class="py-1.5 text-mute">{expiry.unit}</td>
+                    </tr>
+                {:else}
+                    <tr><td class="py-2.5 text-mute">{owned ? "沒有輸入到期的點數。" : "帳單上沒有即將到期的點數。"}</td></tr>
+                {/each}
+            </tbody>
+        </table>
+    </section>
+{/if}
+
+{#if owned}
+    <HoldingsForm accountId={account.id} kind={account.kind} balances={account.balances} expiries={account.expiries} />
+{/if}
+
+<UnitPrices balances={account.balances} />
+
+<!-- An exchange reports no lines at all (ADR 0018), nor does the owner of an account they keep (ADR 0019). -->
+{#if !exchange && !owned}
     <section class="panel px-3.5 pt-1 pb-2.5">
         <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
             <h2 class="label">LINES · 明細（{data.lines.length}）</h2>
-            <span class="text-[12px] text-mute">新的在上 · {brokerage ? "買進的股數是正數" : "存入是正數"}</span>
+            <span class="text-[12px] text-mute">新的在上 · {brokerage ? "買進的股數是正數" : points ? "帳單上每一期的合計，獲得是正數" : "存入是正數"}</span>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full min-w-[820px] border-collapse">

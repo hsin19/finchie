@@ -10,18 +10,21 @@ import {
 } from "vitest";
 import {
     accountSort,
+    describePrice,
     historyByDay,
     holdingsByWorth,
     isSmallAccount,
+    lapsesSoon,
     leftOut,
     listedBalances,
+    shownNumber,
     sortAccounts,
     totalWorth,
     unpaidBills,
 } from "./accounts.js";
 
 function account(id: number, worth?: string): Account {
-    return { id, institution: "esun", kind: "deposit", number: String(id), balances: [], continuity: "checked", gaps: [], worth };
+    return { id, institution: "esun", kind: "deposit", number: String(id), balances: [], continuity: "checked", gaps: [], expiries: [], worth };
 }
 
 describe("accounts", () => {
@@ -93,6 +96,7 @@ describe("small accounts and balances", () => {
         balances,
         continuity: "checked",
         gaps: Array.from({ length: gaps }, () => ({ unit: "TWD", from: "2026-08-31", to: "2026-09-30", unseen: "1" })),
+        expiries: [],
         worth,
     });
 
@@ -115,7 +119,7 @@ describe("small accounts and balances", () => {
         );
         const view = listedBalances(coins, true);
         expect(view.listed.map(b => b.unit)).toEqual(["BNB", "ETH", "USDC"]);
-        expect(leftOut(view)).toBe("另 2 種 ≤ NT$3,193、1 種沒有匯率");
+        expect(leftOut(view)).toBe("另 2 種 ≤ NT$3,193、1 種沒有價格");
         expect(listedBalances(coins, false).listed).toHaveLength(6);
     });
 
@@ -124,8 +128,15 @@ describe("small accounts and balances", () => {
         const max = holding([money("TWD", "0.27", "0.27"), money("BTC", "0.00002639", "65.55"), money("MAX", "570.12")], "4251.35");
         const view = listedBalances(max, true);
         expect(view.listed).toEqual([]);
-        expect(leftOut(view)).toBe("另 2 種 ≤ NT$66、1 種沒有匯率");
+        expect(leftOut(view)).toBe("另 2 種 ≤ NT$66、1 種沒有價格");
         expect(leftOut(listedBalances(max, false))).toBe("");
+    });
+
+    it("lists the first few of an account with nothing to weigh by worth, such as points", () => {
+        const points = holding([money("小樹點(信用卡)", "3253"), money("亞洲萬里通里數", "500"), money("A", "1"), money("B", "1")]);
+        const view = listedBalances(points, true);
+        expect(view.listed).toHaveLength(3);
+        expect(leftOut(view)).toBe("另 1 種沒有價格");
     });
 
     it("counts an account as small under NT$1,000 either way, gaps or not, unless its worth is unknown", () => {
@@ -135,5 +146,38 @@ describe("small accounts and balances", () => {
         expect(isSmallAccount(holding([], "-5000"))).toBe(false);
         expect(isSmallAccount(holding([]))).toBe(false);
         expect(isSmallAccount(holding([], "0", 1))).toBe(true);
+    });
+});
+
+describe("lapsing points", () => {
+    it("stands out within sixty days", () => {
+        expect(lapsesSoon("2027-01-08", "2026-11-09")).toBe(true);
+        expect(lapsesSoon("2027-01-09", "2026-11-09")).toBe(false);
+        expect(lapsesSoon("2026-11-30", "2026-11-09", 14)).toBe(false);
+    });
+});
+
+describe("describePrice", () => {
+    it("says what one unit comes to in NT$, where the price came from, and when it held", () => {
+        expect(describePrice("USD", { asOf: "2026-11-06T16:00:00Z", source: "fawaz", quote: "TWD", quoted: "32.8538370571241164", twd: "32.8538370571241164" }))
+            .toBe("1 USD ≈ NT$32.85 · 匯率 2026-11-07");
+        expect(describePrice("範例電子", { asOf: "2026-11-06T05:30:00Z", source: "twse", quote: "TWD", quoted: "50.5", twd: "50.5" }))
+            .toBe("1 範例電子 ≈ NT$50.50 · 證交所收盤 2026-11-06 13:30");
+    });
+
+    it("goes through the quote unit, or says it has no price in NT$", () => {
+        expect(describePrice("BGB", { asOf: "2026-11-09T06:00:00Z", source: "bitget", quote: "USDT", quoted: "0.85", twd: "27.9325" }))
+            .toBe("1 BGB = 0.85 USDT ≈ NT$27.93 · Bitget 2026-11-09 14:00");
+        expect(describePrice("哩程", { asOf: "2026-11-09T06:00:00Z", source: "owner", quote: "EUR", quoted: "0.01" }))
+            .toBe("1 哩程 = 0.01 EUR（EUR 沒有新臺幣價格） · 自訂 2026-11-09 14:00");
+    });
+});
+
+describe("shownNumber", () => {
+    it("shows the owner's full number, else the source's, even where the source prints none", () => {
+        expect(shownNumber({ number: "1234567***890", fullNumber: "1234567000890" })).toBe("1234567000890");
+        expect(shownNumber({ number: "1234567***890" })).toBe("1234567***890");
+        expect(shownNumber({ number: "", fullNumber: "MB-1234" })).toBe("MB-1234");
+        expect(shownNumber({ number: "" })).toBe("");
     });
 });

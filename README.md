@@ -23,7 +23,7 @@ A self-hosted personal finance platform. It turns bank and credit card statement
 |---|---|---|
 | [`proto/`](proto/) | gRPC contracts, managed with buf. Generated code is committed inside each app. | ✅ |
 
-Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents, 0013 accounts, 0014 recognizing statements, 0015 exchange rates, 0016 transfer links, 0017 securities accounts, 0018 exchange accounts.
+Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents, 0013 accounts, 0014 recognizing statements, 0015 exchange rates, 0016 transfer links, 0017 securities accounts, 0018 exchange accounts, 0019 points, 0020 units and prices.
 
 ## Why V2
 

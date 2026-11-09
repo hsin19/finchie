@@ -185,7 +185,13 @@ export interface paths {
          */
         get: operations["listAccounts"];
         put?: never;
-        post?: never;
+        /**
+         * An account the owner keeps by hand
+         * @description Of any kind but a card's (ADR 0019): its institution `owner`, and the name it is opened with its
+         *     own (`label`), as a bank's account has the bank's; no two accounts go by one name the owner gave.
+         *     It holds what `PUT /api/accounts/{id}/holdings` says.
+         */
+        post: operations["createAccount"];
         delete?: never;
         options?: never;
         head?: never;
@@ -210,9 +216,76 @@ export interface paths {
          * The owner's details of an account, its own name and its full number
          * @description Both optional (ADR 0016): a field left out stays as it is, an empty string clears it. A full
          *     number must fit the masked number the bank prints, digit for digit; links are worked out
-         *     again, since it fits counterparties too.
+         *     again, since it fits counterparties too. No two accounts go by one name the owner gave (`409`);
+         *     cleared, an account goes by its own again.
          */
         patch: operations["updateAccount"];
+        trace?: never;
+    };
+    "/api/accounts/{id}/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * What an account the owner keeps holds today, and what will lapse
+         * @description Only for an account the owner opened (ADR 0019): today's snapshot of the whole account, as an
+         *     exchange's is (ADR 0018). A later one the same day replaces it, and a unit it held before and
+         *     no longer lists is at 0. Each unit is of the kind the account holds (money, securities by name,
+         *     points, ADR 0020); what will lapse replaces all the account had.
+         */
+        put: operations["updateHoldings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The units amounts are counted in
+         * @description Every unit a source has reported or the owner has named (ADR 0020), optionally of one kind.
+         */
+        get: operations["listUnits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/units/{id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * What one unit is worth, by the owner's word
+         * @description A price of the owner's, as of now (ADR 0020). Like any price it counts while it is the unit's
+         *     newest, whatever the source: a rate or a close of a later day takes over from it. A later one the
+         *     same day replaces it.
+         */
+        put: operations["setUnitPrice"];
+        post?: never;
+        /** Withdraw every price the owner gave a unit */
+        delete: operations["clearUnitPrice"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/accounts/{id}/lines": {
@@ -441,7 +514,7 @@ export interface components {
             paidOn?: string;
         };
         /** @enum {string} */
-        AccountKind: "credit_card" | "deposit" | "securities" | "exchange";
+        AccountKind: "credit_card" | "deposit" | "securities" | "exchange" | "points";
         /**
          * @description Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
          * @enum {string}
@@ -475,6 +548,8 @@ export interface components {
             worthFrom?: components["schemas"]["WorthFrom"];
             valuation?: components["schemas"]["Valuation"];
             gaps: components["schemas"]["BalanceGap"][];
+            /** @description What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019) */
+            expiries: components["schemas"]["Expiry"][];
         };
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Every balance its sources reported, statements and snapshots, newest first */
@@ -503,6 +578,14 @@ export interface components {
              */
             since?: string;
         };
+        /** @description Points a source says will lapse by a date (ADR 0019): one date's, one month's, or several months' together */
+        Expiry: {
+            /** @example 小樹點(信用卡) */
+            unit: string;
+            amount: components["schemas"]["Decimal"];
+            /** Format: date */
+            by: string;
+        };
         /**
          * @description What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation
          * @enum {string}
@@ -515,15 +598,20 @@ export interface components {
             /** Format: date */
             asOf: string;
             amount: components["schemas"]["Decimal"];
-            /** @description In NT$, at the newest rate of its unit; absent for a unit without one */
+            /** @description In NT$, at its unit's newest price (ADR 0020); absent for a unit without one */
             worth?: components["schemas"]["Decimal"];
         };
         Balance: {
             /**
-             * @description ISO 4217, or a points program's code
+             * @description Its unit's symbol: ISO 4217 or a coin's ticker, a security's name, a points program's
              * @example TWD
              */
             unit: string;
+            /**
+             * Format: int64
+             * @description Its unit (ADR 0020), for giving it a price; on an account's newest balances
+             */
+            unitId?: number;
             /**
              * Format: date
              * @description The end of the day it was held
@@ -535,20 +623,52 @@ export interface components {
              * @description The statement that reported it; absent for a snapshot, such as an exchange's (ADR 0018)
              */
             statementId?: number;
-            /** @description In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points */
+            /** @description In NT$, at its unit's newest price (ADR 0020); absent for a unit without one in NT$ */
             worth?: components["schemas"]["Decimal"];
-            /**
-             * Format: date
-             * @description The day of the rate or close its worth used; absent for NT$
-             */
-            rateDay?: string;
             /**
              * @description A security's code, from the exchanges' lists (ADR 0017)
              * @example 00878
              */
             code?: string;
-            /** @description A security's newest close in NT$, which its worth used */
-            price?: components["schemas"]["Decimal"];
+            /** @description Its unit's newest price, which its worth used; absent for NT$ and for a unit without one */
+            price?: components["schemas"]["Price"];
+        };
+        /** @description What one unit is worth by its newest price, whatever the source (ADR 0020) */
+        Price: {
+            /**
+             * Format: date-time
+             * @description When the price held: the start of a rate's day, a close's 13:30, an exchange's fetch, the owner's word
+             */
+            asOf: string;
+            source: components["schemas"]["PriceSource"];
+            /**
+             * @description The unit the source priced it in
+             * @example USDT
+             */
+            quote: string;
+            /** @description One unit in the quote unit */
+            quoted: components["schemas"]["Decimal"];
+            /** @description One unit in NT$; through the quote unit's own newest price when that is not NT$, absent when that one is not in NT$ */
+            twd?: components["schemas"]["Decimal"];
+        };
+        /**
+         * @description The exchange-rate feed (ADR 0015), the stock exchanges' closes (ADR 0017), a crypto exchange's markets (ADR 0018), or the owner
+         * @enum {string}
+         */
+        PriceSource: "fawaz" | "twse" | "tpex" | "max" | "binance" | "bitget" | "owner";
+        /** @enum {string} */
+        UnitKind: "money" | "security" | "points";
+        Unit: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["UnitKind"];
+            /** @example 小樹點(信用卡) */
+            symbol: string;
+            /**
+             * @description A security's code
+             * @example 00878
+             */
+            code?: string;
         };
         /** @description Two consecutive balances in one unit that the lines between them do not join */
         BalanceGap: {
@@ -560,10 +680,44 @@ export interface components {
             /** @description Money that moved between them that no line shows */
             unseen: components["schemas"]["Decimal"];
         };
+        AccountCreate: {
+            /** @description Any but credit_card */
+            kind: components["schemas"]["AccountKind"];
+            /**
+             * @description Its own name (`label`), no other account's
+             * @example 飯店會員
+             */
+            name: string;
+        };
+        AccountCreated: {
+            /** Format: int64 */
+            id: number;
+        };
+        HoldingsUpdate: {
+            holdings: {
+                /**
+                 * @description Its symbol: a currency or coin, a security's name, a points program's
+                 * @example 飯店點數
+                 */
+                unit: string;
+                amount: components["schemas"]["Decimal"];
+                expiries: {
+                    amount: components["schemas"]["Decimal"];
+                    /** Format: date */
+                    by: string;
+                }[];
+            }[];
+        };
+        UnitPriceUpdate: {
+            /** @description What one unit is worth in the quote unit: 0 or more */
+            value: components["schemas"]["Decimal"];
+            /** @description A money unit to price it in, NT$ when left out; one with no price in NT$ gives it no worth */
+            quote?: string;
+        };
         AccountUpdate: {
             /** @description The owner's name for the account; empty clears it */
             name?: string;
-            /** @description Digits, spaces and dashes allowed; empty clears it */
+            /** @description Where the source prints a masked number, its digits (spaces and dashes allowed); else any. Empty clears it */
             fullNumber?: string;
         };
         /** @description The other line of a transfer or card payment (ADR 0016) */
@@ -634,10 +788,10 @@ export interface components {
          */
         TransactionSort: "newest" | "oldest" | "largest" | "smallest";
         /**
-         * @description A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), or a trade's (buy, sell; ADR 0017)
+         * @description A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
          * @enum {string}
          */
-        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment" | "interest" | "fee" | "other" | "buy" | "sell";
+        TransactionKind: "purchase" | "foreign_transaction_fee" | "annual_fee" | "refund" | "rebate" | "payment" | "interest" | "fee" | "other" | "buy" | "sell" | "earn" | "adjust" | "redeem";
         Transaction: {
             /** Format: int64 */
             id: number;
@@ -1030,6 +1184,32 @@ export interface operations {
             };
         };
     };
+    createAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountCreated"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
     getAccount: {
         parameters: {
             query?: never;
@@ -1076,6 +1256,102 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    updateHoldings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listUnits: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["UnitKind"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Units by kind and symbol */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"][];
+                };
+            };
+        };
+    };
+    setUnitPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitPriceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Set */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    clearUnitPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             404: components["responses"]["Problem"];
         };
     };

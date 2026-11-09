@@ -35,7 +35,12 @@ func Pool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("start postgres: %v", initErr)
 	}
 	ctx := t.Context()
-	if _, err := pool.Exec(ctx, "TRUNCATE documents, accounts, exchange_rates, quotes, river_job RESTART IDENTITY CASCADE"); err != nil {
+	// Units outlive accounts, so they keep their ids; what the migrations seed (NT$, the owner's prices of
+	// card points) is put back.
+	if _, err := pool.Exec(ctx, `
+		TRUNCATE documents, accounts, prices, river_job RESTART IDENTITY CASCADE;
+		DELETE FROM units WHERE id NOT IN (SELECT id FROM test_seed_units);
+		INSERT INTO prices SELECT * FROM test_seed_prices;`); err != nil {
 		t.Fatalf("reset database: %v", err)
 	}
 	return pool
@@ -64,6 +69,11 @@ func start() (*pgxpool.Pool, error) {
 	}
 	if err := db.Migrate(ctx, p); err != nil {
 		return nil, err
+	}
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE test_seed_units AS SELECT id FROM units;
+		CREATE TABLE test_seed_prices AS SELECT * FROM prices;`); err != nil {
+		return nil, fmt.Errorf("keep the seeds: %w", err)
 	}
 	return p, nil
 }

@@ -1,5 +1,6 @@
 """Small helpers shared by the bank parsers: ROC dates, amounts, descriptions."""
 
+import calendar
 import re
 import unicodedata
 from datetime import date, timedelta
@@ -20,6 +21,11 @@ def iso_date(text: str) -> date:
     """`2026/10/21` -> 2026-10-21."""
     year, month, day = (int(part) for part in text.split("/"))
     return date(year, month, day)
+
+
+def month_end(year: int, month: int) -> date:
+    """The last day of a month: a month's expiring points lapse by it (ADR 0019)."""
+    return date(year, month, calendar.monthrange(year, month)[1])
 
 
 def month_day(text: str, closing: date) -> date:

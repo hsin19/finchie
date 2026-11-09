@@ -1,4 +1,5 @@
-// Package quotes keeps the daily closing prices that give holdings a worth in NT$ (ADR 0017).
+// Package quotes keeps the daily closing prices that give holdings a worth in NT$ (ADR 0017), as prices
+// of the securities some account holds or held (ADR 0020), and each security's code and market.
 package quotes
 
 import (
@@ -7,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +20,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
 // Feed is one exchange's daily list of closing prices: free, without a key.
@@ -66,9 +70,9 @@ func (w *Worker) Timeout(*river.Job[FetchArgs]) time.Duration { return 5 * time.
 // One exchange failing does not lose the other's closes, but the job fails so River retries it.
 func (w *Worker) Work(ctx context.Context, _ *river.Job[FetchArgs]) error {
 	queries := dbq.New(w.pool)
-	names, err := queries.HeldSecurities(ctx)
+	names, err := queries.Securities(ctx)
 	if err != nil {
-		return fmt.Errorf("held securities: %w", err)
+		return fmt.Errorf("securities: %w", err)
 	}
 	if len(names) == 0 {
 		return nil
@@ -84,11 +88,14 @@ func (w *Worker) Work(ctx context.Context, _ *river.Job[FetchArgs]) error {
 			errs = append(errs, fmt.Errorf("%s: %w", feed.URL, err))
 			continue
 		}
-		params := keep(feed.Market, rows, held)
-		if len(params.Names) == 0 {
+		codes, prices := keep(feed.Market, rows, held)
+		if len(prices.Symbols) == 0 {
 			continue
 		}
-		if err := queries.UpsertQuotes(ctx, params); err != nil {
+		if err := queries.SetSecurityCodes(ctx, codes); err != nil {
+			return fmt.Errorf("store codes: %w", err)
+		}
+		if err := queries.UpsertPrices(ctx, prices); err != nil {
 			return fmt.Errorf("store quotes: %w", err)
 		}
 	}
@@ -132,10 +139,12 @@ func (w *Worker) fetch(ctx context.Context, url string) ([]row, error) {
 	return rows, nil
 }
 
-// keep takes the rows of held names that closed at a price; a security that did not trade that day
-// prints none, and its newest close stands.
-func keep(market string, rows []row, held map[string]bool) dbq.UpsertQuotesParams {
-	var params dbq.UpsertQuotesParams
+// keep takes the rows of held names that closed at a price, as of the close at 13:30 on the day, and
+// their codes; a security that did not trade that day prints none, and its newest close stands.
+func keep(market string, rows []row, held map[string]bool) (dbq.SetSecurityCodesParams, dbq.UpsertPricesParams) {
+	var codes dbq.SetSecurityCodesParams
+	prices := dbq.UpsertPricesParams{Source: market, Kind: ingest.UnitSecurity}
+	one := pgtype.Numeric{Int: big.NewInt(1), Valid: true}
 	for _, r := range rows {
 		code, name, closing := r.Code, r.Name, r.ClosingPrice
 		if market == "tpex" {
@@ -151,13 +160,16 @@ func keep(market string, rows []row, held map[string]bool) dbq.UpsertQuotesParam
 		if err := price.Scan(strings.TrimSpace(closing)); err != nil || price.Int == nil || price.Int.Sign() <= 0 {
 			continue
 		}
-		params.Days = append(params.Days, day)
-		params.Names = append(params.Names, name)
-		params.Codes = append(params.Codes, strings.TrimSpace(code))
-		params.Markets = append(params.Markets, market)
-		params.Closes = append(params.Closes, price)
+		codes.Symbols = append(codes.Symbols, name)
+		codes.Codes = append(codes.Codes, strings.TrimSpace(code))
+		codes.Markets = append(codes.Markets, market)
+		prices.Symbols = append(prices.Symbols, name)
+		prices.AsOf = append(prices.AsOf, pgtype.Timestamptz{Time: taipei.At(day.Time, 13, 30), Valid: true})
+		prices.Amounts = append(prices.Amounts, one)
+		prices.Quotes = append(prices.Quotes, "TWD")
+		prices.QuoteAmounts = append(prices.QuoteAmounts, price)
 	}
-	return params
+	return codes, prices
 }
 
 // rocDay reads the lists' dates, Minguo years without separators: 1151106 is 2026-11-06.
