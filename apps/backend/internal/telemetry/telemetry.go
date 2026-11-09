@@ -78,9 +78,33 @@ func Setup(ctx context.Context, version string, stdout slog.Handler) (*slog.Logg
 		return nil, nil, fmt.Errorf("runtime metrics: %w", err)
 	}
 
-	logger := slog.New(slog.NewMultiHandler(stdout, otelslog.NewHandler(Scope, otelslog.WithLoggerProvider(loggerProvider))))
 	shutdown := func(ctx context.Context) error {
 		return errors.Join(tracerProvider.Shutdown(ctx), meterProvider.Shutdown(ctx), loggerProvider.Shutdown(ctx))
 	}
-	return logger, shutdown, nil
+	return newLogger(stdout, loggerProvider), shutdown, nil
+}
+
+// newLogger writes to stdout and over OTLP the same records: otelslog's handler takes every level,
+// and libraries such as River log at debug.
+func newLogger(stdout slog.Handler, provider *sdklog.LoggerProvider) *slog.Logger {
+	otlp := otelslog.NewHandler(Scope, otelslog.WithLoggerProvider(provider))
+	return slog.New(slog.NewMultiHandler(stdout, levelOf{otlp, stdout}))
+}
+
+// levelOf passes a record on only at the levels the reference handler takes.
+type levelOf struct {
+	slog.Handler
+	reference slog.Handler
+}
+
+func (h levelOf) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.reference.Enabled(ctx, level) && h.Handler.Enabled(ctx, level)
+}
+
+func (h levelOf) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return levelOf{h.Handler.WithAttrs(attrs), h.reference}
+}
+
+func (h levelOf) WithGroup(name string) slog.Handler {
+	return levelOf{h.Handler.WithGroup(name), h.reference}
 }
