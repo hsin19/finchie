@@ -103,15 +103,17 @@ JOIN accounts a ON a.id = t.account_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
-LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
-                                             'transactionDate', p.transaction_date, 'amount', p.amount::text,
-                                             'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
+-- Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+-- parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
+LEFT JOIN LATERAL (SELECT jsonb_build_object('id'::text, p.id, 'statementId'::text, p.statement_id, 'kind'::text, p.kind,
+                                             'transactionDate'::text, p.transaction_date, 'amount'::text, p.amount::text,
+                                             'originalAmount'::text, p.original_amount::text, 'originalCurrency'::text, p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
 LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
-                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
-                                                       'transactionDate', c.transaction_date, 'amount', c.amount::text,
-                                             'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
+                          jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
+                                                       'transactionDate'::text, c.transaction_date, 'amount'::text, c.amount::text,
+                                             'originalAmount'::text, c.original_amount::text, 'originalCurrency'::text, c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE c.parent_id = t.id) kids ON true

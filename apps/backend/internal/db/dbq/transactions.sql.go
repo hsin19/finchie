@@ -277,15 +277,15 @@ JOIN accounts a ON a.id = t.account_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
-LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
-                                             'transactionDate', p.transaction_date, 'amount', p.amount::text,
-                                             'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
+LEFT JOIN LATERAL (SELECT jsonb_build_object('id'::text, p.id, 'statementId'::text, p.statement_id, 'kind'::text, p.kind,
+                                             'transactionDate'::text, p.transaction_date, 'amount'::text, p.amount::text,
+                                             'originalAmount'::text, p.original_amount::text, 'originalCurrency'::text, p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
 LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
-                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
-                                                       'transactionDate', c.transaction_date, 'amount', c.amount::text,
-                                             'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
+                          jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
+                                                       'transactionDate'::text, c.transaction_date, 'amount'::text, c.amount::text,
+                                             'originalAmount'::text, c.original_amount::text, 'originalCurrency'::text, c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE $1::boolean AND c.parent_id = t.id) kids ON true
@@ -365,6 +365,8 @@ type SearchTransactionsRow struct {
 // A link (ADR 0016) is one row too: the line its money went to (another account's inflow, a card bill's
 // payment line) is listed under the outflow it came from whenever that outflow matches as well. A view
 // without the outflow, such as another account or the month before, lists the line itself.
+// Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+// parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
 // Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
 // big payment counts as large. Ties go newest first, then in statement line order.
 func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactionsParams) ([]SearchTransactionsRow, error) {
@@ -518,15 +520,15 @@ JOIN accounts a ON a.id = t.account_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
-LEFT JOIN LATERAL (SELECT jsonb_build_object('id', p.id, 'statementId', p.statement_id, 'kind', p.kind,
-                                             'transactionDate', p.transaction_date, 'amount', p.amount::text,
-                                             'originalAmount', p.original_amount::text, 'originalCurrency', p.original_currency) AS ref
+LEFT JOIN LATERAL (SELECT jsonb_build_object('id'::text, p.id, 'statementId'::text, p.statement_id, 'kind'::text, p.kind,
+                                             'transactionDate'::text, p.transaction_date, 'amount'::text, p.amount::text,
+                                             'originalAmount'::text, p.original_amount::text, 'originalCurrency'::text, p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
 LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
-                          jsonb_agg(jsonb_build_object('id', c.id, 'statementId', c.statement_id, 'kind', c.kind,
-                                                       'transactionDate', c.transaction_date, 'amount', c.amount::text,
-                                             'originalAmount', c.original_amount::text, 'originalCurrency', c.original_currency)
+                          jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
+                                                       'transactionDate'::text, c.transaction_date, 'amount'::text, c.amount::text,
+                                             'originalAmount'::text, c.original_amount::text, 'originalCurrency'::text, c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE c.parent_id = t.id) kids ON true
@@ -581,6 +583,8 @@ type TransactionFamilyRow struct {
 
 // A line with its parent and its children, whichever statements they are on; the same columns as
 // ListTransactions.
+// Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+// parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
 func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]TransactionFamilyRow, error) {
 	rows, err := q.db.Query(ctx, transactionFamily, id)
 	if err != nil {
