@@ -15,6 +15,7 @@ const documentCounts = `-- name: DocumentCounts :many
 SELECT (CASE WHEN status = 'failed' AND error LIKE 'Unimplemented%' THEN 'skipped' ELSE status END)::text AS status,
        count(*)::integer AS documents
 FROM documents
+WHERE $1::text IS NULL OR strpos(lower(filename), lower($1::text)) > 0
 GROUP BY 1
 `
 
@@ -25,8 +26,9 @@ type DocumentCountsRow struct {
 
 // Documents by status as the web app shows it: a failure because no parser handles the file is
 // "skipped", since there is nothing to fix or retry.
-func (q *Queries) DocumentCounts(ctx context.Context) ([]DocumentCountsRow, error) {
-	rows, err := q.db.Query(ctx, documentCounts)
+// With a query, only documents whose filename holds it.
+func (q *Queries) DocumentCounts(ctx context.Context, query *string) ([]DocumentCountsRow, error) {
+	rows, err := q.db.Query(ctx, documentCounts, query)
 	if err != nil {
 		return nil, err
 	}
@@ -157,9 +159,22 @@ SELECT d.id, d.sha256, d.filename, d.content_type, octet_length(d.content)::inte
        (SELECT count(DISTINCT b.account_id) FROM balances b WHERE b.statement_id = s.id)::integer AS account_count
 FROM documents d
 LEFT JOIN statements s ON s.document_id = d.id
+WHERE ($1::bigint IS NULL
+       OR (d.received_at, d.id) < (SELECT b.received_at, b.id FROM documents b WHERE b.id = $1::bigint))
+  AND ($2::text[] IS NULL
+       OR (CASE WHEN d.status = 'failed' AND d.error LIKE 'Unimplemented%' THEN 'skipped' ELSE d.status END)
+          = ANY ($2::text[]))
+  AND ($3::text IS NULL OR strpos(lower(d.filename), lower($3::text)) > 0)
 ORDER BY d.received_at DESC, d.id DESC
-LIMIT $1
+LIMIT $4
 `
+
+type ListDocumentsParams struct {
+	Before   *int64
+	States   []string
+	Query    *string
+	RowLimit int32
+}
 
 type ListDocumentsRow struct {
 	ID            int64
@@ -179,9 +194,15 @@ type ListDocumentsRow struct {
 	AccountCount  int32
 }
 
-// The same columns as GetDocument.
-func (q *Queries) ListDocuments(ctx context.Context, rowLimit int32) ([]ListDocumentsRow, error) {
-	rows, err := q.db.Query(ctx, listDocuments, rowLimit)
+// The same columns as GetDocument, newest first. `before` continues the list after that document;
+// states are as DocumentCounts names them.
+func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([]ListDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, listDocuments,
+		arg.Before,
+		arg.States,
+		arg.Query,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

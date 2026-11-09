@@ -63,27 +63,57 @@ func (e AccountKind) Valid() bool {
 	}
 }
 
+// Defines values for DocumentState.
+const (
+	DocumentStateDuplicate   DocumentState = "duplicate"
+	DocumentStateFailed      DocumentState = "failed"
+	DocumentStateNeedsReview DocumentState = "needs_review"
+	DocumentStateParsed      DocumentState = "parsed"
+	DocumentStatePending     DocumentState = "pending"
+	DocumentStateSkipped     DocumentState = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the DocumentState enum.
+func (e DocumentState) Valid() bool {
+	switch e {
+	case DocumentStateDuplicate:
+		return true
+	case DocumentStateFailed:
+		return true
+	case DocumentStateNeedsReview:
+		return true
+	case DocumentStateParsed:
+		return true
+	case DocumentStatePending:
+		return true
+	case DocumentStateSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DocumentStatus.
 const (
-	Duplicate   DocumentStatus = "duplicate"
-	Failed      DocumentStatus = "failed"
-	NeedsReview DocumentStatus = "needs_review"
-	Parsed      DocumentStatus = "parsed"
-	Pending     DocumentStatus = "pending"
+	DocumentStatusDuplicate   DocumentStatus = "duplicate"
+	DocumentStatusFailed      DocumentStatus = "failed"
+	DocumentStatusNeedsReview DocumentStatus = "needs_review"
+	DocumentStatusParsed      DocumentStatus = "parsed"
+	DocumentStatusPending     DocumentStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the DocumentStatus enum.
 func (e DocumentStatus) Valid() bool {
 	switch e {
-	case Duplicate:
+	case DocumentStatusDuplicate:
 		return true
-	case Failed:
+	case DocumentStatusFailed:
 		return true
-	case NeedsReview:
+	case DocumentStatusNeedsReview:
 		return true
-	case Parsed:
+	case DocumentStatusParsed:
 		return true
-	case Pending:
+	case DocumentStatusPending:
 		return true
 	default:
 		return false
@@ -492,6 +522,13 @@ type Document struct {
 	Warnings []string       `json:"warnings"`
 }
 
+// DocumentPage defines model for DocumentPage.
+type DocumentPage struct {
+	// ByState Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out
+	ByState []StateCount `json:"byState"`
+	Items   []Document   `json:"items"`
+}
+
 // DocumentPreview defines model for DocumentPreview.
 type DocumentPreview struct {
 	Email *EmailPreview `json:"email,omitempty"`
@@ -499,6 +536,11 @@ type DocumentPreview struct {
 	// Files The e-mail's attachments in order, or the bare PDF
 	Files []PreviewFile `json:"files"`
 }
+
+// DocumentState A document's status as the web app shows it: a failure because no parser handles the file
+// (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
+// failure.
+type DocumentState string
 
 // DocumentStatus pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
 // transactions don't add up to the statement. duplicate: the same statement came from
@@ -665,6 +707,16 @@ type Reconciliation struct {
 	// Example: 1234.50
 	Stated      Decimal `json:"stated"`
 	StatedLabel string  `json:"statedLabel"`
+}
+
+// StateCount defines model for StateCount.
+type StateCount struct {
+	Count int `json:"count"`
+
+	// State A document's status as the web app shows it: a failure because no parser handles the file
+	// (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
+	// failure.
+	State DocumentState `json:"state"`
 }
 
 // Statement defines model for Statement.
@@ -910,6 +962,13 @@ type ListAccountLinesParams struct {
 // ListDocumentsParams defines parameters for ListDocuments.
 type ListDocumentsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Before The last document of the page before; the list continues after it
+	Before *int64           `form:"before,omitempty" json:"before,omitempty"`
+	State  *[]DocumentState `form:"state,omitempty" json:"state,omitempty"`
+
+	// Q Case-insensitive substring of the filename
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
 }
 
 // UploadDocumentMultipartBody defines parameters for UploadDocument.
@@ -1004,7 +1063,7 @@ type ServerInterface interface {
 	// ListAccountLines An account's lines, newest first
 	// (GET /api/accounts/{id}/lines)
 	ListAccountLines(ctx *echo.Context, id Id, params ListAccountLinesParams) error
-	// ListDocuments Uploaded documents, newest first
+	// ListDocuments Uploaded documents, newest first, a page at a time
 	// (GET /api/documents)
 	ListDocuments(ctx *echo.Context, params ListDocumentsParams) error
 	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
@@ -1174,6 +1233,27 @@ func (w *ServerInterfaceWrapper) ListDocuments(ctx *echo.Context) error {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", ctx.QueryParams(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter limit: %s", err))
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", ctx.QueryParams(), &params.Before, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter before: %s", err))
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", ctx.QueryParams(), &params.State, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter state: %s", err))
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", ctx.QueryParams(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter q: %s", err))
 	}
 
 	// Invoke the callback with all the unmarshaled arguments
@@ -1883,7 +1963,7 @@ type ListDocumentsResponseObject interface {
 	VisitListDocumentsResponse(w http.ResponseWriter) error
 }
 
-type ListDocuments200JSONResponse []Document
+type ListDocuments200JSONResponse DocumentPage
 
 func (response ListDocuments200JSONResponse) VisitListDocumentsResponse(w http.ResponseWriter) error {
 
@@ -2748,7 +2828,7 @@ type StrictServerInterface interface {
 	// ListAccountLines An account's lines, newest first
 	// (GET /api/accounts/{id}/lines)
 	ListAccountLines(ctx context.Context, request ListAccountLinesRequestObject) (ListAccountLinesResponseObject, error)
-	// ListDocuments Uploaded documents, newest first
+	// ListDocuments Uploaded documents, newest first, a page at a time
 	// (GET /api/documents)
 	ListDocuments(ctx context.Context, request ListDocumentsRequestObject) (ListDocumentsResponseObject, error)
 	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing

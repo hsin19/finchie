@@ -44,17 +44,33 @@ paths:
           $ref: "#/components/responses/Problem"
     get:
       operationId: listDocuments
-      summary: Uploaded documents, newest first
+      summary: Uploaded documents, newest first, a page at a time
+      description: |
+        Filters combine with AND. A page shorter than `limit` is the last; the next one starts
+        `before` the last document of this one.
       parameters:
         - $ref: "#/components/parameters/Limit"
+        - name: before
+          in: query
+          description: The last document of the page before; the list continues after it
+          schema: { type: integer, format: int64 }
+        - name: state
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/DocumentState" }
+        - name: q
+          in: query
+          description: Case-insensitive substring of the filename
+          schema: { type: string }
       responses:
         "200":
-          description: Documents
+          description: One page of documents, and how many match in each state
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/Document" }
+              schema: { $ref: "#/components/schemas/DocumentPage" }
 
   /api/documents/{id}:
     get:
@@ -614,6 +630,33 @@ components:
         pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
         transactions don't add up to the statement. duplicate: the same statement came from
         another document. failed: the parser could not read it (see `error`).
+
+    DocumentState:
+      type: string
+      enum: [pending, parsed, needs_review, duplicate, failed, skipped]
+      description: |
+        A document's status as the web app shows it: a failure because no parser handles the file
+        (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
+        failure.
+
+    DocumentPage:
+      type: object
+      required: [items, byState]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Document" }
+        byState:
+          type: array
+          description: "Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out"
+          items: { $ref: "#/components/schemas/StateCount" }
+
+    StateCount:
+      type: object
+      required: [state, count]
+      properties:
+        state: { $ref: "#/components/schemas/DocumentState" }
+        count: { type: integer }
 
     Document:
       type: object

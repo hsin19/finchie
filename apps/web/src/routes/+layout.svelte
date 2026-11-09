@@ -40,13 +40,13 @@ let palette = $state(false);
 const carried = $derived(carriedQueries(page.route.id, page.url.searchParams));
 const nav = $derived([
     { key: "o", label: "總覽", href: resolve("/"), current: page.route.id === "/" },
-    { key: "s", label: "帳單", href: resolve(`/statements${carried.statements}`), current: /^\/(statements|documents)/.test(page.route.id ?? "") },
+    { key: "s", label: "帳單", href: resolve(`/statements${carried.statements}`), current: /^\/statements/.test(page.route.id ?? "") },
     { key: "t", label: "交易", href: resolve(`/transactions${carried.transactions}`), current: page.route.id === "/transactions" },
     { key: "a", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? "") },
-    { key: "u", label: "上傳", href: resolve("/upload"), current: page.route.id === "/upload" },
+    { key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? "") },
 ]);
-// The last one, upload, sits apart on wide screens.
-const upload = $derived(nav[nav.length - 1]);
+// The last one, documents (where uploads go), sits apart on wide screens.
+const documents = $derived(nav[nav.length - 1]);
 
 const prompt = $derived(commandLine(page.url.pathname, page.url.searchParams, (page.data as { command?: string; }).command));
 
@@ -88,7 +88,7 @@ onKeys({
     "s": () => go("s"),
     "t": () => go("t"),
     "a": () => go("a"),
-    "u": () => go("u"),
+    "d": () => go("d"),
     "/": () => void searchTransactions(),
     "?": () => (help = !help),
 }, { global: true });
@@ -126,10 +126,10 @@ function onkeydown(event: KeyboardEvent) {
             {/each}
         </nav>
         <a
-            href={upload.href}
-            aria-current={upload.current ? "page" : undefined}
-            class="hidden rounded-[4px] border border-accent px-3 py-2 text-ink hover:bg-accent/10 hover:text-ink md:block"
-        ><span class="text-accent">[u]</span> 上傳</a>
+            href={documents.href}
+            aria-current={documents.current ? "page" : undefined}
+            class="hidden rounded-[4px] border px-3 py-2 text-ink hover:bg-accent/10 hover:text-ink md:block {documents.current ? 'border-accent bg-accent/10' : 'border-accent'}"
+        ><span class="text-accent">[d]</span> 文件</a>
     </header>
 
     <main class="flex grow flex-col gap-3">

@@ -117,15 +117,49 @@ func (s *Server) UploadDocument(ctx context.Context, request UploadDocumentReque
 }
 
 func (s *Server) ListDocuments(ctx context.Context, request ListDocumentsRequestObject) (ListDocumentsResponseObject, error) {
-	rows, err := dbq.New(s.pool).ListDocuments(ctx, limit(request.Params.Limit))
+	params := request.Params
+	query := blankAsNil(params.Q)
+	var states []string // nil, not empty: no state filter
+	if params.State != nil {
+		for _, state := range *params.State {
+			states = append(states, string(state))
+		}
+	}
+	queries := dbq.New(s.pool)
+	rows, err := queries.ListDocuments(ctx, dbq.ListDocumentsParams{
+		Before:   params.Before,
+		States:   states,
+		Query:    query,
+		RowLimit: limit(params.Limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
-	docs := make(ListDocuments200JSONResponse, 0, len(rows))
-	for _, row := range rows {
-		docs = append(docs, toDocument(dbq.GetDocumentRow(row)))
+	counts, err := queries.DocumentCounts(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("count documents: %w", err)
 	}
-	return docs, nil
+
+	page := DocumentPage{Items: make([]Document, 0, len(rows)), ByState: []StateCount{}}
+	for _, row := range rows {
+		page.Items = append(page.Items, toDocument(dbq.GetDocumentRow(row)))
+	}
+	byState := map[string]int{}
+	for _, row := range counts {
+		byState[row.Status] = int(row.Documents)
+	}
+	for _, state := range documentStates {
+		if n := byState[string(state)]; n > 0 {
+			page.ByState = append(page.ByState, StateCount{State: state, Count: n})
+		}
+	}
+	return ListDocuments200JSONResponse(page), nil
+}
+
+// documentStates in the order the web app lists them.
+var documentStates = []DocumentState{
+	DocumentStatePending, DocumentStateParsed, DocumentStateNeedsReview,
+	DocumentStateDuplicate, DocumentStateFailed, DocumentStateSkipped,
 }
 
 func (s *Server) GetDocument(ctx context.Context, request GetDocumentRequestObject) (GetDocumentResponseObject, error) {

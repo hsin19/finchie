@@ -26,7 +26,7 @@ func ObserveDocuments(pool *pgxpool.Pool, meter metric.Meter) error {
 		return fmt.Errorf("documents gauge: %w", err)
 	}
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		rows, err := dbq.New(pool).DocumentCounts(ctx)
+		rows, err := dbq.New(pool).DocumentCounts(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("count documents: %w", err)
 		}

@@ -36,7 +36,9 @@ export const load = (async ({ fetch, depends }) => {
 
     return {
         statements: statementList,
-        documents: need(documents),
+        // The newest, for what every page shows of them and to see what is still parsing; /documents
+        // lists them all.
+        documents: need(documents).items,
         latestMonth,
         months: monthsBetween(oldest, newestMonth),
     };

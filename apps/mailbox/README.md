@@ -9,7 +9,7 @@ bank ──▶ Gmail ──filter, forward──▶ finchie@<domain> (Email Rout
      ──POST /api/documents, Access service token──▶ backend (dedupe, parse, reconcile as usual)
 ```
 
-The Gmail filter comes from the backend: the web app's upload page links `/api/mail-filters.xml`, generated from the parsers' claims (each one's sender domains and subject terms, so a bank's other e-mails stay out) and forwarding to `BACKEND_MAILBOX_ADDRESS` ([ADR 0014](../../docs/adr/0014-recognizing-statements.md)). Import it in Gmail (Settings, Filters and Blocked Addresses, Import filters) with "apply to matching conversations" if the old statements should get its label too, and import it again after a new kind of statement is supported, deleting the previous one. A filter of the owner's own that already forwards statements has to stop forwarding, or each arrives twice.
+The Gmail filter comes from the backend: the web app's documents page links `/api/mail-filters.xml`, generated from the parsers' claims (each one's sender domains and subject terms, so a bank's other e-mails stay out) and forwarding to `BACKEND_MAILBOX_ADDRESS` ([ADR 0014](../../docs/adr/0014-recognizing-statements.md)). Import it in Gmail (Settings, Filters and Blocked Addresses, Import filters) with "apply to matching conversations" if the old statements should get its label too, and import it again after a new kind of statement is supported, deleting the previous one. A filter of the owner's own that already forwards statements has to stop forwarding, or each arrives twice.
 
 | Mail | What happens |
 |---|---|

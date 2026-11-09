@@ -11,7 +11,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Uploaded documents, newest first */
+        /**
+         * Uploaded documents, newest first, a page at a time
+         * @description Filters combine with AND. A page shorter than `limit` is the last; the next one starts
+         *     `before` the last document of this one.
+         */
         get: operations["listDocuments"];
         put?: never;
         /**
@@ -442,6 +446,22 @@ export interface components {
          * @enum {string}
          */
         DocumentStatus: "pending" | "parsed" | "needs_review" | "duplicate" | "failed";
+        /**
+         * @description A document's status as the web app shows it: a failure because no parser handles the file
+         *     (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
+         *     failure.
+         * @enum {string}
+         */
+        DocumentState: "pending" | "parsed" | "needs_review" | "duplicate" | "failed" | "skipped";
+        DocumentPage: {
+            items: components["schemas"]["Document"][];
+            /** @description Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out */
+            byState: components["schemas"]["StateCount"][];
+        };
+        StateCount: {
+            state: components["schemas"]["DocumentState"];
+            count: number;
+        };
         Document: {
             /** Format: int64 */
             id: number;
@@ -925,6 +945,11 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: components["parameters"]["Limit"];
+                /** @description The last document of the page before; the list continues after it */
+                before?: number;
+                state?: components["schemas"]["DocumentState"][];
+                /** @description Case-insensitive substring of the filename */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -932,13 +957,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Documents */
+            /** @description One page of documents, and how many match in each state */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Document"][];
+                    "application/json": components["schemas"]["DocumentPage"];
                 };
             };
         };

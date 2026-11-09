@@ -86,7 +86,7 @@ async function reparse(id: number) {
                     </tr>
                 {:else}
                     <tr class="border-t border-rule">
-                        <td colspan="8" class="py-3 text-mute">還沒有帳單。<a href={resolve("/upload")}>上傳 →</a></td>
+                        <td colspan="8" class="py-3 text-mute">還沒有帳單。<a href={resolve("/documents")}>上傳 →</a></td>
                     </tr>
                 {/each}
             </tbody>

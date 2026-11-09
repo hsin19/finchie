@@ -51,7 +51,7 @@ browser ── Cloudflare Access ── Tunnel ──▶ backend (Go) ── gRP
 | Cathay United Bank | Password-protected PDF | Deposit accounts come from the CUBE app's e-passbook (電子存摺), since the monthly bank statement e-mail carries only a link |
 | HSBC Taiwan | Password-protected PDF | Transaction descriptions are images, read with OCR |
 
-Statements are taken as e-mails only ([ADR 0014](docs/adr/0014-recognizing-statements.md)). Let Gmail forward them to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)): the upload page offers the Gmail filter to import, generated from the parsers. Or upload the `.eml` by hand, as the bank sent it or forwarded. A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
+Statements are taken as e-mails only ([ADR 0014](docs/adr/0014-recognizing-statements.md)). Let Gmail forward them to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)): the documents page offers the Gmail filter to import, generated from the parsers. Or upload the `.eml` by hand, as the bank sent it or forwarded. A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
 
 ## Getting started
 

@@ -16,7 +16,9 @@ export type Expiry = Schemas["Expiry"];
 export type BalanceGap = Schemas["BalanceGap"];
 export type CardTotal = Schemas["CardTotal"];
 export type Document = Schemas["Document"];
+export type DocumentPage = Schemas["DocumentPage"];
 export type DocumentPreview = Schemas["DocumentPreview"];
+export type DocumentState = Schemas["DocumentState"];
 export type DocumentStatus = Schemas["DocumentStatus"];
 export type KindTotal = Schemas["KindTotal"];
 export type LineCounterpart = Schemas["LineCounterpart"];
@@ -38,6 +40,7 @@ export type TransactionQuery = NonNullable<paths["/api/transactions"]["get"]["pa
 export const LEDGER = "app:ledger";
 
 export const TRANSACTIONS_PAGE_SIZE = 50;
+export const DOCUMENTS_PAGE_SIZE = 50;
 
 /** In a load function pass its `fetch`, so SvelteKit can track and replay the requests. */
 export function api(fetchFn: typeof fetch = fetch) {

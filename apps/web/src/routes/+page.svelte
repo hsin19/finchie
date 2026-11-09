@@ -161,7 +161,7 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
                 </span>
             </a>
         {:else}
-            <p class="m-0 border-t border-rule pt-2.5 text-mute">還沒有帳單。<a href={resolve("/upload")}>上傳第一份 →</a></p>
+            <p class="m-0 border-t border-rule pt-2.5 text-mute">還沒有帳單。<a href={resolve("/documents")}>上傳第一份 →</a></p>
         {/each}
     </section>
 </div>

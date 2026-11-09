@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,7 +104,7 @@ func TestUploadStoresTheDocumentAndQueuesOneParse(t *testing.T) {
 		t.Fatalf("status = %d: %s", first.Code, first.Body)
 	}
 	doc := decode[Document](t, first)
-	if doc.Status != Pending || doc.ContentType != "message/rfc822" || doc.SizeBytes != 19 || len(doc.Sha256) != 64 {
+	if doc.Status != DocumentStatusPending || doc.ContentType != "message/rfc822" || doc.SizeBytes != 19 || len(doc.Sha256) != 64 {
 		t.Fatalf("document = %+v", doc)
 	}
 
@@ -130,7 +131,7 @@ func TestUploadRefusesAnythingButAnEmailBeforeStoringIt(t *testing.T) {
 			t.Errorf("%s: %d %s", name, recorder.Code, recorder.Body)
 		}
 	}
-	if docs := decode[[]Document](t, get(t, e, "/api/documents")); len(docs) != 0 {
+	if docs := decode[DocumentPage](t, get(t, e, "/api/documents")); len(docs.Items) != 0 {
 		t.Fatalf("documents = %+v", docs)
 	}
 	if n := queuedJobs(t, pool); n != 0 {
@@ -180,7 +181,7 @@ func TestReadEndpoints(t *testing.T) {
 	e, _ := newAPI(t, 1<<20)
 	postFile(t, e, "file", "a.eml", []byte("From: bank\r\n\r\none"))
 
-	if docs := decode[[]Document](t, get(t, e, "/api/documents?limit=10")); len(docs) != 1 {
+	if docs := decode[DocumentPage](t, get(t, e, "/api/documents?limit=10")); len(docs.Items) != 1 {
 		t.Fatalf("documents = %+v", docs)
 	}
 	if statements := decode[[]Statement](t, get(t, e, "/api/statements")); len(statements) != 0 {
@@ -190,6 +191,64 @@ func TestReadEndpoints(t *testing.T) {
 		if got := get(t, e, path).Code; got != http.StatusNotFound {
 			t.Errorf("%s: status = %d", path, got)
 		}
+	}
+}
+
+func TestDocumentListPagesOnFromTheLastDocumentAndFilters(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	// Oldest first: a1 parsed, a2 failed, a3 skipped (no parser handles it), b4 needs review.
+	states := []struct{ name, status, error string }{
+		{"a1-bill.eml", "parsed", ""},
+		{"a2-bill.eml", "failed", "Internal: a line before its table's headings"},
+		{"a3-promo.eml", "failed", "Unimplemented: no parser claims it"},
+		{"b4-BILL.eml", "needs_review", ""},
+	}
+	ids := map[string]int64{}
+	for i, s := range states {
+		doc := decode[Document](t, postFile(t, e, "file", s.name, fmt.Appendf(nil, "From: bank\r\n\r\n%d", i)))
+		ids[s.name] = doc.Id
+		var docError *string
+		if s.error != "" {
+			docError = &s.error
+		}
+		if _, err := pool.Exec(t.Context(), "UPDATE documents SET status = $1, error = $2 WHERE id = $3", s.status, docError, doc.Id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names := func(page DocumentPage) []string {
+		var out []string
+		for _, doc := range page.Items {
+			out = append(out, doc.Filename)
+		}
+		return out
+	}
+
+	first := decode[DocumentPage](t, get(t, e, "/api/documents?limit=2"))
+	if got := names(first); !slices.Equal(got, []string{"b4-BILL.eml", "a3-promo.eml"}) {
+		t.Fatalf("first page = %v", got)
+	}
+	next := decode[DocumentPage](t, get(t, e, fmt.Sprintf("/api/documents?limit=2&before=%d", first.Items[1].Id)))
+	if got := names(next); !slices.Equal(got, []string{"a2-bill.eml", "a1-bill.eml"}) {
+		t.Fatalf("next page = %v", got)
+	}
+	want := []StateCount{{State: DocumentStateParsed, Count: 1}, {State: DocumentStateNeedsReview, Count: 1}, {State: DocumentStateFailed, Count: 1}, {State: DocumentStateSkipped, Count: 1}}
+	if !slices.Equal(next.ByState, want) {
+		t.Fatalf("byState = %+v, want %+v", next.ByState, want)
+	}
+
+	// A failure no parser handles is skipped, not failed.
+	todo := decode[DocumentPage](t, get(t, e, "/api/documents?state=failed&state=needs_review"))
+	if got := names(todo); !slices.Equal(got, []string{"b4-BILL.eml", "a2-bill.eml"}) {
+		t.Fatalf("failed and needs_review = %v", got)
+	}
+	// The counts follow the search but not the state filter.
+	bills := decode[DocumentPage](t, get(t, e, "/api/documents?q=+bill+&state=parsed"))
+	if got := names(bills); !slices.Equal(got, []string{"a1-bill.eml"}) {
+		t.Fatalf("parsed bills = %v", got)
+	}
+	want = []StateCount{{State: DocumentStateParsed, Count: 1}, {State: DocumentStateNeedsReview, Count: 1}, {State: DocumentStateFailed, Count: 1}}
+	if !slices.Equal(bills.ByState, want) {
+		t.Fatalf("bills byState = %+v, want %+v", bills.ByState, want)
 	}
 }
 
