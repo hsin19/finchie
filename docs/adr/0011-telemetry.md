@@ -12,7 +12,7 @@ The backend sends traces, metrics, and logs with OpenTelemetry over OTLP (gRPC),
 | Metrics | HTTP request duration and sizes by route, River job metrics, Go runtime, and `finchie.documents{status}`: documents by status, read from the database at each collection, for alerting on statements that failed to parse or do not reconcile (since ADR 0013 also `finchie.accounts.gaps`, accounts whose balances do not join up) |
 | Logs | `slog` writes to stdout and, through the `otelslog` bridge, over OTLP with the trace a record was logged in. A deployment that also collects the container's stdout should stop, or every line arrives twice; what is printed before telemetry starts (a startup failure) is then on stdout only |
 
-The parser is not instrumented yet; the backend already propagates the trace context to it, so its spans will join the same traces once it is.
+The parser is not instrumented yet; the backend already propagates the trace context to it, so its spans will join the same traces once it is. (It is now, the same way: the same switch and `OTEL_*` variables, `finchie-parser` by default, `service.version` from the image (`PARSER_VERSION`). A span for every call but health checks, a child of the backend's call to it, with spans for picking the statement, parsing, and each OCR; process metrics (CPU, memory, threads, garbage collection); and `logging` records over OTLP through `opentelemetry-instrumentation-logging`, besides stdout.)
 
 ## Alternatives considered
 

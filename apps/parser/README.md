@@ -36,6 +36,14 @@ Adding a kind of statement: subclass `StatementParser` with its sender domains, 
 
 An unbalanced statement is not an error: it comes back `OK` with `reconciliation.balanced = false`.
 
+## Telemetry
+
+With `OTEL_EXPORTER_OTLP_ENDPOINT` set (`telemetry.py`, ADR 0011):
+
+- **Traces.** A span for every call but health checks, named after the method (`/finchie.parser.v1.ParserService/ParseDocument`), a child of the backend's call through the trace context it sends. It carries `finchie.document.id`, and for a parsed statement `finchie.parser.name`, `finchie.parser.version`, `finchie.statement.lines`, and `finchie.statement.balanced`. Under it, `select_statement` (decrypting and reading the PDFs), `parse`, and an `ocr` span per page strip, which includes waiting for the one OCR engine. A rejected document is an error with its status code; anything else that fails, a bug, records its exception.
+- **Metrics.** The process's CPU time, memory, threads, and garbage collections.
+- **Logs.** Every `logging` record, also on stdout, with the trace it was logged in.
+
 ## Configuration
 
 Environment variables, prefix `PARSER_`, nested keys split by `__`. Local runs also read `../../.local/parser.env`.
@@ -51,6 +59,10 @@ Environment variables, prefix `PARSER_`, nested keys split by `__`. Local runs a
 | `PARSER_MAX_MESSAGE_MB` | `33` | gRPC message limit. Keep it 1 above the backend's `BACKEND_MAX_UPLOAD_MB`: a request is the whole file plus its other fields |
 | `PARSER_OCR` | `true` | Without OCR, HSBC descriptions are empty and a warning is returned, and CTBC statements cannot be read |
 | `PARSER_LOG_LEVEL` | `INFO` | |
+| `PARSER_VERSION` | `dev` | The release, reported as `service.version`. The image sets it; leave it alone |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Where traces, metrics, and logs go over OTLP gRPC, e.g. `http://collector:4317`. Unset: nothing leaves the process, logs go to stdout only (ADR 0011) |
+| `OTEL_SERVICE_NAME` | `finchie-parser` | |
+| `OTEL_RESOURCE_ATTRIBUTES` | — | E.g. `service.namespace=finchie,deployment.environment.name=production`; the other standard `OTEL_*` variables apply too |
 
 ## Development
 
@@ -66,4 +78,4 @@ Code under `src/finchie/` is generated from `proto/` (`task proto`); don't edit 
 
 ## Image
 
-`Dockerfile`: Python 3.13 slim, runs as uid 1654, OCR models baked in at build time. The container healthcheck runs `python -m finchie_parser.healthcheck`. Expose the port only on the internal network.
+`Dockerfile`: Python 3.13 slim, runs as uid 1654, OCR models baked in at build time. The `VERSION` build argument (`release.yml` passes the tag's version) becomes `PARSER_VERSION`. The container healthcheck runs `python -m finchie_parser.healthcheck`. Expose the port only on the internal network.

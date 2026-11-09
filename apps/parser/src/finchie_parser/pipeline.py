@@ -1,5 +1,7 @@
 from collections.abc import Sequence
 
+from opentelemetry import trace
+
 from finchie_parser.documents import Mail, read_mail
 from finchie_parser.errors import InvalidDocumentError, PasswordRequiredError, UnsupportedDocumentError
 from finchie_parser.model import ParseResult
@@ -7,6 +9,8 @@ from finchie_parser.ocr import Ocr
 from finchie_parser.parsers import PARSERS, StatementParser
 from finchie_parser.passwords import Passwords
 from finchie_parser.pdf import PdfSet
+
+_tracer = trace.get_tracer(__name__)
 
 
 def parse_document(
@@ -18,8 +22,11 @@ def parse_document(
 ) -> ParseResult:
     mail = read_mail(content)
     with PdfSet(mail.pdfs(), passwords) as pdfs:
-        index, parser = select_statement(mail, pdfs, parsers)
-        parsed = parser.parse(pdfs.open(index, parser), ocr)
+        # Spans for the two steps that take time: decrypting and reading PDFs, and parsing with any OCR.
+        with _tracer.start_as_current_span("select_statement"):
+            index, parser = select_statement(mail, pdfs, parsers)
+        with _tracer.start_as_current_span("parse", attributes={"finchie.parser.name": parser.name}):
+            parsed = parser.parse(pdfs.open(index, parser), ocr)
     return ParseResult(parser.name, parser.version, parsed.statement, parsed.warnings)
 
 

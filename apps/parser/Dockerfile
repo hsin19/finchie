@@ -17,7 +17,9 @@ FROM python:3.13-slim
 RUN useradd --uid 1654 --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 COPY --from=build --chown=app:app /app/.venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+# The release, reported with every trace, metric, and log (release.yml passes the tag's version)
+ARG VERSION=dev
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 PARSER_VERSION=$VERSION
 USER app
 EXPOSE 50051
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD ["python", "-m", "finchie_parser.healthcheck"]

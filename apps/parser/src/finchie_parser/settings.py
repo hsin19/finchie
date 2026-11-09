@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     max_message_mb: int = 33
     ocr: bool = True
     log_level: str = "INFO"
+    # The release, reported with every trace, metric, and log; the image sets it (release.yml passes the
+    # tag's version). Not to be confused with a bank parser's version.
+    version: str = "dev"
     # PARSER_IDENTITY__NATIONAL_ID=... ; see IdentitySettings.
     identity: IdentitySettings = Field(default_factory=IdentitySettings)
     # PARSER_PDF_PASSWORDS__TAISHIN=... ; keys are institution IDs. Only for a bank whose password the
