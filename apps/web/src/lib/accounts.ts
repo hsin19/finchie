@@ -1,5 +1,6 @@
 import type {
     Account,
+    Balance,
     Statement,
 } from "#lib/api/client.js";
 import {
@@ -44,4 +45,25 @@ export function unpaidBills(statements: Statement[]): Statement[] {
         if (!seen || s.closingDate > seen.closingDate) newest.set(s.institution, s);
     }
     return [...newest.values()].filter(s => !s.paidOn && sign(s.totalDue) > 0);
+}
+
+/** Holdings by worth in NT$, largest first; those without a rate go last, by unit. */
+export function holdingsByWorth(balances: Balance[]): Balance[] {
+    return [...balances].sort((a, b) => {
+        if (a.worth === undefined || b.worth === undefined) {
+            if (a.worth !== b.worth) return a.worth === undefined ? 1 : -1;
+            return a.unit.localeCompare(b.unit);
+        }
+        return sign(subtract(b.worth, a.worth)) || a.unit.localeCompare(b.unit);
+    });
+}
+
+/**
+ * A snapshot history by day, newest first, each day's units in the order the API lists them (ADR 0018).
+ * A unit at 0 is one sold out that day.
+ */
+export function historyByDay(history: Balance[]): { asOf: string; balances: Balance[]; }[] {
+    const days = new Map<string, Balance[]>();
+    for (const b of history) days.set(b.asOf, [...(days.get(b.asOf) ?? []), b]);
+    return [...days].sort(([a], [b]) => b.localeCompare(a)).map(([asOf, balances]) => ({ asOf, balances }));
 }

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAccessNeedsBothSettingsOrNeither(t *testing.T) {
 	t.Setenv("BACKEND_DATABASE_URL", "postgres://localhost/finchie")
@@ -25,5 +28,24 @@ func TestAccessNeedsBothSettingsOrNeither(t *testing.T) {
 		if err == nil && cfg.AccessEnabled() != tc.enabled {
 			t.Fatalf("domain=%q aud=%q: enabled = %v", tc.domain, tc.aud, cfg.AccessEnabled())
 		}
+	}
+}
+
+func TestAnExchangeNeedsAllOfItsKeysOrNone(t *testing.T) {
+	t.Setenv("BACKEND_DATABASE_URL", "postgres://localhost/finchie")
+
+	cfg, err := Load()
+	if err != nil || cfg.ExchangeEnabled("bitget") {
+		t.Fatalf("no keys: enabled = %v, err = %v", cfg.ExchangeEnabled("bitget"), err)
+	}
+	t.Setenv("BACKEND_BITGET_API_KEY", "key")
+	t.Setenv("BACKEND_BITGET_API_SECRET", "secret")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_BITGET_PASSPHRASE") {
+		t.Fatalf("two of three keys: err = %v", err)
+	}
+	t.Setenv("BACKEND_BITGET_PASSPHRASE", "passphrase")
+	cfg, err = Load()
+	if err != nil || !cfg.ExchangeEnabled("bitget") || cfg.ExchangeEnabled("max") {
+		t.Fatalf("all three keys: bitget %v, max %v, err = %v", cfg.ExchangeEnabled("bitget"), cfg.ExchangeEnabled("max"), err)
 	}
 }

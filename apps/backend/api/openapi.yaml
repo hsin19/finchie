@@ -246,7 +246,7 @@ paths:
         balances are checked for continuity: two consecutive ones join when the lines dated between
         them account for the difference. A card bill's cannot be checked yet, nor a deposit account's
         whose balance moved in a unit no statement has listed a line of, as when its statements print
-        only its balance.
+        only its balance, nor an exchange's, which reports what it holds and nothing else (ADR 0018).
       responses:
         "200":
           description: Accounts by institution
@@ -587,7 +587,7 @@ components:
 
     AccountKind:
       type: string
-      enum: [credit_card, deposit, securities]
+      enum: [credit_card, deposit, securities, exchange]
 
     AccountContinuity:
       type: string
@@ -612,7 +612,11 @@ components:
         continuity: { $ref: "#/components/schemas/AccountContinuity" }
         worth:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
-          description: "Its newest balances' worth in NT$ added up; absent if any of them has none"
+          description: >-
+            In NT$: its newest balances' worth added up; else, when one of them has none, its valuation
+            on the day of its newest balance (ADR 0018); else absent
+        worthFrom: { $ref: "#/components/schemas/WorthFrom" }
+        valuation: { $ref: "#/components/schemas/Valuation" }
         gaps:
           type: array
           items: { $ref: "#/components/schemas/BalanceGap" }
@@ -625,7 +629,7 @@ components:
           properties:
             history:
               type: array
-              description: Every balance, newest first
+              description: Every balance its sources reported, statements and snapshots, newest first
               items: { $ref: "#/components/schemas/Balance" }
             positions:
               type: array
@@ -651,14 +655,31 @@ components:
           description: "What its sales gained, their amounts less fee and tax against their cost; absent when a sale's cost is not known"
         since: { type: string, format: date, description: The day it was last held at none, from which cost is known }
 
+    WorthFrom:
+      type: string
+      enum: [holdings, valuation]
+      description: "What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation"
+
+    Valuation:
+      type: object
+      description: "What a source says the whole account is worth (ADR 0018): an exchange, by its own prices"
+      required: [unit, asOf, amount]
+      properties:
+        unit: { type: string, example: USDT }
+        asOf: { type: string, format: date }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        worth:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: "In NT$, at the newest rate of its unit; absent for a unit without one"
+
     Balance:
       type: object
-      required: [unit, asOf, amount, statementId]
+      required: [unit, asOf, amount]
       properties:
         unit: { type: string, description: "ISO 4217, or a points program's code", example: TWD }
         asOf: { type: string, format: date, description: The end of the day it was held }
         amount: { $ref: "#/components/schemas/Decimal" }
-        statementId: { type: integer, format: int64, description: The statement that reported it }
+        statementId: { type: integer, format: int64, description: "The statement that reported it; absent for a snapshot, such as an exchange's (ADR 0018)" }
         worth:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
           description: "In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points"

@@ -27,11 +27,13 @@ const (
 
 // Kinds of statement, as stored in statements.kind, and of account, in accounts.kind (ADR 0013): a
 // card bill reports a credit card account, a deposit statement deposit accounts, a securities
-// statement a brokerage account (ADR 0017).
+// statement a brokerage account (ADR 0017). An exchange account has no statements: its API reports
+// snapshots (ADR 0018).
 const (
 	KindCreditCard = "credit_card"
 	KindDeposit    = "deposit"
 	KindSecurities = "securities"
+	KindExchange   = "exchange"
 )
 
 // ErrInvalidResponse means the parser returned something that breaks the contract; retrying won't help.

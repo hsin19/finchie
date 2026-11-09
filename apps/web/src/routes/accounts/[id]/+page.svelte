@@ -1,5 +1,9 @@
 <script lang="ts">
 import {
+    historyByDay,
+    holdingsByWorth,
+} from "#lib/accounts.js";
+import {
     api,
     LEDGER,
     type Trade,
@@ -27,6 +31,11 @@ const account = $derived(data.account);
 const bank = $derived(institution(account.institution));
 // A brokerage account holds shares, one unit per security, and its lines are trades (ADR 0017).
 const brokerage = $derived(account.kind === "securities");
+// An exchange account holds coins and reports nothing but snapshots of them (ADR 0018).
+const exchange = $derived(account.kind === "exchange");
+const holdings = $derived(holdingsByWorth(account.balances));
+const unpriced = $derived(account.balances.filter(b => b.worth === undefined).length);
+const snapshots = $derived(historyByDay(account.history));
 
 /** What a trade paid or received, or what was paid in advance for it. */
 function tradeMoney(trade: Trade): string {
@@ -109,6 +118,18 @@ function amountTone(value: string) {
                 <div class="text-[18px] text-ink">{account.worth !== undefined ? `≈ NT$${formatAmount(account.worth)}` : "有證券沒有收盤價"}</div>
                 <div class="text-[12px] text-mute">{held.length} 檔，股數到 {account.balances[0]?.asOf ?? "—"} 為止</div>
             </div>
+        {:else if exchange}
+            <div>
+                <div class="label">WORTH · 市值</div>
+                <div class="text-[18px] text-ink">{account.worth !== undefined ? `≈ NT$${formatAmount(account.worth)}` : "有幣種沒有匯率"}</div>
+                <div class="text-[12px] text-mute">
+                    {#if account.worthFrom === "valuation" && account.valuation}
+                        取交易所估值 {formatAmount(account.valuation.amount)} {account.valuation.unit}：{unpriced} 種沒有匯率
+                    {:else}
+                        {holdings.length} 種，到 {account.balances[0]?.asOf ?? "—"} 為止
+                    {/if}
+                </div>
+            </div>
         {:else}
             {#each account.balances as balance (balance.unit)}
                 <div>
@@ -153,6 +174,37 @@ function amountTone(value: string) {
                         <td class="py-1.5 pr-2 text-right {amountTone(gap.unseen)}">{formatAmount(gap.unseen, { signed: true })}</td>
                         <td class="py-1.5 text-mute">{gap.unit} 沒有明細</td>
                     </tr>
+                {/each}
+            </tbody>
+        </table>
+    </section>
+{/if}
+
+{#if exchange}
+    <section class="panel px-3.5 pt-1 pb-2.5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
+            <h2 class="label">HOLDINGS · 持有（{holdings.length}）</h2>
+            <span class="text-[12px] text-mute">每 6 小時從交易所 API 同步 · 參考價為每日匯率</span>
+        </div>
+        <table class="border-collapse">
+            <thead>
+                <tr class="text-left text-mute">
+                    <th class="py-2 pr-4 font-medium">COIN</th>
+                    <th class="px-2 py-2 text-right font-medium">AMOUNT</th>
+                    <th class="py-2 pl-4 text-right font-medium">≈ NT$</th>
+                </tr>
+            </thead>
+            <tbody>
+                {#each holdings as balance (balance.unit)}
+                    <tr class="border-t border-rule">
+                        <td class="py-1.5 pr-4">{balance.unit}</td>
+                        <td class="px-2 py-1.5 text-right">{formatAmount(balance.amount)}</td>
+                        <td class="py-1.5 pl-4 text-right text-dim" title={balance.rateDay ? `${balance.rateDay} 的匯率` : ""}>
+                            {balance.worth !== undefined ? formatAmount(balance.worth) : "沒有匯率"}
+                        </td>
+                    </tr>
+                {:else}
+                    <tr><td colspan="3" class="py-2.5 text-mute">目前沒有持有任何幣。</td></tr>
                 {/each}
             </tbody>
         </table>
@@ -207,64 +259,85 @@ function amountTone(value: string) {
     </section>
 {/if}
 
-<section class="panel px-3.5 pt-1 pb-2.5">
-    <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
-        <h2 class="label">LINES · 明細（{data.lines.length}）</h2>
-        <span class="text-[12px] text-mute">新的在上 · {brokerage ? "買進的股數是正數" : "存入是正數"}</span>
-    </div>
-    <div class="overflow-x-auto">
-        <table class="w-full min-w-[820px] border-collapse">
-            <thead>
-                <tr class="text-left text-mute">
-                    <th class="py-2 pr-2 font-medium">DATE</th>
-                    <th class="px-2 py-2 font-medium">DESCRIPTION</th>
-                    <th class="px-2 py-2 font-medium">{brokerage ? "TRADE" : "MEMO"}</th>
-                    <th class="px-2 py-2 font-medium">{brokerage ? "MONEY" : "COUNTERPARTY"}</th>
-                    <th class="px-2 py-2 text-right font-medium">AMOUNT</th>
-                    <th class="py-2 pl-2 text-right font-medium">BALANCE</th>
-                </tr>
-            </thead>
-            <tbody>
-                {#each data.lines as line (line.id)}
-                    <tr class="border-t border-rule hover:bg-raised">
-                        <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
-                        <td class="px-2 py-2">
-                            {line.description}
-                            {#if line.counterpart}<Counterpart other={line.counterpart} out={sign(line.amount) < 0} class="block text-[12px] text-dim hover:text-ink" />{/if}
-                        </td>
-                        {#if line.trade}
-                            <td class="px-2 py-2 text-dim">{line.trade.category} @ {formatAmount(line.trade.price)}</td>
-                            <td class="px-2 py-2 whitespace-nowrap text-mute" title={`價金 ${line.trade.amount} · 手續費 ${line.trade.fee} · 稅 ${line.trade.tax}`}>
-                                {tradeMoney(line.trade)}
-                            </td>
-                        {:else}
-                            <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
-                            <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
-                        {/if}
-                        <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
-                            {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
-                        </td>
-                        <td class="py-2 pl-2 text-right whitespace-nowrap text-dim">{line.balance ? formatAmount(line.balance) : ""}</td>
+<!-- An exchange reports no lines at all (ADR 0018). -->
+{#if !exchange}
+    <section class="panel px-3.5 pt-1 pb-2.5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
+            <h2 class="label">LINES · 明細（{data.lines.length}）</h2>
+            <span class="text-[12px] text-mute">新的在上 · {brokerage ? "買進的股數是正數" : "存入是正數"}</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[820px] border-collapse">
+                <thead>
+                    <tr class="text-left text-mute">
+                        <th class="py-2 pr-2 font-medium">DATE</th>
+                        <th class="px-2 py-2 font-medium">DESCRIPTION</th>
+                        <th class="px-2 py-2 font-medium">{brokerage ? "TRADE" : "MEMO"}</th>
+                        <th class="px-2 py-2 font-medium">{brokerage ? "MONEY" : "COUNTERPARTY"}</th>
+                        <th class="px-2 py-2 text-right font-medium">AMOUNT</th>
+                        <th class="py-2 pl-2 text-right font-medium">BALANCE</th>
                     </tr>
-                {:else}
-                    <tr><td colspan="6" class="py-2.5 text-mute">這個帳戶還沒有明細：對帳單只印了它的餘額。</td></tr>
+                </thead>
+                <tbody>
+                    {#each data.lines as line (line.id)}
+                        <tr class="border-t border-rule hover:bg-raised">
+                            <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
+                            <td class="px-2 py-2">
+                                {line.description}
+                                {#if line.counterpart}<Counterpart other={line.counterpart} out={sign(line.amount) < 0} class="block text-[12px] text-dim hover:text-ink" />{/if}
+                            </td>
+                            {#if line.trade}
+                                <td class="px-2 py-2 text-dim">{line.trade.category} @ {formatAmount(line.trade.price)}</td>
+                                <td class="px-2 py-2 whitespace-nowrap text-mute" title={`價金 ${line.trade.amount} · 手續費 ${line.trade.fee} · 稅 ${line.trade.tax}`}>
+                                    {tradeMoney(line.trade)}
+                                </td>
+                            {:else}
+                                <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
+                                <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
+                            {/if}
+                            <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
+                                {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
+                            </td>
+                            <td class="py-2 pl-2 text-right whitespace-nowrap text-dim">{line.balance ? formatAmount(line.balance) : ""}</td>
+                        </tr>
+                    {:else}
+                        <tr><td colspan="6" class="py-2.5 text-mute">這個帳戶還沒有明細：對帳單只印了它的餘額。</td></tr>
+                    {/each}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{/if}
+
+<section class="panel px-3.5 pt-1 pb-2.5">
+    <h2 class="label py-2.5">HISTORY · {exchange ? "每天的快照" : "每一期的餘額"}</h2>
+    {#if exchange}
+        <table class="border-collapse">
+            <tbody>
+                {#each snapshots as day (day.asOf)}
+                    <tr class="border-t border-rule align-top">
+                        <td class="py-1.5 pr-4 whitespace-nowrap text-dim">{day.asOf}</td>
+                        <td class="py-1.5">
+                            {#each day.balances as balance, i (balance.unit)}
+                                {i > 0 ? " · " : ""}<span class={sign(balance.amount) === 0 ? "text-mute" : "text-ink"}>{formatAmount(balance.amount)}</span>
+                                <span class="text-mute">{balance.unit}</span>
+                            {/each}
+                        </td>
+                    </tr>
                 {/each}
             </tbody>
         </table>
-    </div>
-</section>
-
-<section class="panel px-3.5 pt-1 pb-2.5">
-    <h2 class="label py-2.5">HISTORY · 每一期的餘額</h2>
-    <table class="border-collapse">
-        <tbody>
-            {#each account.history as balance (`${balance.statementId}:${balance.unit}:${balance.asOf}`)}
-                <tr class="border-t border-rule">
-                    <td class="py-1.5 pr-4 text-dim">{balance.asOf}</td>
-                    <td class="py-1.5 pr-2 text-right {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</td>
-                    <td class="py-1.5 pr-4 text-mute">{balance.unit}</td>
-                </tr>
-            {/each}
-        </tbody>
-    </table>
+    {:else}
+        <table class="border-collapse">
+            <tbody>
+                {#each account.history as balance (`${balance.statementId ?? ""}:${balance.unit}:${balance.asOf}`)}
+                    <tr class="border-t border-rule">
+                        <td class="py-1.5 pr-4 text-dim">{balance.asOf}</td>
+                        <td class="py-1.5 pr-2 text-right {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</td>
+                        <td class="py-1.5 pr-4 text-mute">{balance.unit}</td>
+                    </tr>
+                {/each}
+            </tbody>
+        </table>
+    {/if}
 </section>

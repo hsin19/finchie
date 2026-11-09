@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/exchanges"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 )
@@ -428,5 +430,71 @@ func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSp
 	search := decode[TransactionSearch](t, get(t, e, "/api/transactions"))
 	if search.Total != 2 || len(search.Flows) != 0 || search.Items[0].Trade == nil {
 		t.Fatalf("search = total %d, flows %+v", search.Total, search.Flows)
+	}
+}
+
+func TestAnExchangeIsWorthItsHoldingsElseItsValuationOfTheSameDay(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	ctx := t.Context()
+	var perTWD []pgtype.Numeric
+	for _, rate := range []string{"0.03125", "0.0000003125"} { // 1 USDT is NT$32, 1 BTC NT$3,200,000
+		var n pgtype.Numeric
+		if err := n.Scan(rate); err != nil {
+			t.Fatal(err)
+		}
+		perTWD = append(perTWD, n)
+	}
+	day := func(s string) time.Time { d, _ := time.Parse(time.DateOnly, s); return d }
+	if err := dbq.New(pool).UpsertRates(ctx, dbq.UpsertRatesParams{Day: pgtype.Date{Time: day("2026-11-07"), Valid: true}, Units: []string{"USDT", "BTC"}, PerTwd: perTWD}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func(on string, valuation string, pairs ...string) {
+		t.Helper()
+		s := exchanges.Snapshot{Holdings: map[string]*big.Rat{}}
+		for i := 0; i < len(pairs); i += 2 {
+			s.Holdings[pairs[i]], _ = new(big.Rat).SetString(pairs[i+1])
+		}
+		if valuation != "" {
+			amount, _ := new(big.Rat).SetString(valuation)
+			s.Valuation = &exchanges.Value{Unit: "USDT", Amount: amount}
+		}
+		if err := exchanges.Store(ctx, pool, "binance", day(on), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exchange := func() AccountDetail {
+		t.Helper()
+		accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+		if len(accounts) != 1 || accounts[0].Kind != Exchange || accounts[0].Continuity != Unknown {
+			t.Fatalf("accounts = %+v", accounts)
+		}
+		detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", accounts[0].Id)))
+		if deref(detail.Worth) != deref(accounts[0].Worth) {
+			t.Fatalf("list worth %v, detail worth %v", accounts[0].Worth, detail.Worth)
+		}
+		return detail
+	}
+
+	// Every coin has a rate: the holdings, whatever the exchange says.
+	snapshot("2026-11-08", "11000", "BTC", "0.1", "USDT", "100")
+	if a := exchange(); *a.Worth != "323200.00" || *a.WorthFrom != WorthFromHoldings || a.Valuation.Amount != "11000" {
+		t.Fatalf("priced holdings: worth %v from %v, valuation %+v", a.Worth, a.WorthFrom, a.Valuation)
+	}
+
+	// DUST has no rate: the exchange's valuation of the day, at USDT's rate. BTC is sold out: not held,
+	// but in the history at 0, with no statement.
+	snapshot("2026-11-09", "200", "USDT", "100", "DUST", "5")
+	a := exchange()
+	if *a.Worth != "6400.00" || *a.WorthFrom != WorthFromValuation || *a.Valuation.Worth != "6400.00" || len(a.Balances) != 2 {
+		t.Fatalf("unpriced dust: worth %v from %v, balances %+v", a.Worth, a.WorthFrom, a.Balances)
+	}
+	if a.History[0].StatementId != nil || len(a.History) != 5 {
+		t.Fatalf("history = %+v", a.History)
+	}
+
+	// No valuation that day: the one before is not the same holdings, so no worth at all.
+	snapshot("2026-11-10", "", "USDT", "100", "DUST", "5")
+	if a := exchange(); a.Worth != nil || a.WorthFrom != nil {
+		t.Fatalf("no valuation of the day: worth %v from %v", a.Worth, a.WorthFrom)
 	}
 }

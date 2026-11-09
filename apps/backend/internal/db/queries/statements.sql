@@ -37,13 +37,13 @@ WHERE statement_id = @statement_id
 -- before them that statement has a balance for too: the opening balance two exports starting the same
 -- day both have.
 DELETE FROM balances b
-WHERE b.statement_id = @statement_id
+WHERE b.statement_id = @statement_id::bigint
   AND b.account_id = @account_id
   AND b.unit = @unit
   AND b.as_of <= @to_date
   AND (b.as_of >= @from_date OR EXISTS (
       SELECT 1 FROM balances k
-      WHERE k.statement_id = @keeper_id AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of));
+      WHERE k.statement_id = @keeper_id::bigint AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of));
 
 -- name: InsertStatement :one
 -- The bill's columns are null for a deposit statement (ADR 0013).

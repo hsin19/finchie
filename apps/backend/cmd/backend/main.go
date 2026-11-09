@@ -27,6 +27,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/api"
 	"github.com/hsin19/finchie/apps/backend/internal/config"
 	"github.com/hsin19/finchie/apps/backend/internal/db"
+	"github.com/hsin19/finchie/apps/backend/internal/exchanges"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 	"github.com/hsin19/finchie/apps/backend/internal/quotes"
@@ -124,10 +125,13 @@ func run() error {
 	river.AddWorker(workers, ingest.NewWorker(pool, parser, cfg.ParseTimeout))
 	river.AddWorker(workers, rates.NewWorker(pool, &http.Client{Timeout: 30 * time.Second}, rates.Feeds))
 	river.AddWorker(workers, quotes.NewWorker(pool, &http.Client{Timeout: 2 * time.Minute}, quotes.Feeds))
+	exchangeAPIs := configuredExchanges(cfg, &http.Client{Timeout: 30 * time.Second})
+	// Registered without any exchange too: a job queued before its keys were removed finds a worker.
+	river.AddWorker(workers, exchanges.NewWorker(pool, exchangeAPIs, time.Now))
 	jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:       map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
 		Workers:      workers,
-		PeriodicJobs: []*river.PeriodicJob{rates.Periodic(), quotes.Periodic()},
+		PeriodicJobs: append([]*river.PeriodicJob{rates.Periodic(), quotes.Periodic()}, exchanges.Periodic(exchangeAPIs)...),
 		Logger:       logger,
 		// Without it, the signal that cancels the context passed to Start cancels running jobs too.
 		SoftStopTimeout: jobStopTimeout,
@@ -177,6 +181,24 @@ func run() error {
 		return fmt.Errorf("http server: %w", serveErr)
 	}
 	return nil
+}
+
+// configuredExchanges are the exchanges whose keys are set (ADR 0018).
+func configuredExchanges(cfg config.Config, client *http.Client) []exchanges.Exchange {
+	var configured []exchanges.Exchange
+	if cfg.ExchangeEnabled("max") {
+		configured = append(configured, exchanges.NewMAX(cfg.MaxAccessKey, cfg.MaxSecretKey, client))
+	}
+	if cfg.ExchangeEnabled("binance") {
+		configured = append(configured, exchanges.NewBinance(cfg.BinanceAPIKey, cfg.BinanceAPISecret, client))
+	}
+	if cfg.ExchangeEnabled("bitget") {
+		configured = append(configured, exchanges.NewBitget(cfg.BitgetAPIKey, cfg.BitgetAPISecret, cfg.BitgetPassphrase, client))
+	}
+	for _, e := range configured {
+		slog.Info("fetching an exchange's balances", "institution", e.Institution())
+	}
+	return configured
 }
 
 func newStdoutHandler(format string) slog.Handler {

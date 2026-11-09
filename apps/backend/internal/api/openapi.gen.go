@@ -40,6 +40,7 @@ func (e AccountContinuity) Valid() bool {
 const (
 	CreditCard AccountKind = "credit_card"
 	Deposit    AccountKind = "deposit"
+	Exchange   AccountKind = "exchange"
 	Securities AccountKind = "securities"
 )
 
@@ -49,6 +50,8 @@ func (e AccountKind) Valid() bool {
 	case CreditCard:
 		return true
 	case Deposit:
+		return true
+	case Exchange:
 		return true
 	case Securities:
 		return true
@@ -153,6 +156,24 @@ func (e TransactionSort) Valid() bool {
 	}
 }
 
+// Defines values for WorthFrom.
+const (
+	WorthFromHoldings  WorthFrom = "holdings"
+	WorthFromValuation WorthFrom = "valuation"
+)
+
+// Valid indicates whether the value is a known member of the WorthFrom enum.
+func (e WorthFrom) Valid() bool {
+	switch e {
+	case WorthFromHoldings:
+		return true
+	case WorthFromValuation:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	// Balances The newest balance in each unit
@@ -183,8 +204,14 @@ type Account struct {
 	// Example: 1234567***890
 	Number string `json:"number"`
 
-	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
+	// Valuation What a source says the whole account is worth (ADR 0018): an exchange, by its own prices
+	Valuation *Valuation `json:"valuation,omitempty"`
+
+	// Worth In NT$: its newest balances' worth added up; else, when one of them has none, its valuation on the day of its newest balance (ADR 0018); else absent
 	Worth *Decimal `json:"worth,omitempty"`
+
+	// WorthFrom What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation
+	WorthFrom *WorthFrom `json:"worthFrom,omitempty"`
 }
 
 // AccountContinuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
@@ -202,7 +229,7 @@ type AccountDetail struct {
 	FullNumber *string      `json:"fullNumber,omitempty"`
 	Gaps       []BalanceGap `json:"gaps"`
 
-	// History Every balance, newest first
+	// History Every balance its sources reported, statements and snapshots, newest first
 	History []Balance `json:"history"`
 	Id      int64     `json:"id"`
 
@@ -226,8 +253,14 @@ type AccountDetail struct {
 	// Positions A securities account's: every security it holds or has traded, by name (ADR 0017)
 	Positions *[]Position `json:"positions,omitempty"`
 
-	// Worth Its newest balances' worth in NT$ added up; absent if any of them has none
+	// Valuation What a source says the whole account is worth (ADR 0018): an exchange, by its own prices
+	Valuation *Valuation `json:"valuation,omitempty"`
+
+	// Worth In NT$: its newest balances' worth added up; else, when one of them has none, its valuation on the day of its newest balance (ADR 0018); else absent
 	Worth *Decimal `json:"worth,omitempty"`
+
+	// WorthFrom What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation
+	WorthFrom *WorthFrom `json:"worthFrom,omitempty"`
 }
 
 // AccountKind defines model for AccountKind.
@@ -299,8 +332,8 @@ type Balance struct {
 	// RateDay The day of the rate or close its worth used; absent for NT$
 	RateDay *openapi_types.Date `json:"rateDay,omitempty"`
 
-	// StatementId The statement that reported it
-	StatementId int64 `json:"statementId"`
+	// StatementId The statement that reported it; absent for a snapshot, such as an exchange's (ADR 0018)
+	StatementId *int64 `json:"statementId,omitempty"`
 
 	// Unit ISO 4217, or a points program's code
 	//
@@ -673,6 +706,24 @@ type UnitFlow struct {
 	Spent Decimal `json:"spent"`
 	Unit  string  `json:"unit"`
 }
+
+// Valuation What a source says the whole account is worth (ADR 0018): an exchange, by its own prices
+type Valuation struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal            `json:"amount"`
+	AsOf   openapi_types.Date `json:"asOf"`
+
+	// Unit Example: USDT
+	Unit string `json:"unit"`
+
+	// Worth In NT$, at the newest rate of its unit; absent for a unit without one
+	Worth *Decimal `json:"worth,omitempty"`
+}
+
+// WorthFrom What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation
+type WorthFrom string
 
 // Id defines model for Id.
 type Id = int64

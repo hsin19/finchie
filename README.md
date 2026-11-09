@@ -23,7 +23,7 @@ A self-hosted personal finance platform. It turns bank and credit card statement
 |---|---|---|
 | [`proto/`](proto/) | gRPC contracts, managed with buf. Generated code is committed inside each app. | ✅ |
 
-Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents, 0013 accounts, 0014 recognizing statements, 0015 exchange rates, 0016 transfer links, 0017 securities accounts.
+Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents, 0013 accounts, 0014 recognizing statements, 0015 exchange rates, 0016 transfer links, 0017 securities accounts, 0018 exchange accounts.
 
 ## Why V2
 
@@ -87,4 +87,4 @@ GitHub Actions in [`.github/workflows/`](.github/workflows/README.md): `check.ym
 
 The homelab's Docker Compose runs the released images behind Cloudflare Tunnel and Access. Only the backend is reachable from outside; the parser stays on the internal network. Pin a version tag, never `latest`.
 
-Sign-in is Cloudflare Access with Google, and the backend also verifies every request's Access token (ADR 0008): set `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD` there. Set `BACKEND_MAILBOX_ADDRESS` for the Gmail filter download, and `PARSER_IDENTITY__*` for the parser's PDF passwords.
+Sign-in is Cloudflare Access with Google, and the backend also verifies every request's Access token (ADR 0008): set `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD` there. Set `BACKEND_MAILBOX_ADDRESS` for the Gmail filter download, `BACKEND_MAX_*`, `BACKEND_BINANCE_*`, and `BACKEND_BITGET_*` for the exchanges' read-only API keys (ADR 0018), and `PARSER_IDENTITY__*` for the parser's PDF passwords.

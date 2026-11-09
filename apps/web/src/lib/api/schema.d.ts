@@ -181,7 +181,7 @@ export interface paths {
          *     balances are checked for continuity: two consecutive ones join when the lines dated between
          *     them account for the difference. A card bill's cannot be checked yet, nor a deposit account's
          *     whose balance moved in a unit no statement has listed a line of, as when its statements print
-         *     only its balance.
+         *     only its balance, nor an exchange's, which reports what it holds and nothing else (ADR 0018).
          */
         get: operations["listAccounts"];
         put?: never;
@@ -441,7 +441,7 @@ export interface components {
             paidOn?: string;
         };
         /** @enum {string} */
-        AccountKind: "credit_card" | "deposit" | "securities";
+        AccountKind: "credit_card" | "deposit" | "securities" | "exchange";
         /**
          * @description Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
          * @enum {string}
@@ -470,12 +470,14 @@ export interface components {
             /** @description The newest balance in each unit */
             balances: components["schemas"]["Balance"][];
             continuity: components["schemas"]["AccountContinuity"];
-            /** @description Its newest balances' worth in NT$ added up; absent if any of them has none */
+            /** @description In NT$: its newest balances' worth added up; else, when one of them has none, its valuation on the day of its newest balance (ADR 0018); else absent */
             worth?: components["schemas"]["Decimal"];
+            worthFrom?: components["schemas"]["WorthFrom"];
+            valuation?: components["schemas"]["Valuation"];
             gaps: components["schemas"]["BalanceGap"][];
         };
         AccountDetail: components["schemas"]["Account"] & {
-            /** @description Every balance, newest first */
+            /** @description Every balance its sources reported, statements and snapshots, newest first */
             history: components["schemas"]["Balance"][];
             /** @description A securities account's: every security it holds or has traded, by name (ADR 0017) */
             positions?: components["schemas"]["Position"][];
@@ -501,6 +503,21 @@ export interface components {
              */
             since?: string;
         };
+        /**
+         * @description What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation
+         * @enum {string}
+         */
+        WorthFrom: "holdings" | "valuation";
+        /** @description What a source says the whole account is worth (ADR 0018): an exchange, by its own prices */
+        Valuation: {
+            /** @example USDT */
+            unit: string;
+            /** Format: date */
+            asOf: string;
+            amount: components["schemas"]["Decimal"];
+            /** @description In NT$, at the newest rate of its unit; absent for a unit without one */
+            worth?: components["schemas"]["Decimal"];
+        };
         Balance: {
             /**
              * @description ISO 4217, or a points program's code
@@ -515,9 +532,9 @@ export interface components {
             amount: components["schemas"]["Decimal"];
             /**
              * Format: int64
-             * @description The statement that reported it
+             * @description The statement that reported it; absent for a snapshot, such as an exchange's (ADR 0018)
              */
-            statementId: number;
+            statementId?: number;
             /** @description In NT$, at the newest rate of its unit (ADR 0015); absent for a unit without one, such as points */
             worth?: components["schemas"]["Decimal"];
             /**

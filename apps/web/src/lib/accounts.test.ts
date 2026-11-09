@@ -1,5 +1,6 @@
 import type {
     Account,
+    Balance,
     Statement,
 } from "#lib/api/client.js";
 import {
@@ -9,6 +10,8 @@ import {
 } from "vitest";
 import {
     accountSort,
+    historyByDay,
+    holdingsByWorth,
     sortAccounts,
     totalWorth,
     unpaidBills,
@@ -57,5 +60,22 @@ describe("accounts", () => {
             bill(5, "cathay", "2026-10-01", "0"),
         ];
         expect(unpaidBills(bills).map(b => b.id)).toEqual([2]);
+    });
+});
+
+describe("exchange holdings", () => {
+    const coin = (unit: string, asOf: string, amount: string, worth?: string): Balance => ({ unit, asOf, amount, worth });
+
+    it("lists holdings by worth, those without a rate last", () => {
+        const held = [coin("DUST", "2026-11-09", "3"), coin("USDT", "2026-11-09", "100", "3200"), coin("BTC", "2026-11-09", "0.1", "320000"), coin("AAA", "2026-11-09", "1")];
+        expect(holdingsByWorth(held).map(b => b.unit)).toEqual(["BTC", "USDT", "AAA", "DUST"]);
+    });
+
+    it("groups a snapshot history by day, newest first", () => {
+        const history = [coin("BTC", "2026-11-09", "0"), coin("USDT", "2026-11-09", "500"), coin("BTC", "2026-11-08", "0.1")];
+        expect(historyByDay(history)).toEqual([
+            { asOf: "2026-11-09", balances: [history[0], history[1]] },
+            { asOf: "2026-11-08", balances: [history[2]] },
+        ]);
     });
 });

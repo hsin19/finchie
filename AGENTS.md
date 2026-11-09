@@ -96,3 +96,4 @@ None of these are under version control. Don't add them, and don't print their c
 | `.local/` | Real statements, local env files, anything personal |
 | `PARSER_PDF_PASSWORDS__<INSTITUTION>` | PDF passwords for the parser. Check whether one is set by name only |
 | `BACKEND_DATABASE_URL` | Postgres connection string |
+| `BACKEND_MAX_*`, `BACKEND_BINANCE_*`, `BACKEND_BITGET_*` | Exchanges' read-only API keys (ADR 0018). Check whether one is set by name only |

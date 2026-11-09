@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -35,7 +36,15 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 	if err != nil {
 		return nil, fmt.Errorf("account gaps: %w", err)
 	}
+	valuations, err := queries.LatestValuations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest valuations: %w", err)
+	}
 
+	valuationOf := map[int64]*dbq.LatestValuationsRow{}
+	for i := range valuations {
+		valuationOf[valuations[i].AccountID] = &valuations[i]
+	}
 	balancesOf := map[int64][]Balance{}
 	for _, b := range latest {
 		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], toLatestBalance(b))
@@ -51,7 +60,7 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 	}
 	accounts := make(ListAccounts200JSONResponse, 0, len(rows))
 	for _, row := range rows {
-		accounts = append(accounts, toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID], unshown[row.ID]))
+		accounts = append(accounts, toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID], unshown[row.ID], valuationOf[row.ID]))
 	}
 	return accounts, nil
 }
@@ -77,6 +86,10 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	if err != nil {
 		return nil, fmt.Errorf("account gaps: %w", err)
 	}
+	valuations, err := queries.LatestValuations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest valuations: %w", err)
+	}
 
 	history := make([]Balance, 0, len(rows))
 	for _, b := range rows {
@@ -86,6 +99,12 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	for _, b := range latestRows {
 		if b.AccountID == request.Id {
 			latest = append(latest, toLatestBalance(b))
+		}
+	}
+	var valuation *dbq.LatestValuationsRow
+	for i := range valuations {
+		if valuations[i].AccountID == request.Id {
+			valuation = &valuations[i]
 		}
 	}
 	gaps := make([]BalanceGap, 0, len(gapRows))
@@ -106,11 +125,12 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		list := positions(trades, rows, gapRows, latest)
 		held = &list
 	}
-	account := toAccount(row, latest, gaps, unshown)
+	account := toAccount(row, latest, gaps, unshown, valuation)
 	return GetAccount200JSONResponse(AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
-		Continuity: account.Continuity, Worth: account.Worth, Gaps: account.Gaps, History: history, Positions: held,
+		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
+		Gaps: account.Gaps, History: history, Positions: held,
 	}), nil
 }
 
@@ -151,14 +171,15 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 
 // toAccount takes the account's gaps, and whether its balance moved in a unit no statement has listed a
 // line of, as one whose statements print only its balance: nothing could show that move, so the account
-// cannot be checked (ADR 0013).
-func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, unshown bool) Account {
+// cannot be checked (ADR 0013). An exchange reports what it holds and nothing else (ADR 0018).
+func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, unshown bool, valuation *dbq.LatestValuationsRow) Account {
 	continuity := Unknown
 	if (row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities) && !unshown {
 		continuity = Checked
 	}
-	if row.Kind == ingest.KindSecurities {
-		// A security at 0 is one the account no longer holds (ADR 0017).
+	newest := newestDay(balances)
+	if row.Kind == ingest.KindSecurities || row.Kind == ingest.KindExchange {
+		// A security or a coin at 0 is one the account no longer holds (ADR 0017, ADR 0018).
 		balances = slices.DeleteFunc(balances, func(b Balance) bool { return isZero(b.Amount) })
 	}
 	if balances == nil {
@@ -167,11 +188,38 @@ func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, uns
 	if gaps == nil {
 		gaps = []BalanceGap{}
 	}
-	return Account{
+	account := Account{
 		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
 		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Balances: balances, Continuity: continuity,
-		Gaps: gaps, Worth: worthOf(balances),
+		Gaps: gaps,
 	}
+	if valuation != nil {
+		v := toValuation(*valuation)
+		account.Valuation = &v
+	}
+	account.Worth, account.WorthFrom = worthOf(balances, account.Valuation, newest)
+	return account
+}
+
+// newestDay is the day of the newest of the account's balances, zero ones included: a snapshot lists a
+// unit sold out at 0 on its day (ADR 0018).
+func newestDay(balances []Balance) time.Time {
+	var newest time.Time
+	for _, b := range balances {
+		if b.AsOf.After(newest) {
+			newest = b.AsOf.Time
+		}
+	}
+	return newest
+}
+
+func toValuation(v dbq.LatestValuationsRow) Valuation {
+	valuation := Valuation{Unit: v.Unit, AsOf: openapi_types.Date{Time: v.AsOf.Time}, Amount: decimalString(v.Amount)}
+	if v.Worth.Valid {
+		worth := decimalString(v.Worth)
+		valuation.Worth = &worth
+	}
+	return valuation
 }
 
 // toLatestBalance adds the balance's worth in NT$ at the newest rate of its unit (ADR 0015).
@@ -199,8 +247,24 @@ func isZero(value Decimal) bool {
 	return ok && n.Sign() == 0
 }
 
-// worthOf adds up balances' worth exactly; none when a balance has no worth, or there are none.
-func worthOf(balances []Balance) *Decimal {
+// worthOf is an account's worth (ADR 0018): its balances' worth added up exactly; else, when one of them
+// has none, its valuation on the day of its newest balance; else none.
+func worthOf(balances []Balance, valuation *Valuation, newest time.Time) (*Decimal, *WorthFrom) {
+	if worth := holdingsWorth(balances); worth != nil {
+		return worth, ptr(WorthFromHoldings)
+	}
+	if valuation == nil || valuation.Worth == nil || !valuation.AsOf.Equal(newest) {
+		return nil, nil
+	}
+	worth, ok := new(big.Rat).SetString(*valuation.Worth)
+	if !ok {
+		return nil, nil
+	}
+	return ptr(worth.FloatString(2)), ptr(WorthFromValuation)
+}
+
+// holdingsWorth adds up balances' worth exactly; none when a balance has no worth, or there are none.
+func holdingsWorth(balances []Balance) *Decimal {
 	if len(balances) == 0 {
 		return nil
 	}
@@ -219,7 +283,10 @@ func worthOf(balances []Balance) *Decimal {
 	return &worth
 }
 
-func toBalance(unit string, asOf pgtype.Date, amount pgtype.Numeric, statementID int64) Balance {
+func ptr[T any](v T) *T { return &v }
+
+// toBalance takes the statement that reported the balance; a snapshot has none (ADR 0018).
+func toBalance(unit string, asOf pgtype.Date, amount pgtype.Numeric, statementID *int64) Balance {
 	return Balance{Unit: unit, AsOf: openapi_types.Date{Time: asOf.Time}, Amount: decimalString(amount), StatementId: statementID}
 }
 

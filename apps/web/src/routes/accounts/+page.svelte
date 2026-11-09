@@ -23,7 +23,7 @@ let { data }: PageProps = $props();
 
 // By kind, in a fixed order. Card bills are no accounts the owner has and are not listed (ADR 0013).
 const groups = $derived(
-    (["deposit", "securities"] as const)
+    (["deposit", "securities", "exchange"] as const)
         .map(kind => {
             const accounts = data.accounts.filter(a => a.kind === kind);
             return { kind, accounts: sortAccounts(accounts, data.sort), worth: totalWorth(accounts) };
@@ -40,6 +40,8 @@ const holdings = $derived(totalWorth(data.accounts));
 const deposits = $derived(totalWorth(data.accounts.filter(a => a.kind === "deposit")));
 const brokerages = $derived(data.accounts.filter(a => a.kind === "securities"));
 const securities = $derived(totalWorth(brokerages));
+const exchangeAccounts = $derived(data.accounts.filter(a => a.kind === "exchange"));
+const exchanges = $derived(totalWorth(exchangeAccounts));
 const unpaid = $derived(unpaidBills(data.statements));
 const owed = $derived(sum(unpaid.map(s => s.totalDue)));
 
@@ -76,6 +78,12 @@ function href(account: Account) {
         <div>
             <div class="label">SECURITIES · 證券市值</div>
             <div>≈ NT${formatAmount(securities.total)}{securities.missing ? `（${securities.missing} 個帳戶有證券沒有收盤價，不計）` : ""}</div>
+        </div>
+    {/if}
+    {#if exchangeAccounts.length > 0}
+        <div>
+            <div class="label">EXCHANGES · 交易所</div>
+            <div>≈ NT${formatAmount(exchanges.total)}{exchanges.missing ? `（${exchanges.missing} 個交易所有幣種沒有匯率、也沒有交易所估值，不計）` : ""}</div>
         </div>
     {/if}
     <div>

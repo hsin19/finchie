@@ -23,7 +23,7 @@ type AccountBalancesRow struct {
 	Unit        string
 	AsOf        pgtype.Date
 	Amount      pgtype.Numeric
-	StatementID int64
+	StatementID *int64
 }
 
 func (q *Queries) AccountBalances(ctx context.Context, accountID int64) ([]AccountBalancesRow, error) {
@@ -258,7 +258,7 @@ func (q *Queries) GetAccount(ctx context.Context, id int64) (GetAccountRow, erro
 
 const insertBalance = `-- name: InsertBalance :exec
 INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
-VALUES ($1, $2, $3, $4, $5)
+VALUES ($1, $2, $3, $4, $5::bigint)
 `
 
 type InsertBalanceParams struct {
@@ -269,6 +269,7 @@ type InsertBalanceParams struct {
 	StatementID int64
 }
 
+// A statement's balance; a snapshot's has none (InsertSnapshot).
 func (q *Queries) InsertBalance(ctx context.Context, arg InsertBalanceParams) error {
 	_, err := q.db.Exec(ctx, insertBalance,
 		arg.AccountID,
@@ -307,7 +308,7 @@ type LatestBalancesRow struct {
 	Unit        string
 	AsOf        pgtype.Date
 	Amount      pgtype.Numeric
-	StatementID int64
+	StatementID *int64
 	Worth       pgtype.Numeric
 	RateDay     pgtype.Date
 	Code        string
@@ -336,6 +337,57 @@ func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, erro
 			&i.RateDay,
 			&i.Code,
 			&i.Price,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const latestValuations = `-- name: LatestValuations :many
+SELECT DISTINCT ON (v.account_id) v.account_id, v.as_of, v.unit, v.amount,
+       (CASE WHEN v.unit = 'TWD' THEN v.amount ELSE round(v.amount / rate.per_twd, 2) END)::numeric AS worth,
+       rate.day::date AS rate_day
+FROM valuations v
+LEFT JOIN LATERAL (SELECT r.day, r.per_twd
+                   FROM exchange_rates r
+                   WHERE r.unit = v.unit
+                   ORDER BY r.day DESC
+                   LIMIT 1) rate ON true
+ORDER BY v.account_id, v.as_of DESC
+`
+
+type LatestValuationsRow struct {
+	AccountID int64
+	AsOf      pgtype.Date
+	Unit      string
+	Amount    pgtype.Numeric
+	Worth     pgtype.Numeric
+	RateDay   pgtype.Date
+}
+
+// Each account's newest valuation (ADR 0018), with its worth in NT$ at the newest rate of its unit, NT$
+// being worth itself; none for a unit without a rate.
+func (q *Queries) LatestValuations(ctx context.Context) ([]LatestValuationsRow, error) {
+	rows, err := q.db.Query(ctx, latestValuations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LatestValuationsRow
+	for rows.Next() {
+		var i LatestValuationsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.AsOf,
+			&i.Unit,
+			&i.Amount,
+			&i.Worth,
+			&i.RateDay,
 		); err != nil {
 			return nil, err
 		}

@@ -433,13 +433,13 @@ func (q *Queries) StatementExists(ctx context.Context, id int64) (bool, error) {
 
 const trimStatementBalances = `-- name: TrimStatementBalances :exec
 DELETE FROM balances b
-WHERE b.statement_id = $1
+WHERE b.statement_id = $1::bigint
   AND b.account_id = $2
   AND b.unit = $3
   AND b.as_of <= $4
   AND (b.as_of >= $5 OR EXISTS (
       SELECT 1 FROM balances k
-      WHERE k.statement_id = $6 AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of))
+      WHERE k.statement_id = $6::bigint AND k.account_id = b.account_id AND k.unit = b.unit AND k.as_of = b.as_of))
 `
 
 type TrimStatementBalancesParams struct {

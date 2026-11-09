@@ -26,7 +26,7 @@ type Balance struct {
 	Unit        string
 	AsOf        pgtype.Date
 	Amount      pgtype.Numeric
-	StatementID int64
+	StatementID *int64
 }
 
 type Document struct {
@@ -108,4 +108,11 @@ type Transaction struct {
 	Counterparty     *string
 	Balance          pgtype.Numeric
 	CounterpartID    *int64
+}
+
+type Valuation struct {
+	AccountID int64
+	AsOf      pgtype.Date
+	Unit      string
+	Amount    pgtype.Numeric
 }

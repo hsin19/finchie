@@ -7,8 +7,9 @@ ON CONFLICT (institution, kind, number) DO UPDATE SET label = coalesce(EXCLUDED.
 RETURNING id;
 
 -- name: InsertBalance :exec
+-- A statement's balance; a snapshot's has none (InsertSnapshot).
 INSERT INTO balances (account_id, unit, as_of, amount, statement_id)
-VALUES (@account_id, @unit, @as_of, @amount, @statement_id);
+VALUES (@account_id, @unit, @as_of, @amount, @statement_id::bigint);
 
 -- name: ListAccounts :many
 -- The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
@@ -53,6 +54,20 @@ LEFT JOIN LATERAL (SELECT q.day, q.code, q.close
                    ORDER BY q.day DESC
                    LIMIT 1) quote ON true
 ORDER BY b.account_id, b.unit, b.as_of DESC, b.id DESC;
+
+-- name: LatestValuations :many
+-- Each account's newest valuation (ADR 0018), with its worth in NT$ at the newest rate of its unit, NT$
+-- being worth itself; none for a unit without a rate.
+SELECT DISTINCT ON (v.account_id) v.account_id, v.as_of, v.unit, v.amount,
+       (CASE WHEN v.unit = 'TWD' THEN v.amount ELSE round(v.amount / rate.per_twd, 2) END)::numeric AS worth,
+       rate.day::date AS rate_day
+FROM valuations v
+LEFT JOIN LATERAL (SELECT r.day, r.per_twd
+                   FROM exchange_rates r
+                   WHERE r.unit = v.unit
+                   ORDER BY r.day DESC
+                   LIMIT 1) rate ON true
+ORDER BY v.account_id, v.as_of DESC;
 
 -- name: AccountBalances :many
 SELECT account_id, unit, as_of, amount, statement_id

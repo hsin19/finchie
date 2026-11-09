@@ -34,12 +34,15 @@ const institutions: Record<string, Institution> = {
 };
 
 // Institutions Finchie reads no card bills from, so never in a spending chart: banks it reads deposit
-// statements from, and brokers (ADR 0017).
+// statements from, brokers (ADR 0017), and exchanges (ADR 0018).
 const depositOnly: Record<string, Institution> = {
     fubon: { name: "富邦", code: "TFB", color: "var(--color-mute)" },
     ctbc: { name: "中信", code: "CTBC", color: "var(--color-mute)" },
     nextbank: { name: "將來", code: "NEXT", color: "var(--color-mute)" },
     skis: { name: "新光證券", code: "SKIS", color: "var(--color-mute)" },
+    max: { name: "MAX", code: "MAX", color: "var(--color-mute)" },
+    binance: { name: "Binance", code: "BINANCE", color: "var(--color-mute)" },
+    bitget: { name: "Bitget", code: "BITGET", color: "var(--color-mute)" },
 };
 
 /** Banks in chart order; a bank without a color comes after them. */
@@ -59,6 +62,7 @@ export const accountKinds: Record<AccountKind, { short: string; label: string; }
     deposit: { short: "deposit", label: "存款" },
     credit_card: { short: "card", label: "信用卡" },
     securities: { short: "securities", label: "證券" },
+    exchange: { short: "exchange", label: "交易所" },
 };
 
 /** The owner's name for an account, else the bank's ("臺幣活存"), else its kind's. */
