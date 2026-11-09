@@ -5,8 +5,8 @@ The browser app (ADR 0007): a SvelteKit single-page app, embedded in the backend
 | Route | Page |
 |---|---|
 | `/` | Overview: this month's and last month's bills, what is due, the year so far, a 12-month trend, recent statements and documents |
-| `/statements` | One month's bill (`?m=`, a closing month): what is due, spending, foreign transaction fees, rebates, by card and by kind, its statements. `?all` lists every statement, plus documents that produced none |
-| `/statements/{id}` | One statement: metadata, reconciliation by kind, its lines in statement order, processing log, re-parse; `?line=` scrolls to a line |
+| `/statements` | One month's bill (`?m=`, a closing month): what is due, spending, foreign transaction fees, rebates, by card and by kind, its statements; while a bank has not closed this month, no change against the month before. `?all` lists every statement |
+| `/statements/{id}` | One statement: metadata, reconciliation by kind (money only), the points it reports (each program's lines, the balance after it, and, on the newest bill, what will lapse), its lines in statement order, processing log, re-parse; `?line=` scrolls to a line |
 | `/documents` | Drop statement e-mails (`.eml`) and follow each through parsing; links the Gmail filter download. Then every document, newest first, loading more as the list scrolls (Back returns to where it was): what parsing it gave, by state (`?show=todo`, failed or not adding up; `pending`, `parsed`, `duplicate`, `skipped`), text in the filename (`?q=`). `/upload` redirects here |
 | `/documents/{id}` | One document: what parsing it gave (what it produced and where, what to do about a failure, warnings) and a re-parse; opened for reading (ADR 0012): an e-mail's headers, attachments, and body; the original to download even when the parser cannot open it |
 | `/transactions` | Search across every account's lines, cards and deposit accounts alike: period, bank, card or account, kinds, overseas, text in the description or memo. Amounts are seen from the owner, money out negative (ADR 0013); totals are what went out and came in per unit. A transfer between the owner's lines or a card payment is one row, its outflow, with the line the money went to folded under it; it counts as neither but as money moved (ADR 0016), and `?hide=transfers` leaves it out |
@@ -52,4 +52,4 @@ Node 26 (`.node-version`); the pnpm version is pinned in `package.json`.
 - `page.url` and `data` change only once a navigation's load is done. A control that changes the URL builds on the URL last asked for (`QueryRequests`), or a second change made while the first loads undoes it.
 - SvelteKit sets the scroll position at the very end of a navigation, after the page's `$effect`s ran; scroll to something in `afterNavigate`.
 - Internal links go through `resolve()` (`svelte/no-navigation-without-resolve`). Links that open a document use `FileLink`.
-- A re-parse gives the statement a new id; the statement page follows it.
+- A re-parse keeps the statement's id but gives its lines new ones; the statement page reloads once the parse is done.

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { lapsesSoon } from "#lib/accounts.js";
 import {
     api,
     LEDGER,
@@ -13,8 +14,10 @@ import {
     monthOf,
     shortDate,
     shortDateTime,
+    today,
 } from "#lib/dates.js";
 import { openUrl } from "#lib/documents.js";
+import { isPoints } from "#lib/flows.js";
 import { onKeys } from "#lib/keys.svelte.js";
 import {
     cardLabel,
@@ -45,22 +48,39 @@ const doc = $derived(data.document);
 const bank = $derived(institution(s.institution));
 const delta = $derived(subtract(s.reconciliation.stated, s.reconciliation.computed));
 
-// Re-parsing replaces the statement: wait for the document to finish, then follow it to its new id.
-// The layout keeps data.documents fresh while anything is pending. Finished means a new parsedAt:
-// until the ledger reloads, data.documents still shows the previous parse.
+// Re-parsing replaces the statement's lines, and it keeps its id: wait for the document to finish,
+// then reload it. The layout keeps data.documents fresh while anything is pending. Finished means a
+// new parsedAt: until the ledger reloads, data.documents still shows the previous parse.
 let reparsing = $state(false);
 let parsedBefore: string | undefined;
 let reparseMessage = $state<string>();
 const live = $derived(data.documents.find(d => d.id === doc.id) ?? doc);
 const status = $derived(reparsing || live.status === "pending" ? "pending" : s.reconciliation.balanced ? "parsed" : "needs_review");
 
+// Money only: points are not added to it (ADR 0019), they have a panel of their own.
 const byKind = $derived(
     kindOrder
         .map(kind => {
-            const rows = data.transactions.filter(t => t.kind === kind);
+            const rows = data.transactions.filter(t => t.kind === kind && !isPoints(t));
             return { kind, rows: rows.length, amount: sum(rows.map(t => t.amount)) };
         })
         .filter(k => k.rows > 0),
+);
+
+// The points the bill reports, by program: its lines, the balance after it, and what will lapse, which
+// is known as of the newest bill only.
+const points = $derived(
+    data.points.flatMap(account => {
+        const lines = data.transactions.filter(t => isPoints(t) && t.accountId === account.id);
+        const newest = account.balances.some(b => b.statementId === s.id);
+        return [...new Set(lines.map(t => t.unit ?? ""))].map(unit => ({
+            account,
+            unit,
+            lines: lines.filter(t => (t.unit ?? "") === unit),
+            balance: account.history.find(b => b.statementId === s.id && b.unit === unit),
+            expiries: newest ? account.expiries.filter(e => e.unit === unit) : [],
+        }));
+    }),
 );
 
 // Lines linked to these (ADR 0009) may be on other statements; ?line= picks the line to show. Scrolled
@@ -161,30 +181,56 @@ onKeys({
     </span>
 </div>
 
-<div class="grid gap-3 md:grid-cols-[1fr_1.3fr]">
-    <section class="panel p-3.5">
-        <h2 class="label mb-2.5">META</h2>
-        <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-            <dt class="text-mute">closing</dt>
-            <dd class="m-0">{s.closingDate}</dd>
-            <dt class="text-mute">due</dt>
-            <dd class="m-0">{s.dueDate}</dd>
-            <dt class="text-mute">paid</dt>
-            <dd class="m-0 {s.paidOn ? 'text-pos' : 'text-mute'}">{s.paidOn ?? "還沒看到繳款（等涵蓋到期日的存款對帳單）"}</dd>
-            <dt class="text-mute">total_due</dt>
-            <dd class="m-0">{formatAmount(s.totalDue)} {s.currency}</dd>
-            <dt class="text-mute">document</dt>
-            <dd class="m-0 min-w-0 truncate">#{doc.id} {doc.filename} · {formatBytes(doc.sizeBytes)}</dd>
-            <dt class="text-mute">sha256</dt>
-            <dd class="m-0 text-dim" title={doc.sha256}>{doc.sha256.slice(0, 4)}…{doc.sha256.slice(-4)}</dd>
-            <dt class="text-mute">parser</dt>
-            <dd class="m-0 text-dim">{doc.parser ? `${doc.parser} v${doc.parserVersion}` : "—"}</dd>
-            <dt class="text-mute">parsed</dt>
-            <dd class="m-0 text-dim">{doc.parsedAt ? shortDateTime(doc.parsedAt) : "—"}</dd>
-            <dt class="text-mute">warnings</dt>
-            <dd class="m-0 {doc.warnings.length ? 'text-neg' : 'text-dim'}">{doc.warnings.length}</dd>
-        </dl>
-    </section>
+<div class="grid items-start gap-3 md:grid-cols-[1fr_1.3fr]">
+    <div class="flex flex-col gap-3">
+        <section class="panel p-3.5">
+            <h2 class="label mb-2.5">META</h2>
+            <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+                <dt class="text-mute">closing</dt>
+                <dd class="m-0">{s.closingDate}</dd>
+                <dt class="text-mute">due</dt>
+                <dd class="m-0">{s.dueDate}</dd>
+                <dt class="text-mute">paid</dt>
+                <dd class="m-0 {s.paidOn ? 'text-pos' : 'text-mute'}">{s.paidOn ?? "還沒看到繳款（等涵蓋到期日的存款對帳單）"}</dd>
+                <dt class="text-mute">total_due</dt>
+                <dd class="m-0">{formatAmount(s.totalDue)} {s.currency}</dd>
+                <dt class="text-mute">document</dt>
+                <dd class="m-0 min-w-0 truncate">#{doc.id} {doc.filename} · {formatBytes(doc.sizeBytes)}</dd>
+                <dt class="text-mute">sha256</dt>
+                <dd class="m-0 text-dim" title={doc.sha256}>{doc.sha256.slice(0, 4)}…{doc.sha256.slice(-4)}</dd>
+                <dt class="text-mute">parser</dt>
+                <dd class="m-0 text-dim">{doc.parser ? `${doc.parser} v${doc.parserVersion}` : "—"}</dd>
+                <dt class="text-mute">parsed</dt>
+                <dd class="m-0 text-dim">{doc.parsedAt ? shortDateTime(doc.parsedAt) : "—"}</dd>
+                <dt class="text-mute">warnings</dt>
+                <dd class="m-0 {doc.warnings.length ? 'text-neg' : 'text-dim'}">{doc.warnings.length}</dd>
+            </dl>
+        </section>
+
+        {#each points as program (`${program.account.id}-${program.unit}`)}
+            <section class="panel p-3.5">
+                <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 class="label">POINTS · {program.unit}</h2>
+                    <a href={resolve("/accounts/[id]", { id: String(program.account.id) })} class="text-[12px]">點數帳戶 →</a>
+                </div>
+                <dl class="m-0 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5">
+                    {#each program.lines as line (line.id)}
+                        <dt class="text-mute">{kinds[line.kind].label}</dt>
+                        <dd class="m-0 text-right">{formatAmount(line.amount, { signed: true })}</dd>
+                    {/each}
+                    {#if program.balance}
+                        <div aria-hidden="true" class="col-span-2 border-t border-dashed border-line"></div>
+                        <dt class="text-mute">這期之後的餘額</dt>
+                        <dd class="m-0 text-right font-bold text-ink-bright">{formatAmount(program.balance.amount)}</dd>
+                    {/if}
+                    {#each program.expiries as expiry (expiry.by)}
+                        <dt class={lapsesSoon(expiry.by, today()) ? "text-neg" : "text-mute"}>{expiry.by} 前到期</dt>
+                        <dd class="m-0 text-right {lapsesSoon(expiry.by, today()) ? 'text-neg' : ''}">{formatAmount(expiry.amount)}</dd>
+                    {/each}
+                </dl>
+            </section>
+        {/each}
+    </div>
 
     <section class="panel flex flex-col gap-3 p-3.5">
         <h2 class="label">RECONCILIATION · 對帳</h2>
@@ -271,7 +317,9 @@ onKeys({
                             <td class="px-2 py-2 text-right text-dim">
                                 {line.t.originalAmount && line.t.originalCurrency ? `${line.t.originalCurrency} ${formatAmount(line.t.originalAmount)}` : ""}
                             </td>
-                            <td class="py-2 pl-2 text-right {line.t.kind === 'purchase' ? 'text-ink' : tone[kinds[line.t.kind].tone]}">{formatAmount(line.t.amount)}</td>
+                            <td class="py-2 pl-2 text-right {line.t.kind === 'purchase' ? 'text-ink' : tone[kinds[line.t.kind].tone]}">
+                                {formatAmount(line.t.amount)}{#if isPoints(line.t)}<span class="ml-1 text-mute">{line.t.unit}</span>{/if}
+                            </td>
                         </tr>
                     {/if}
                 {/each}

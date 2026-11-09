@@ -139,7 +139,7 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
         </div>
         {#each recent as { doc, statement } (statement ? `s${statement.id}` : `d${doc?.id}`)}
             <a
-                href={statement ? resolve("/statements/[id]", { id: String(statement.id) }) : resolve("/statements?all")}
+                href={statement ? resolve("/statements/[id]", { id: String(statement.id) }) : resolve("/documents/[id]", { id: String(doc?.id) })}
                 class="flex min-h-11 flex-col gap-0.5 border-t border-rule py-2.5 text-ink hover:text-ink"
             >
                 <span>

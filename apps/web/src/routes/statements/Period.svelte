@@ -28,6 +28,7 @@ import {
     approx,
     formatAmount,
     negate,
+    sign,
     subtract,
 } from "#lib/money.js";
 import { goto } from "$app/navigation";
@@ -70,15 +71,16 @@ const rebate = $derived(kindTotal("rebate"));
 const cards = $derived([...data.current.byCard].sort((a, b) => approx(b.amount) - approx(a.amount)));
 const topCard = $derived(Math.max(...cards.map(c => approx(c.amount)), 1));
 
-const parsedDocuments = $derived(new Set(data.statements.map(s => s.documentId)));
-const unparsed = $derived(data.documents.filter(d => !parsedDocuments.has(d.id) && ["pending", "failed"].includes(documentStatus(d))).length);
+// This month while some bank has not closed yet: a part of a bill against a whole one says nothing.
+const partial = $derived(closing && missing.length > 0);
 
 function changeText(change: number | undefined): string {
+    if (partial) return `還沒出齊，先不比`;
     return change === undefined ? "沒有上期可比" : `${change > 0 ? "+" : ""}${change.toFixed(1)}% vs 上期`;
 }
 
 function changeTone(change: number | undefined): string {
-    return change === undefined ? "text-mute" : change > 0 ? "text-neg" : "text-pos";
+    return partial || change === undefined ? "text-mute" : change > 0 ? "text-neg" : "text-pos";
 }
 
 function reconciliation(s: Statement): string {
@@ -114,12 +116,12 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
     </div>
     <div class="panel flex flex-col gap-1 p-3 md:p-3.5">
         <div class="text-[10px] tracking-[0.12em] text-mute">FX_FEE · 海外手續費</div>
-        <div class="text-[20px] font-bold text-neg md:text-[24px]">{formatAmount(fxFee)}</div>
+        <div class="text-[20px] font-bold md:text-[24px] {sign(fxFee) > 0 ? 'text-neg' : 'text-mute'}">{formatAmount(fxFee)}</div>
         <div class="text-[11px] text-dim">{fxShare === undefined ? "沒有海外消費" : `${fxShare.percent.toFixed(1)}% of overseas ${formatAmount(fxShare.of)}`}</div>
     </div>
     <div class="panel flex flex-col gap-1 p-3 md:p-3.5">
         <div class="text-[10px] tracking-[0.12em] text-mute">REWARD · 回饋</div>
-        <div class="text-[20px] font-bold text-pos md:text-[24px]">{formatAmount(rebate ? negate(rebate.amount) : "0")}</div>
+        <div class="text-[20px] font-bold md:text-[24px] {rebate ? 'text-pos' : 'text-mute'}">{formatAmount(rebate ? negate(rebate.amount) : "0")}</div>
         <div class="text-[11px] text-dim">{rebate ? `${rebate.count} 筆入帳回饋` : "這期沒有回饋入帳"}</div>
     </div>
 </div>
@@ -161,8 +163,7 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
                     {#each kindOrder.map(kindTotal).filter(k => k !== undefined) as k (k.kind)}
                         <tr class="border-t border-rule">
                             <td class="py-2 pr-2">
-                                <a class="text-dim hover:text-ink" href={resolve(`/transactions?closing=${data.month}&kind=${k.kind}`)}>{kinds[k.kind].short}
-                                    <span class="text-mute">{kinds[k.kind].label}</span></a>
+                                <a class="text-dim hover:text-ink" href={resolve(`/transactions?closing=${data.month}&kind=${k.kind}`)}>{kinds[k.kind].label}</a>
                             </td>
                             <td class="py-2 pr-2 text-right text-dim">{k.count}</td>
                             <td class="py-2 text-right {tone[kinds[k.kind].tone]}">{formatAmount(k.amount)}</td>
@@ -194,11 +195,6 @@ const names = (ids: string[]) => ids.map(i => institution(i).name).join("、");
         {#if missing.length > 0}
             <p class="m-0 border-t border-rule py-2.5 text-[12px] text-mute">
                 {closing ? `等 ${names(missing)} 出帳` : `沒有 ${names(missing)} 的帳單（上個月有）`}
-            </p>
-        {/if}
-        {#if unparsed > 0}
-            <p class="m-0 border-t border-rule py-2.5 text-[12px] text-mute">
-                {unparsed} 份文件還沒產生帳單 · <a href={resolve("/statements?all")}>看全部 →</a>
             </p>
         {/if}
     </section>
