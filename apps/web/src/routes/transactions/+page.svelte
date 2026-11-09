@@ -510,7 +510,8 @@ onKeys({
                             <td class="px-2 py-2 text-dim">{t.country ?? "—"}</td>
                             <td class="px-2 py-2 text-right whitespace-nowrap text-dim">{original(t)}</td>
                             <td class="py-2 pl-2 text-right whitespace-nowrap {amountTone(t)}">
-                                {amount(t)}{#if unitOf(t)} <span class="text-mute">{unitOf(t)}</span>{/if}
+                                <!-- A margin, not a space: Svelte drops the whitespace a block starts with. -->
+                                {amount(t)}{#if unitOf(t)}<span class="ml-1 text-mute">{unitOf(t)}</span>{/if}
                             </td>
                         </tr>
                     {:else}
@@ -525,7 +526,7 @@ onKeys({
             <button type="button" class="flex min-h-11 w-full flex-col gap-0.5 border-t border-rule py-2.5 text-left text-ink" onclick={() => select(t, { open: true })}>
                 <span class="flex w-full justify-between gap-2.5">
                     <span class="truncate">{t.description}{t.memo ? ` · ${t.memo}` : ""}</span>
-                    <span class="shrink-0 {amountTone(t)}">{amount(t)}{unitOf(t) ? ` ${unitOf(t)}` : ""}</span>
+                    <span class="shrink-0 {amountTone(t)}">{amount(t)}{#if unitOf(t)}<span class="ml-1 text-mute">{unitOf(t)}</span>{/if}</span>
                 </span>
                 <span class="text-[12px] text-mute">
                     {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{lineAccount(t)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · ${breakdown(t)}` : ""}{t.counterpart ? ` · ${sign(flowOf(t)) < 0 ? "→" : "←"} 自己的帳戶` : ""}
