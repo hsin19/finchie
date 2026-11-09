@@ -93,3 +93,41 @@ def test_esun_reads_its_e_points_and_each_months_expiring_ones() -> None:
         (Decimal(35), date(2026, 5, 31)),
     ]
     assert parsed.warnings == []
+
+
+# From the October 2026 bill: Gregorian dates, rebates under 本期回饋／費用明細, and no 本期調整點數 column.
+PAGE_1_GREGORIAN = """親愛的 王＊明 您好：
+這是您 2026年10月 信用卡帳單，感謝您使用電子帳單讓地球更美麗，
+1,226 元 120,000 元
+2026/11/23 11.88%
+1,000 元 至 2026/12
+2026/11/07 12,000 / 120,000 元
+150 點 35 點 20 點 165 點
+※玉山 e point 統計區間為20261007~20261106。
+※您有玉山 e point 即將到期：2026/11共0點、2026/12共10點，將依效期每日到期清除，實際到期點數依系統為準。"""
+
+PAGE_2_GREGORIAN = (
+    PAGE_2.replace("03/24 ", "10/22 ")
+    .replace("本期費用明細：", "本期回饋／費用明細：")
+    .replace("04/07 04/07", "11/07 11/07")
+    .replace("03/", "10/")
+)
+
+
+def test_esun_reads_the_gregorian_layout_from_october_2026() -> None:
+    parsed = EsunParser().parse(FakeDocument([PAGE_1_GREGORIAN, PAGE_2_GREGORIAN]), ocr=None)
+    statement = parsed.statement
+    assert statement.closing_date == date(2026, 11, 7)
+    assert statement.due_date == date(2026, 11, 23)
+    assert statement.reconciliation.balanced
+    rebate = next(tx for tx in statement.transactions if tx.kind is Kind.REBATE)
+    assert (rebate.transaction_date, rebate.amount) == (date(2026, 11, 7), Decimal(-12))
+    [program] = statement.points
+    assert program.closing == Decimal(165)
+    lines = [(line.label, line.kind, line.amount) for line in program.lines]
+    assert lines == [("本期加點", PointsKind.EARN, Decimal(35)), ("本期扣點", PointsKind.REDEEM, Decimal(-20))]
+    assert [(e.amount, e.by) for e in program.expiries] == [
+        (Decimal(0), date(2026, 11, 30)),
+        (Decimal(10), date(2026, 12, 31)),
+    ]
+    assert parsed.warnings == []

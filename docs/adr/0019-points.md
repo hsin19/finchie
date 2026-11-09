@@ -11,7 +11,7 @@ All four banks print their programs on the bill, in a table of their own beside 
 | Bank | Program | Opening | Added | Used | Closing | Expiring |
 |---|---|---|---|---|---|---|
 | Cathay | 小樹點(信用卡) | 上期累計 | 本期新增/扣除, 本期贈送 | 本期兌/轉換 (printed positive) | 本期結餘 | This month's (by the closing month's last day), and the next twelve months' together, this month's included (by the date printed) |
-| E.SUN | e point | 上期累積點數 | 本期加點, 本期調整點數 | 本期扣點 | 本期結餘點數 | Per month (by the month's last day) |
+| E.SUN | e point | 上期累積點數 | 本期加點, 本期調整點數 (gone from the October 2026 bill) | 本期扣點 | 本期結餘點數 | Per month (by the month's last day) |
 | Taishin | 台新Point(信用卡); 大集大利點數 until 2022-06 | 上期結餘點數/里數 | 新增回饋, 活動回饋/調整 | 本期使用點數/里數 (printed negative) | 本期結餘回饋 | One amount, on the date printed |
 | HSBC | 滙豐旅遊積分 | 上月結餘積分 | 本期新增積分 | 本期使用積分(含調整) | 本期積分總結餘 | 次月到期點數 (by next month's last day) |
 

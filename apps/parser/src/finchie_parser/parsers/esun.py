@@ -1,4 +1,5 @@
 import re
+from datetime import date
 from decimal import Decimal
 
 from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
@@ -15,11 +16,14 @@ from finchie_parser.parsers.base import (
 )
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, clean, month_day, month_end, roc_date
+from finchie_parser.text import amount, clean, iso_date, month_day, month_end, roc_date
 
-_DUE = re.compile(r"^(\d{3}/\d\d/\d\d) \d+(?:\.\d+)?%", re.ASCII)
+# Minguo dates ("115/09/07") up to the September 2026 bill, Gregorian ones ("2026/11/07") from October.
+_DUE = re.compile(r"^(\d{3,4}/\d\d/\d\d) \d+(?:\.\d+)?%", re.ASCII)
 # The closing date is printed next to the cash-advance limit: "115/09/07 24,000 / 240,000 元".
-_CLOSING = re.compile(r"^(\d{3}/\d\d/\d\d) [\d,]+ / [\d,]+ 元", re.ASCII)
+_CLOSING = re.compile(r"^(\d{3,4}/\d\d/\d\d) [\d,]+ / [\d,]+ 元", re.ASCII)
+# 本期回饋／費用明細 from the October 2026 bill.
+_FEES = re.compile(r"^本期(?:回饋／)?費用明細")
 _SUBTOTAL = re.compile(r"^本期合計： TWD (-?[\d,]+)$", re.ASCII)
 _TOTAL_DUE = re.compile(r"^本期應繳總金額： TWD (-?[\d,]+)$", re.ASCII)
 _CARD = re.compile(r"^卡號：\d{4}-X{4}-X{4}-(\d{4})", re.ASCII)
@@ -33,9 +37,10 @@ _ROW = re.compile(
 )
 _PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<desc>\D.*) TWD (?P<amt>-[\d,]+)$", re.ASCII)
 # 點數明細, its headings an image (ADR 0019): "<上期累積點數> 點 <本期加點> 點 <本期調整點數> 點 <本期扣點> 點
-# <本期結餘點數> 點". The table names no program; its notes call the points e point.
+# <本期結餘點數> 點". The table names no program; its notes call the points e point. From the October 2026
+# bill it is 玉山e point明細, without 本期調整點數.
 _POINTS = re.compile(
-    r"^(?P<opening>-?[\d,]+) 點 (?P<added>-?[\d,]+) 點 (?P<adjusted>-?[\d,]+) 點 (?P<used>-?[\d,]+) 點"
+    r"^(?P<opening>-?[\d,]+) 點 (?P<added>-?[\d,]+) 點(?: (?P<adjusted>-?[\d,]+) 點)? (?P<used>-?[\d,]+) 點"
     r" (?P<closing>-?[\d,]+) 點$"
 )
 _POINTS_NAME = "e point"
@@ -45,7 +50,7 @@ _POINTS_EXPIRING = re.compile(r"(?P<y>\d{4})/(?P<m>\d{1,2})共(?P<n>[\d,]+)點")
 
 class EsunParser(StatementParser):
     name = "esun.credit_card"
-    version = "2"
+    version = "3"
     institution = "esun"
     # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
     # comes from the same address.
@@ -61,8 +66,8 @@ class EsunParser(StatementParser):
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         texts = document.page_texts()
-        closing = roc_date(find(_CLOSING, texts, "closing date").group(1))
-        due = roc_date(find(_DUE, texts, "due date").group(1))
+        closing = _date(find(_CLOSING, texts, "closing date").group(1))
+        due = _date(find(_DUE, texts, "due date").group(1))
         subtotal = amount(find(_SUBTOTAL, texts, "本期合計").group(1))
         total_due = amount(find(_TOTAL_DUE, texts, "本期應繳總金額").group(1))
 
@@ -79,7 +84,7 @@ class EsunParser(StatementParser):
                     PointsExpiry(amount(m["n"]), month_end(int(m["y"]), int(m["m"])))
                     for m in _POINTS_EXPIRING.finditer(line)
                 ]
-            elif line.startswith("本期費用明細"):
+            elif _FEES.match(line):
                 section, card = "fees", ""
             elif line.startswith("本期消費明細"):
                 section = "purchases"
@@ -123,7 +128,7 @@ class EsunParser(StatementParser):
                     opening=amount(program["opening"]),
                     lines=(
                         earned("本期加點", amount(program["added"])),
-                        adjusted("本期調整點數", amount(program["adjusted"])),
+                        adjusted("本期調整點數", amount(program["adjusted"] or "0")),
                         used("本期扣點", amount(program["used"])),
                     ),
                     closing=amount(program["closing"]),
@@ -143,6 +148,10 @@ class EsunParser(StatementParser):
             points=points,
         )
         return Parsed(statement, warnings)
+
+
+def _date(text: str) -> date:
+    return iso_date(text) if len(text.split("/")[0]) == 4 else roc_date(text)
 
 
 def _kind(description: str, value: Decimal) -> Kind:
