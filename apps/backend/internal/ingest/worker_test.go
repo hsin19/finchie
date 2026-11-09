@@ -196,6 +196,7 @@ func TestReparsingReplacesThePreviousResult(t *testing.T) {
 	if err := NewWorker(pool, parsed(sampleStatement(true)), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
+	before := statementOf(t, pool, id)
 
 	fixed := sampleStatement(true)
 	fixed.Transactions = fixed.Transactions[:1]
@@ -205,6 +206,29 @@ func TestReparsingReplacesThePreviousResult(t *testing.T) {
 	if countRows(t, pool, "statements") != 1 || countRows(t, pool, "transactions") != 1 {
 		t.Fatal("re-parse must replace, not append")
 	}
+	// Its page and the links to it keep working.
+	if after := statementOf(t, pool, id); after != before {
+		t.Fatalf("statement id = %d after re-parse, want %d as before", after, before)
+	}
+	// A statement stored for the first time after that still gets an id of its own.
+	other := addDocument(t, pool, "other.eml")
+	next := sampleStatement(true)
+	next.ClosingDate.Month++
+	if err := NewWorker(pool, parsed(next), time.Minute).Work(t.Context(), job(other, 1, 6)); err != nil {
+		t.Fatal(err)
+	}
+	if got := statementOf(t, pool, other); got == before {
+		t.Fatalf("a new statement took id %d", got)
+	}
+}
+
+func statementOf(t *testing.T, pool *pgxpool.Pool, documentID int64) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(t.Context(), "SELECT id FROM statements WHERE document_id = $1", documentID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func TestPermanentParserErrorsFailTheDocumentWithoutRetry(t *testing.T) {

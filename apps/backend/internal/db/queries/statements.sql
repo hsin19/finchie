@@ -1,6 +1,7 @@
--- name: DeleteStatementsForDocument :exec
+-- name: DeleteStatementsForDocument :many
 DELETE FROM statements
-WHERE document_id = @document_id;
+WHERE document_id = @document_id
+RETURNING id;
 
 -- name: FindStatementByKey :one
 SELECT id, document_id
@@ -46,10 +47,13 @@ WHERE b.statement_id = @statement_id::bigint
       WHERE k.statement_id = @keeper_id::bigint AND k.account_id = b.account_id AND k.unit_id = b.unit_id AND k.as_of = b.as_of));
 
 -- name: InsertStatement :one
--- The bill's columns are null for a deposit statement (ADR 0013).
-INSERT INTO statements (document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
+-- The bill's columns are null for a deposit statement (ADR 0013). With `id`, a re-parsed statement keeps
+-- the id it had, so its page and the links to it keep working; without, it takes the next.
+INSERT INTO statements (id, document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
                         computed_new_charges, stated_new_charges, stated_label, balanced)
-VALUES (@document_id, @institution, @kind, @period_start, @closing_date, @due_date, @currency, @total_due,
+OVERRIDING SYSTEM VALUE
+VALUES (coalesce(sqlc.narg(id)::bigint, nextval(pg_get_serial_sequence('statements', 'id'))),
+        @document_id, @institution, @kind, @period_start, @closing_date, @due_date, @currency, @total_due,
         @computed_new_charges, @stated_new_charges, @stated_label, @balanced)
 RETURNING id;
 

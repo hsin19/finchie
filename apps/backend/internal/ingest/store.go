@@ -98,8 +98,13 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *
 		if err := queries.LockLinks(ctx); err != nil {
 			return fmt.Errorf("lock links: %w", err)
 		}
-		if err := queries.DeleteStatementsForDocument(ctx, documentID); err != nil {
+		previous, err := queries.DeleteStatementsForDocument(ctx, documentID)
+		if err != nil {
 			return err
+		}
+		// A re-parse keeps the statement's id: its page and the links to it stay where they were.
+		if len(previous) > 0 {
+			statement.ID = &previous[0]
 		}
 
 		finish := dbq.FinishDocumentParams{

@@ -11,14 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteStatementsForDocument = `-- name: DeleteStatementsForDocument :exec
+const deleteStatementsForDocument = `-- name: DeleteStatementsForDocument :many
 DELETE FROM statements
 WHERE document_id = $1
+RETURNING id
 `
 
-func (q *Queries) DeleteStatementsForDocument(ctx context.Context, documentID int64) error {
-	_, err := q.db.Exec(ctx, deleteStatementsForDocument, documentID)
-	return err
+func (q *Queries) DeleteStatementsForDocument(ctx context.Context, documentID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, deleteStatementsForDocument, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const findStatementByKey = `-- name: FindStatementByKey :one
@@ -100,14 +116,17 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 }
 
 const insertStatement = `-- name: InsertStatement :one
-INSERT INTO statements (document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
+INSERT INTO statements (id, document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
                         computed_new_charges, stated_new_charges, stated_label, balanced)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12)
+OVERRIDING SYSTEM VALUE
+VALUES (coalesce($1::bigint, nextval(pg_get_serial_sequence('statements', 'id'))),
+        $2, $3, $4, $5, $6, $7, $8, $9,
+        $10, $11, $12, $13)
 RETURNING id
 `
 
 type InsertStatementParams struct {
+	ID                 *int64
 	DocumentID         int64
 	Institution        string
 	Kind               string
@@ -122,9 +141,11 @@ type InsertStatementParams struct {
 	Balanced           bool
 }
 
-// The bill's columns are null for a deposit statement (ADR 0013).
+// The bill's columns are null for a deposit statement (ADR 0013). With `id`, a re-parsed statement keeps
+// the id it had, so its page and the links to it keep working; without, it takes the next.
 func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertStatement,
+		arg.ID,
 		arg.DocumentID,
 		arg.Institution,
 		arg.Kind,
