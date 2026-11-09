@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/numeric"
 )
 
 // Feeds are tried in order: Fawaz Ahmed's currency API on jsDelivr, then its Cloudflare Pages mirror.
@@ -112,9 +114,14 @@ func parse(body feed) (dbq.UpsertRatesParams, error) {
 	sort.Strings(units)
 	params := dbq.UpsertRatesParams{Day: pgtype.Date{Time: day, Valid: true}}
 	for _, unit := range units {
-		var rate pgtype.Numeric
+		// The feed prints a tiny rate in exponent notation (BTC: 4.0260888e-7), read exactly all the same.
 		// A unit priced at zero (or a value that is no number) cannot be divided by: left out.
-		if err := rate.Scan(body.TWD[unit].String()); err != nil || rate.Int == nil || rate.Int.Sign() <= 0 {
+		r, ok := new(big.Rat).SetString(body.TWD[unit].String())
+		if !ok || r.Sign() <= 0 {
+			continue
+		}
+		rate, err := numeric.FromRat(r)
+		if err != nil {
 			continue
 		}
 		params.Units = append(params.Units, strings.ToUpper(unit))
