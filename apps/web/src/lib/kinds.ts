@@ -6,14 +6,21 @@ import type {
 } from "#lib/api/client.js";
 import type { Tone } from "#lib/tone.js";
 
-/** `worth`: the heading of what accounts of the kind are worth together. */
+/**
+ * In the order /accounts lists them: assets, then liabilities (ADR 0022). `worth`: the heading of what
+ * accounts of the kind are worth together.
+ */
 export const accountKinds: Record<AccountKind, { short: string; label: string; worth: string; }> = {
     deposit: { short: "deposit", label: "存款", worth: "DEPOSITS · 存款" },
-    credit_card: { short: "card", label: "信用卡", worth: "CARDS · 信用卡" },
     securities: { short: "securities", label: "證券", worth: "SECURITIES · 證券市值" },
     exchange: { short: "exchange", label: "交易所", worth: "EXCHANGES · 交易所" },
     points: { short: "points", label: "點數", worth: "POINTS · 點數" },
+    credit_card: { short: "card", label: "信用卡", worth: "CARDS · 信用卡" },
+    loan: { short: "loan", label: "貸款", worth: "LOANS · 貸款" },
 };
+
+/** Every account kind, in the order of `accountKinds`. */
+export const accountKindOrder = Object.keys(accountKinds) as AccountKind[];
 
 interface Kind {
     /** Column value, terminal style. */

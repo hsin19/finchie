@@ -58,15 +58,20 @@ export function accountsHref({ sort, all }: { sort: AccountSort; all: boolean; }
 }
 
 /**
- * By worth in NT$, largest first (ADR 0015); or by bank, as the API lists them. An account without a
- * worth, holding a unit with no rate, goes last; ties keep the bank order.
+ * By worth in NT$ either way, largest first (ADR 0015): the largest debt first among liabilities, whose
+ * worth is negative (ADR 0022). Or by bank, as the API lists them. An account without a worth, holding
+ * a unit with no rate, goes last; ties keep the bank order.
  */
 export function sortAccounts(accounts: Account[], by: AccountSort): Account[] {
     if (by === "bank") return accounts;
     return [...accounts].sort((a, b) => {
         if (a.worth === undefined || b.worth === undefined) return a.worth === undefined ? (b.worth === undefined ? 0 : 1) : -1;
-        return sign(subtract(b.worth, a.worth));
+        return sign(subtract(magnitude(b.worth), magnitude(a.worth)));
     });
+}
+
+function magnitude(value: string): string {
+    return sign(value) < 0 ? negate(value) : value;
 }
 
 /** Below this worth in NT$, either way, an account or a balance is small: the accounts page leaves it out unless ?all. */
@@ -76,7 +81,7 @@ export const SMALL_WORTH = "1000";
 export const LISTED_BALANCES = 3;
 
 function small(worth: string): boolean {
-    return sign(subtract(sign(worth) < 0 ? negate(worth) : worth, SMALL_WORTH)) < 0;
+    return sign(subtract(magnitude(worth), SMALL_WORTH)) < 0;
 }
 
 /**
@@ -258,11 +263,14 @@ export interface AccountPage {
     history: "days" | "statements";
     /** What a gap in its balances most likely means. */
     gaps: string;
+    /** Why its balances are not checked against its lines, when they are not. */
+    unchecked: string;
     /** The owner keeps it by hand (ADR 0019): it takes what it holds, a row a unit. */
     form: boolean;
 }
 
 const MISSING_STATEMENT = "這兩個日期之間有錢進出、卻沒有任何明細：多半是少了一期對帳單。上傳那期之後就會接起來。";
+const NO_LINES = "來源只給餘額、沒有明細，接不起來";
 
 const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
     deposit: {
@@ -274,17 +282,32 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         lines: { note: "存入是正數", trade: false },
         history: "statements",
         gaps: MISSING_STATEMENT,
+        unchecked: NO_LINES,
     },
-    // A card bill's account only holds its lines (ADR 0013); /statements shows the bills.
+    // A liability (ADR 0022): what each bill says is owed, on its closing date; its lines are the bills'.
     credit_card: {
         headline: "balances",
         noWorth: "",
         holdings: false,
         positions: false,
         expiring: false,
-        lines: { note: "存入是正數", trade: false },
+        lines: { note: "照帳單印的：消費是正數，繳款與退款是負數", trade: false },
         history: "statements",
         gaps: MISSING_STATEMENT,
+        // A bill dates its lines by purchase, which can fall before the bill before it closed (ADR 0022).
+        unchecked: "每期帳單自己對帳，不接前後期的餘額",
+    },
+    // A liability (ADR 0022): the principal outstanding, as the owner says, until a loan statement is parsed.
+    loan: {
+        headline: "balances",
+        noWorth: "",
+        holdings: false,
+        positions: false,
+        expiring: false,
+        lines: { note: "照對帳單印的", trade: false },
+        history: "statements",
+        gaps: MISSING_STATEMENT,
+        unchecked: NO_LINES,
     },
     // Shares, one unit per security; its lines are trades (ADR 0017).
     securities: {
@@ -296,6 +319,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         lines: { note: "買進的股數是正數", trade: true },
         history: "statements",
         gaps: MISSING_STATEMENT,
+        unchecked: NO_LINES,
     },
     // Coins, and nothing but snapshots of them (ADR 0018).
     exchange: {
@@ -306,6 +330,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         expiring: false,
         history: "days",
         gaps: MISSING_STATEMENT,
+        unchecked: NO_LINES,
     },
     // Its bills print its programs' balances, their totals as lines, and what will lapse (ADR 0019).
     points: {
@@ -317,6 +342,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         lines: { note: "帳單上每一期的合計，獲得是正數", trade: false },
         history: "statements",
         gaps: "這兩期之間少了點數，帳單卻沒列出：多半是點數過期了（過期的點數不會出現在任何欄位），或少了一期帳單。",
+        unchecked: NO_LINES,
     },
 };
 
@@ -327,8 +353,8 @@ export function accountPage(account: Pick<Account, "kind" | "institution">): Acc
     return { ...page, lines: owned ? undefined : page.lines, form: owned };
 }
 
-/** Kinds an owner can keep by hand, in the order the accounts page lists kinds: every one but a card's. */
-export const ownedKinds: AccountKind[] = ["deposit", "securities", "exchange", "points"];
+/** Kinds an owner can keep by hand: every one but a card's, which its bank's bills report (ADR 0022). */
+export const ownedKinds: AccountKind[] = ["deposit", "securities", "exchange", "points", "loan"];
 
 /** A securities account's positions: held first, then those sold out whose sales are known to have gained or lost. */
 export function shownPositions(positions: Position[] = []): Position[] {

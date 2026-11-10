@@ -31,7 +31,7 @@ async function create(event: SubmitEvent) {
 
 <section class="panel px-3.5 py-2.5">
     <h2 class="label">NEW · 新增帳戶</h2>
-    <p class="mt-1 text-[12px] text-mute">沒有帳單或 API 的帳戶自己記，例如飯店點數、航空哩程、現金：建立後到帳戶頁加上它有的東西。</p>
+    <p class="mt-1 text-[12px] text-mute">沒有帳單或 API 的帳戶自己記，例如飯店點數、航空哩程、現金，或是貸款（記還欠的本金，算負債）：建立後到帳戶頁加上它有的東西。</p>
     <form class="mt-2 flex flex-wrap items-end gap-3" onsubmit={create}>
         <label class="flex flex-col gap-1 text-[12px] text-mute">
             帳戶名稱

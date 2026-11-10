@@ -321,12 +321,35 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What the owner has less what they owe on cards, in NT$
-         * @description Every account's worth added up, overall and by kind (accounts without a worth are counted, not
-         *     guessed), less what is owed: each bank's newest card bill that owes something and that no deposit
-         *     account or later bill has shown paid (ADR 0016). Worked out on every read, like the accounts.
+         * What the owner has less what they owe, in NT$, on a day
+         * @description Every account's worth on the day added up, assets and liabilities (ADR 0022), overall and by kind;
+         *     accounts without a worth are counted, not guessed. Each account's newest balance on or before the
+         *     day, at each unit's newest price at the end of that day in Taipei (ADR 0023). `completeAsOf` is the
+         *     newest day every account had reported by; after it the figure is an estimate, and `behind` names
+         *     the accounts that have not reported since.
          */
         get: operations["getNetWorth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/net-worth/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Net worth over time, by day or by month end
+         * @description As /api/net-worth for each day from `from` to `to` (Taipei's today when left out), every day or
+         *     the last day of each month and `to` itself; at most 1000 points.
+         */
+        get: operations["getNetWorthHistory"];
         put?: never;
         post?: never;
         delete?: never;
@@ -575,7 +598,10 @@ export interface components {
             /** @example TWD */
             currency: string;
             totalDue: components["schemas"]["Decimal"];
-            reconciliation: components["schemas"]["Reconciliation"];
+            /** @description Every check balances */
+            balanced: boolean;
+            /** @description Every figure the bill prints that its lines are checked against, in its order (ADR 0021) */
+            checks: components["schemas"]["Check"][];
             transactionCount: number;
             /**
              * Format: date
@@ -584,7 +610,12 @@ export interface components {
             paidOn?: string;
         };
         /** @enum {string} */
-        AccountKind: "credit_card" | "deposit" | "securities" | "exchange" | "points";
+        AccountKind: "credit_card" | "deposit" | "securities" | "exchange" | "points" | "loan";
+        /**
+         * @description A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)
+         * @enum {string}
+         */
+        AccountSide: "asset" | "liability";
         /**
          * @description Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
          * @enum {string}
@@ -596,8 +627,9 @@ export interface components {
             /** @example esun */
             institution: string;
             kind: components["schemas"]["AccountKind"];
+            side: components["schemas"]["AccountSide"];
             /**
-             * @description As printed, usually masked; empty for a card bill
+             * @description As printed, usually masked; empty for a bank's card or points account
              * @example 1234567***890
              */
             number: string;
@@ -846,11 +878,14 @@ export interface components {
             /** @description 預繳金, for a buy paid in advance */
             prepaid?: components["schemas"]["Decimal"];
         };
-        Reconciliation: {
-            balanced: boolean;
+        Check: {
+            /** @description The statement's own label for the figure, e.g. 本期新增款項 */
+            name: string;
+            /** @description What both are in, as printed; empty when the statement prints none */
+            unit: string;
             computed: components["schemas"]["Decimal"];
             stated: components["schemas"]["Decimal"];
-            statedLabel: string;
+            balanced: boolean;
         };
         /**
          * @default newest
@@ -967,16 +1002,38 @@ export interface components {
             amount: components["schemas"]["Decimal"];
         };
         NetWorth: {
-            holdings: components["schemas"]["Decimal"];
-            byKind: components["schemas"]["KindWorth"][];
-            /** @description Accounts without a worth, left out of holdings */
-            unvalued: number;
-            owed: components["schemas"]["Decimal"];
-            /** @description Unpaid bills in another currency than NT$, left out of owed */
-            owedElsewhere: number;
-            /** @description The statements that make up what is owed */
-            unpaidBills: number[];
+            /** Format: date */
+            on: string;
+            assets: components["schemas"]["Decimal"];
+            /** @description Negative */
+            liabilities: components["schemas"]["Decimal"];
             net: components["schemas"]["Decimal"];
+            byKind: components["schemas"]["KindWorth"][];
+            /** @description Accounts without a worth on the day, left out */
+            unvalued: number;
+            /**
+             * Format: date
+             * @description The newest day every account had reported by; absent when none has
+             */
+            completeAsOf?: string;
+            /** @description Accounts whose newest report is older than the day */
+            behind: number[];
+        };
+        /**
+         * @description Every day, or the last day of each month
+         * @default month
+         * @enum {string}
+         */
+        HistoryStep: "day" | "month";
+        NetWorthPoint: {
+            /** Format: date */
+            on: string;
+            assets: components["schemas"]["Decimal"];
+            liabilities: components["schemas"]["Decimal"];
+            net: components["schemas"]["Decimal"];
+            unvalued: number;
+            /** @description Every account had reported by the day: the figure is exact */
+            complete: boolean;
         };
         KindWorth: {
             kind: components["schemas"]["AccountKind"];
@@ -1489,7 +1546,10 @@ export interface operations {
     };
     getNetWorth: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The day, Taipei's today when left out */
+                on?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1505,6 +1565,31 @@ export interface operations {
                     "application/json": components["schemas"]["NetWorth"];
                 };
             };
+        };
+    };
+    getNetWorthHistory: {
+        parameters: {
+            query: {
+                from: string;
+                to?: string;
+                step?: components["schemas"]["HistoryStep"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetWorthPoint"][];
+                };
+            };
+            400: components["responses"]["Problem"];
         };
     };
     getSettings: {

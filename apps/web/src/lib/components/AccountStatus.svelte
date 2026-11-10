@@ -1,5 +1,6 @@
 <script lang="ts">
 import {
+    accountPage,
     accountStatus,
     daysAgo,
     isOwned,
@@ -28,5 +29,5 @@ const status = $derived(accountStatus(account, today));
 {:else if full && status.checked}
     <div class="text-[12px] text-pos">● 每一期都接得起來</div>
 {:else if full && !isOwned(account)}
-    <div class="text-[12px] text-mute">來源只給餘額、沒有明細，接不起來</div>
+    <div class="text-[12px] text-mute">{accountPage(account).unchecked}</div>
 {/if}

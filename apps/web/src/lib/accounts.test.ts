@@ -28,7 +28,7 @@ import {
 } from "./accounts.js";
 
 function account(id: number, worth?: string): Account {
-    return { id, institution: "esun", kind: "deposit", number: String(id), balances: [], continuity: "checked", gaps: [], expiries: [], worth };
+    return { id, institution: "esun", kind: "deposit", side: "asset", number: String(id), balances: [], continuity: "checked", gaps: [], expiries: [], worth };
 }
 
 describe("accounts", () => {
@@ -43,6 +43,11 @@ describe("accounts", () => {
 
     it("sorts by worth, largest first, an account without a worth last and ties in bank order", () => {
         expect(sortAccounts(accounts, accountSort("balance")).map(a => a.id)).toEqual([3, 1, 5, 4, 2]);
+    });
+
+    it("puts the largest debt first among liabilities", () => {
+        const cards = [account(1, "-500"), account(2, "-23104"), account(3)];
+        expect(sortAccounts(cards, "balance").map(a => a.id)).toEqual([2, 1, 3]);
     });
 });
 
@@ -69,6 +74,7 @@ describe("small accounts and balances", () => {
         id: 1,
         institution: "nextbank",
         kind: "deposit",
+        side: "asset",
         number: "1",
         balances,
         continuity: "checked",
@@ -211,6 +217,14 @@ describe("accountPage", () => {
         expect(accountPage({ kind: "securities", institution: "skis" })).toMatchObject({ headline: "worth", positions: true, lines: { trade: true } });
         expect(accountPage({ kind: "exchange", institution: "max" })).toMatchObject({ headline: "worth", holdings: true, lines: undefined, history: "days" });
         expect(accountPage({ kind: "points", institution: "esun" })).toMatchObject({ expiring: true, gaps: expect.stringContaining("過期") });
+    });
+
+    it("shows a card account's bill lines, and why its balances are not joined up", () => {
+        expect(accountPage({ kind: "credit_card", institution: "hsbc" })).toMatchObject({ lines: { trade: false }, form: false, unchecked: expect.stringContaining("每期帳單") });
+    });
+
+    it("lets the owner keep a loan, its principal by hand", () => {
+        expect(accountPage({ kind: "loan", institution: "owner" })).toMatchObject({ form: true, lines: undefined, expiring: false });
     });
 
     it("gives an account the owner keeps a form and no lines", () => {

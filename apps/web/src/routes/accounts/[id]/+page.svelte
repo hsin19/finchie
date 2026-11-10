@@ -73,7 +73,7 @@ const layout = $derived(accountPage(account));
 {/if}
 
 {#if layout.form}
-    <HoldingsForm accountId={account.id} kind={account.kind} balances={account.balances} expiries={account.expiries} />
+    <HoldingsForm accountId={account.id} kind={account.kind} balances={account.balances} expiries={account.expiries} {base} />
 {/if}
 
 <UnitPrices balances={account.balances} {base} />

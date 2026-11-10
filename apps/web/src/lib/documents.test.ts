@@ -1,4 +1,7 @@
-import type { Document } from "#lib/api/client.js";
+import type {
+    Document,
+    Statement,
+} from "#lib/api/client.js";
 import {
     describe,
     expect,
@@ -97,6 +100,21 @@ describe("outcome", () => {
         expect(outcome(doc("failed", { failure: "layout", error: "layout changed" }))).toMatchObject({ text: "layout changed", tone: "neg", hint: expect.stringContaining("重新解析") });
         expect(outcome(doc("skipped", { failure: "unsupported", error: "no parser claims it" }))).toMatchObject({ tone: "dim", hint: expect.stringContaining("沒有 parser") });
         expect(outcome(doc("failed", { failure: "unavailable" })).hint).toContain("自己再試");
+    });
+
+    it("names each check of a bill that does not add up", () => {
+        const statement = {
+            id: 5,
+            institution: "esun",
+            closingDate: "2026-10-07",
+            currency: "TWD",
+            balanced: false,
+            checks: [
+                { name: "本期新增款項", unit: "TWD", stated: "1200", computed: "1080", balanced: false },
+                { name: "繳款小計", unit: "TWD", stated: "-500", computed: "-500", balanced: true },
+            ],
+        } as Statement;
+        expect(outcome(doc("needs_review"), statement)).toMatchObject({ text: "明細加總跟帳單對不上：本期新增款項 Δ +120", tone: "neg", link: { href: "/statements/5" } });
     });
 });
 

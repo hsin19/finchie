@@ -71,11 +71,11 @@ export function dayTotal(lines: Transaction[], base: string): string {
 }
 
 /**
- * Where a linked line's money went or came from (ADR 0016): another of the owner's accounts, or the
- * card bill a payment went to, at its payment line.
+ * Where a linked line's money went or came from (ADR 0016): the card bill a payment went to, at its
+ * payment line, which says more than the card account; or another of the owner's accounts.
  */
 export function counterpartLink(other: LineCounterpart): { href: ResolvedPathname; text: string; } {
-    if (other.accountId !== undefined) {
+    if (other.accountKind !== "credit_card" && other.accountId !== undefined) {
         return {
             href: resolve("/accounts/[id]", { id: String(other.accountId) }),
             text: [institution(other.institution).name, other.accountName, other.accountNumber].filter(Boolean).join(" "),

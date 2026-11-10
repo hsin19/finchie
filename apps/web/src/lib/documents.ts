@@ -10,8 +10,7 @@ import {
 } from "#lib/api/client.js";
 import { monthOf } from "#lib/dates.js";
 import { institution } from "#lib/institutions.js";
-import { formatAmount } from "#lib/money.js";
-import { reconciliationDelta } from "#lib/statements.js";
+import { checksText } from "#lib/statements.js";
 import type { TagStatus } from "#lib/statuses.js";
 import type { Upload } from "#lib/upload.svelte.js";
 import { resolve } from "$app/paths";
@@ -175,8 +174,7 @@ export function outcome(doc: Document, statement?: Statement): Outcome {
                 // A deposit statement names each account whose lines do not add up in the document's warnings.
                 return { text: doc.warnings.join("；") || "有帳戶的明細加總對不上", tone: "neg", hint: "打開帳戶看是哪一列沒抓到", link };
             }
-            const delta = formatAmount(reconciliationDelta(statement), { signed: true });
-            return { text: `明細加總跟帳單差 ${delta}`, tone: "neg", hint: "打開帳單看是哪一列沒抓到", link };
+            return { text: `明細加總跟帳單對不上：${checksText(statement)}`, tone: "neg", hint: "打開帳單看是哪一列沒抓到", link };
         }
         case "duplicate": {
             const original = doc.duplicateOf;

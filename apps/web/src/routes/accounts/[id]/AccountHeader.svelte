@@ -59,8 +59,9 @@ let editing = $state(false);
         {:else}
             {#each holdings as balance (balance.unit)}
                 <div>
-                    <div class="label">BALANCE · {balance.unit}</div>
-                    <div class="text-[18px] {sign(balance.amount) < 0 ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</div>
+                    <!-- A liability's balance is what is owed, as printed; its worth is negative (ADR 0022). -->
+                    <div class="label">{account.side === "liability" ? "OWED" : "BALANCE"} · {balance.unit}</div>
+                    <div class="text-[18px] {sign(balance.amount) < 0 || account.side === 'liability' ? 'text-neg' : 'text-ink'}">{formatAmount(balance.amount)}</div>
                     {#if balance.unit !== base && balance.worth !== undefined}
                         <div class="text-[12px] text-mute" title={balance.price ? describePrice(balance.unit, balance.price, base) : ""}>
                             ≈ NT${formatAmount(balance.worth)}{balance.price?.source === "owner" ? "（自訂價格）" : ""}

@@ -32,8 +32,8 @@ import {
 import { Reparse } from "#lib/reparse.svelte.js";
 import {
     billPoints,
-    deltaMeaning,
-    reconciliationDelta,
+    checkText,
+    failingChecks,
     statementStatus,
 } from "#lib/statements.js";
 import { tone } from "#lib/tone.js";
@@ -46,6 +46,7 @@ import { afterNavigate } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { page } from "$app/state";
 import type { PageProps } from "./$types";
+import Checks from "./Checks.svelte";
 
 let { data }: PageProps = $props();
 
@@ -53,7 +54,6 @@ const s = $derived(data.statement);
 // Loaded with the page, which reloads with the ledger: pending while a re-parse runs, then its result.
 const doc = $derived(data.document);
 const bank = $derived(institution(s.institution));
-const delta = $derived(reconciliationDelta(s));
 const month = $derived(monthOf(s.closingDate));
 
 // Once done, the ledger reloads and so does the statement, with new lines (they get new ids).
@@ -113,16 +113,16 @@ const log = $derived(
         doc.parsedAt && {
             at: doc.parsedAt,
             source: "parser",
-            text: `${doc.parser ?? "?"} v${doc.parserVersion ?? "?"} → ${data.transactions.length} lines · balanced=${s.reconciliation.balanced}`,
+            text: `${doc.parser ?? "?"} v${doc.parserVersion ?? "?"} → ${data.transactions.length} lines · balanced=${s.balanced}`,
             tone: "accent" as const,
         },
         ...doc.warnings.map(w => ({ at: doc.parsedAt ?? doc.receivedAt, source: "warning", text: w, tone: "neg" as const })),
-        doc.parsedAt && !s.reconciliation.balanced && {
-            at: doc.parsedAt,
+        ...(doc.parsedAt ? failingChecks(s) : []).map(check => ({
+            at: doc.parsedAt ?? doc.receivedAt,
             source: "store",
-            text: `status needs_review · Δ ${formatAmount(delta, { signed: true })}`,
+            text: `needs_review · ${checkText(check, s.currency)}`,
             tone: "neg" as const,
-        },
+        })),
     ].filter(entry => !!entry),
 );
 
@@ -200,20 +200,8 @@ onKeys("statement", {
     </div>
 
     <section class="panel flex flex-col gap-3 p-3.5">
-        <h2 class="label">RECONCILIATION · 對帳</h2>
-        <div class="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-1.5">
-            <span class="text-mute">stated</span><span>{s.reconciliation.statedLabel}（帳單上印的）</span><span class="text-right">{formatAmount(s.reconciliation.stated)}</span>
-            <span class="text-mute">computed</span><span>明細加總</span><span class="text-right">{formatAmount(s.reconciliation.computed)}</span>
-        </div>
-        <div class="grid grid-cols-[auto_1fr_auto] gap-x-4 border-t border-dashed border-line pt-2">
-            {#if s.reconciliation.balanced}
-                <span class="text-pos">Δ</span><span class="text-pos">兩邊一致</span><span class="text-right text-pos">0</span>
-            {:else}
-                <span class="text-neg">Δ</span>
-                <span class="text-neg">{deltaMeaning(delta)}</span>
-                <span class="text-right text-neg">{formatAmount(delta, { signed: true })}</span>
-            {/if}
-        </div>
+        <h2 class="label">CHECKS · 對帳{s.balanced ? "" : `（${failingChecks(s).length} 項對不上）`}</h2>
+        <Checks statement={s} />
         <table class="w-full border-collapse">
             <thead>
                 <tr class="text-left text-mute">

@@ -115,16 +115,16 @@ function statementLabel(statementId: number) {
             <dt class="text-mute">{t.trade.prepaid ? "prepaid" : sign(t.trade.net) < 0 ? "paid" : "received"}</dt>
             <dd class="m-0">{formatAmount(t.trade.prepaid ?? (sign(t.trade.net) < 0 ? negate(t.trade.net) : t.trade.net))} <span class="text-mute">{base}</span></dd>
         {/if}
-        {#if t.accountKind !== "credit_card" && t.accountId !== undefined}
-            <dt class="text-mute">account</dt>
-            <dd class="m-0">
-                <a href={resolve("/accounts/[id]", { id: String(t.accountId) })}>{institution(t.institution).name} {t.accountName ?? ""}</a>
-                <span class="text-mute">{t.accountNumber ?? ""}</span>
-            </dd>
-        {:else}
-            <dt class="text-mute">card</dt>
-            <dd class="m-0">{institution(t.institution).name} {cardLabel(t.institution, t.cardLast4)}</dd>
-        {/if}
+        <!-- Every line is on an account, a card's included (ADR 0022); a card line also names its card. -->
+        <dt class="text-mute">{t.accountKind === "credit_card" ? "card" : "account"}</dt>
+        <dd class="m-0">
+            {#if t.accountId !== undefined}
+                <a href={resolve("/accounts/[id]", { id: String(t.accountId) })}>{institution(t.institution).name} {t.accountKind === "credit_card" ? cardLabel(t.institution, t.cardLast4) : (t.accountName ?? "")}</a>
+            {:else}
+                {institution(t.institution).name} {cardLabel(t.institution, t.cardLast4)}
+            {/if}
+            <span class="text-mute">{t.accountNumber ?? ""}</span>
+        </dd>
         {#if t.memo}
             <dt class="text-mute">memo</dt>
             <dd class="m-0 break-words">{t.memo}</dd>

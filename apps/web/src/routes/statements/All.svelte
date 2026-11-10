@@ -8,7 +8,7 @@ import { monthOf } from "#lib/dates.js";
 import { institution } from "#lib/institutions.js";
 import { formatAmount } from "#lib/money.js";
 import {
-    reconciliationText,
+    checksText,
     statementStatus,
 } from "#lib/statements.js";
 import { statementsHref } from "#lib/urls.js";
@@ -50,8 +50,8 @@ let { statements, documents }: { statements: Statement[]; documents: ReadonlyMap
                         <td class="px-2 py-2.5 {s.paidOn ? 'text-pos' : 'text-mute'}" title={s.paidOn ? "" : "還沒看到繳款：等涵蓋到期日的存款對帳單"}>{s.paidOn ?? "—"}</td>
                         <td class="px-2 py-2.5 text-right">{formatAmount(s.totalDue)} <span class="text-mute">{s.currency}</span></td>
                         <td class="px-2 py-2.5 text-right text-dim">{s.transactionCount}</td>
-                        <td class="py-2.5 pl-2 {s.reconciliation.balanced ? 'text-pos' : 'text-neg'}">
-                            {reconciliationText(s)}
+                        <td class="py-2.5 pl-2 {s.balanced ? 'text-pos' : 'text-neg'}">
+                            {checksText(s)}
                         </td>
                     </tr>
                 {:else}

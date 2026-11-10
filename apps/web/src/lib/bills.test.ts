@@ -28,7 +28,8 @@ function statement(institution: string, closingDate: string, totalDue: string): 
         currency: "TWD",
         totalDue,
         transactionCount: 0,
-        reconciliation: { balanced: true, computed: totalDue, stated: totalDue, statedLabel: "" },
+        balanced: true,
+        checks: [{ name: "本期新增款項", unit: "TWD", computed: totalDue, stated: totalDue, balanced: true }],
     };
 }
 

@@ -1,5 +1,6 @@
 import type {
     AccountDetail,
+    Check,
     Statement,
     Transaction,
 } from "#lib/api/client.js";
@@ -10,39 +11,49 @@ import {
 } from "vitest";
 import {
     billPoints,
+    checkDelta,
+    checksText,
+    checkText,
     deltaMeaning,
-    reconciliationDelta,
-    reconciliationText,
+    failingChecks,
     statementStatus,
     statementSummary,
 } from "./statements";
 
-const bill = (stated: string, computed: string): Pick<Statement, "reconciliation"> => ({
-    reconciliation: { balanced: stated === computed, stated, computed, statedLabel: "本期應繳" },
-});
+const check = (name: string, stated: string, computed: string, unit = "TWD"): Check => ({ name, unit, stated, computed, balanced: stated === computed });
+
+const bill = (...checks: Check[]): Pick<Statement, "balanced" | "checks" | "currency"> => ({ balanced: checks.every(c => c.balanced), checks, currency: "TWD" });
+
+const even = bill(check("本期新增款項", "100", "100"));
+const off = bill(check("本期新增款項", "1200", "1080.5"), check("繳款小計", "-500", "-500"), check("e point", "64", "84", "e point"));
 
 describe("statementStatus", () => {
     it("says what became of the document, over whether the bill adds up", () => {
         // A re-parse that failed keeps the statement of the parse before.
-        expect(statementStatus(bill("100", "100"), { status: "failed" })).toBe("failed");
-        expect(statementStatus(bill("100", "90"), { status: "needs_review" })).toBe("needs_review");
+        expect(statementStatus(even, { status: "failed" })).toBe("failed");
+        expect(statementStatus(off, { status: "needs_review" })).toBe("needs_review");
     });
 
-    it("falls back on the reconciliation without the document", () => {
-        expect(statementStatus(bill("100", "100"))).toBe("parsed");
-        expect(statementStatus(bill("100", "90"))).toBe("needs_review");
+    it("falls back on its checks without the document", () => {
+        expect(statementStatus(even)).toBe("parsed");
+        expect(statementStatus(off)).toBe("needs_review");
     });
 
     it("is pending while a re-parse asked for has not finished", () => {
-        expect(statementStatus(bill("100", "100"), { status: "parsed" }, { reparsing: true })).toBe("pending");
+        expect(statementStatus(even, { status: "parsed" }, { reparsing: true })).toBe("pending");
     });
 });
 
-describe("reconciliation", () => {
-    it("is what the bill prints less what its lines add up to", () => {
-        expect(reconciliationDelta(bill("1200", "1080.5"))).toBe("119.5");
-        expect(reconciliationText(bill("1200", "1080.5"))).toBe("Δ +119.50");
-        expect(reconciliationText(bill("-80", "-80"))).toBe("balanced");
+describe("checks", () => {
+    it("is what the bill prints less what its lines come to, check by check", () => {
+        expect(checkDelta(off.checks[0])).toBe("119.5");
+        expect(failingChecks(off).map(c => c.name)).toEqual(["本期新增款項", "e point"]);
+    });
+
+    it("names each check that does not balance, with a unit other than the bill's", () => {
+        expect(checksText(off)).toBe("本期新增款項 Δ +119.50；e point Δ -20 e point");
+        expect(checksText(even)).toBe("balanced");
+        expect(checkText(check("新增款項", "1", "0", ""), "TWD")).toBe("新增款項 Δ +1");
     });
 
     it("says which side has more", () => {
@@ -53,9 +64,10 @@ describe("reconciliation", () => {
 
 describe("statementSummary", () => {
     it("says how many lines, whether they add up, when it is due, and whether it was paid", () => {
-        const s = { transactionCount: 12, dueDate: "2026-11-25", totalDue: "23104", paidOn: undefined, ...bill("23104", "23104") };
-        expect(statementSummary(s)).toBe("12 筆 · balanced · 11/25 到期 23,104");
-        expect(statementSummary({ ...s, ...bill("23104", "22984"), paidOn: "2026-11-20" })).toBe("12 筆 · Δ +120 · 需確認 · 11/25 到期 23,104 · 已繳 11/20");
+        const s = { transactionCount: 12, dueDate: "2026-11-25", totalDue: "23104", paidOn: undefined };
+        expect(statementSummary({ ...s, ...even })).toBe("12 筆 · balanced · 11/25 到期 23,104");
+        expect(statementSummary({ ...s, ...bill(check("本期新增款項", "23104", "22984")), paidOn: "2026-11-20" }))
+            .toBe("12 筆 · 本期新增款項 Δ +120 · 需確認 · 11/25 到期 23,104 · 已繳 11/20");
     });
 });
 

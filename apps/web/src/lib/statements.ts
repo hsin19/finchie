@@ -4,6 +4,7 @@
 import type {
     AccountDetail,
     Balance,
+    Check,
     Document,
     Expiry,
     Statement,
@@ -19,37 +20,51 @@ import {
 
 /**
  * The bill's tag: what became of its document when it is known, since a re-parse that failed leaves the
- * statement of the parse before it (and its document says so); else whether it adds up. A re-parse
- * the page asked for and has not seen start yet is `pending` as well.
+ * statement of the parse before it (and its document says so); else whether every check balances. A
+ * re-parse the page asked for and has not seen start yet is `pending` as well.
  */
 export function statementStatus(
-    statement: Pick<Statement, "reconciliation">,
+    statement: Pick<Statement, "balanced">,
     doc?: Pick<Document, "status">,
     { reparsing = false } = {},
 ): Document["status"] {
     if (reparsing) return "pending";
     if (doc) return doc.status;
-    return statement.reconciliation.balanced ? "parsed" : "needs_review";
+    return statement.balanced ? "parsed" : "needs_review";
 }
 
-/** What the bill prints minus what its lines add up to: positive when lines are missing. */
-export function reconciliationDelta(statement: Pick<Statement, "reconciliation">): string {
-    return subtract(statement.reconciliation.stated, statement.reconciliation.computed);
+/** What the bill prints minus what its lines come to: positive when lines are missing. */
+export function checkDelta(check: Pick<Check, "stated" | "computed">): string {
+    return subtract(check.stated, check.computed);
 }
 
-/** "balanced", or "Δ +120" when the lines do not add up to the bill. */
-export function reconciliationText(statement: Pick<Statement, "reconciliation">): string {
-    return statement.reconciliation.balanced ? "balanced" : `Δ ${formatAmount(reconciliationDelta(statement), { signed: true })}`;
+/** The checks that do not balance, in the bill's order. */
+export function failingChecks(statement: Pick<Statement, "checks">): Check[] {
+    return statement.checks.filter(c => !c.balanced);
 }
 
-/** Why a bill does not add up, in words. */
+/** "本期新增款項 Δ +120", with the check's unit where it is not the bill's currency ("e point Δ -20"). */
+export function checkText(check: Check, currency: string): string {
+    const unit = check.unit && check.unit !== currency ? ` ${check.unit}` : "";
+    return `${check.name} Δ ${formatAmount(checkDelta(check), { signed: true })}${unit}`;
+}
+
+/** "balanced", or each check that does not balance: "本期新增款項 Δ +120；e point Δ -20 e point". */
+export function checksText(statement: Pick<Statement, "balanced" | "checks" | "currency">): string {
+    if (statement.balanced) return "balanced";
+    const failing = failingChecks(statement);
+    // Unbalanced without a failing check should not happen; say so rather than nothing.
+    return failing.length > 0 ? failing.map(c => checkText(c, statement.currency)).join("；") : "對不上";
+}
+
+/** Why a check does not add up, in words. */
 export function deltaMeaning(delta: string): string {
     return sign(delta) < 0 ? "明細比帳單多，可能多抓或重複了一列" : "帳單比明細多，可能漏抓了一列";
 }
 
-/** A bill in a line: "12 筆 · Δ +120 · 需確認 · 11/25 到期 23,104 · 已繳 11/20". */
-export function statementSummary(s: Pick<Statement, "transactionCount" | "reconciliation" | "dueDate" | "totalDue" | "paidOn">): string {
-    const reconciled = s.reconciliation.balanced ? "balanced" : `${reconciliationText(s)} · 需確認`;
+/** A bill in a line: "12 筆 · 本期新增款項 Δ +120 · 需確認 · 11/25 到期 23,104 · 已繳 11/20". */
+export function statementSummary(s: Pick<Statement, "transactionCount" | "balanced" | "checks" | "currency" | "dueDate" | "totalDue" | "paidOn">): string {
+    const reconciled = s.balanced ? "balanced" : `${checksText(s)} · 需確認`;
     const paid = s.paidOn ? ` · 已繳 ${slashDate(s.paidOn)}` : "";
     return `${s.transactionCount} 筆 · ${reconciled} · ${slashDate(s.dueDate)} 到期 ${formatAmount(s.totalDue)}${paid}`;
 }

@@ -62,5 +62,8 @@ describe("a transaction's row", () => {
             .toEqual({ href: "/accounts/7", text: "玉山 臺幣活存" });
         expect(counterpartLink({ id: 4, statementId: 2, date: "2026-10-01", accountKind: "credit_card", institution: "hsbc" }))
             .toEqual({ href: "/statements/2?line=4", text: "滙豐 信用卡帳單" });
+        // A card account is listed now (ADR 0022), but a payment still leads to the bill's line.
+        expect(counterpartLink({ id: 4, statementId: 2, date: "2026-10-01", accountKind: "credit_card", institution: "hsbc", accountId: 12 }).href)
+            .toBe("/statements/2?line=4");
     });
 });
