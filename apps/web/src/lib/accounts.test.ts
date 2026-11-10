@@ -10,6 +10,8 @@ import {
 } from "vitest";
 import {
     accountSort,
+    accountStatus,
+    daysAgo,
     describePrice,
     historyByDay,
     holdingsByWorth,
@@ -179,5 +181,42 @@ describe("shownNumber", () => {
         expect(shownNumber({ number: "1234567***890" })).toBe("1234567***890");
         expect(shownNumber({ number: "", fullNumber: "MB-1234" })).toBe("MB-1234");
         expect(shownNumber({ number: "" })).toBe("");
+    });
+});
+
+describe("accountStatus", () => {
+    const at = (kind: Account["kind"], asOf: string, rest: Partial<Account> = {}): Account => ({
+        ...account(1),
+        kind,
+        balances: [{ unit: "TWD", asOf: "2026-08-31", amount: "1" }, { unit: "USD", asOf, amount: "1" }],
+        ...rest,
+    });
+
+    it("counts the days since the newest balance", () => {
+        expect(accountStatus(at("deposit", "2026-10-31"), "2026-11-10")).toMatchObject({ asOf: "2026-10-31", days: 10, stale: false });
+        expect(accountStatus({ ...account(1), balances: [] }, "2026-11-10")).toEqual({ stale: false, gaps: 0, checked: true });
+    });
+
+    it("calls a statement that has not come in 50 days stale, and an exchange not read for a day", () => {
+        expect(accountStatus(at("deposit", "2026-09-30"), "2026-11-19").stale).toBe(false);
+        expect(accountStatus(at("deposit", "2026-09-30"), "2026-11-20").stale).toBe(true);
+        expect(accountStatus(at("points", "2026-09-30"), "2026-11-20").stale).toBe(true);
+        expect(accountStatus(at("securities", "2026-08-04"), "2026-11-10").stale).toBe(true);
+        expect(accountStatus(at("exchange", "2026-11-09"), "2026-11-10").stale).toBe(false);
+        expect(accountStatus(at("exchange", "2026-11-08"), "2026-11-10").stale).toBe(true);
+    });
+
+    it("never calls an account the owner keeps stale", () => {
+        expect(accountStatus(at("deposit", "2026-01-01", { institution: "owner" }), "2026-11-10")).toMatchObject({ stale: false, note: "手動" });
+    });
+
+    it("counts the gaps, and knows when there is nothing to check", () => {
+        const gaps = [{ from: "2026-01-31", to: "2026-03-31", unit: "TWD", unseen: "5" }];
+        expect(accountStatus(at("deposit", "2026-11-01", { gaps }), "2026-11-10")).toMatchObject({ gaps: 1, checked: true });
+        expect(accountStatus(at("exchange", "2026-11-10", { continuity: "unknown" }), "2026-11-10").checked).toBe(false);
+    });
+
+    it("says how long ago in words", () => {
+        expect([daysAgo(0), daysAgo(1), daysAgo(41)]).toEqual(["今天", "昨天", "41 天前"]);
     });
 });

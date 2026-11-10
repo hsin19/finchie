@@ -167,3 +167,43 @@ export function lapsesSoon(by: string, today: string, days = 60): boolean {
     limit.setUTCDate(limit.getUTCDate() + days);
     return by <= limit.toISOString().slice(0, 10);
 }
+
+/**
+ * A statement comes monthly, and up to about three weeks after it closes (台新's took 16 days in 2026,
+ * 中信's 20 after month end): past this, one that should have come has not.
+ */
+const STATEMENT_DAYS = 50;
+/** An exchange is read every few hours (ADR 0018). */
+const SNAPSHOT_DAYS = 1;
+
+export interface AccountStatus {
+    /** The day of its newest balance, and how many days before `today` that was. */
+    asOf?: string;
+    days?: number;
+    /** Nothing new for longer than its source takes. Why is not said: a bank sends nothing for a month without a line. */
+    stale: boolean;
+    /** Why an old balance is still fine. */
+    note?: string;
+    /** Stretches where its balance moved and no line says why. */
+    gaps: number;
+    /** Whether its balances can be checked against its lines at all. */
+    checked: boolean;
+}
+
+/** How current an account is and whether it joins up. One the owner keeps is as old as they leave it. */
+export function accountStatus(account: Account, today: string): AccountStatus {
+    const status: AccountStatus = { stale: false, gaps: account.gaps.length, checked: account.continuity === "checked" };
+    const asOf = account.balances.map(b => b.asOf).sort().at(-1);
+    if (!asOf) return status;
+    const days = Math.round((Date.parse(today) - Date.parse(asOf)) / 86_400_000);
+    status.asOf = asOf;
+    status.days = days;
+    if (account.institution === "owner") status.note = "手動";
+    else status.stale = days > (account.kind === "exchange" ? SNAPSHOT_DAYS : STATEMENT_DAYS);
+    return status;
+}
+
+/** "今天", "昨天", "41 天前". */
+export function daysAgo(days: number): string {
+    return days <= 0 ? "今天" : days === 1 ? "昨天" : `${days} 天前`;
+}

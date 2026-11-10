@@ -1,6 +1,8 @@
 <script lang="ts">
 import {
     type AccountSort,
+    accountStatus,
+    daysAgo,
     describePrice,
     isSmallAccount,
     lapsesSoon,
@@ -182,16 +184,14 @@ function href(account: Account) {
                     <col class="w-28" />
                     <col />
                     <col class="w-[22rem]" />
-                    <col class="w-32" />
-                    <col class="w-24" />
+                    <col class="w-44" />
                 </colgroup>
                 <thead>
                     <tr class="text-left text-mute">
                         <th class="py-2 pr-2 font-medium">BANK</th>
                         <th class="px-2 py-2 font-medium">ACCOUNT</th>
                         <th class="px-2 py-2 text-right font-medium">BALANCE</th>
-                        <th class="px-2 py-2 font-medium">AS_OF</th>
-                        <th class="py-2 pl-2 font-medium">CONTINUITY</th>
+                        <th class="py-2 pl-4 font-medium">STATUS</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -204,6 +204,7 @@ function href(account: Account) {
                         <!-- A worth line only where something has a worth: not for points no one has valued. -->
                         {@const worthLine = !ntdOnly && (account.worth !== undefined || account.balances.some(b => b.worth !== undefined))}
                         {@const lapsing = account.expiries[0]}
+                        {@const status = accountStatus(account, today)}
                         <tr class="border-t border-rule align-top hover:bg-raised">
                             <td class="py-2.5 pr-2">{institution(account.institution).name}</td>
                             <td class="px-2 py-2.5">
@@ -240,27 +241,21 @@ function href(account: Account) {
                                     </div>
                                 {/if}
                             </td>
-                            <td class="px-2 py-2.5 text-dim">
-                                <!-- Keeps each date beside its balance below the account's worth line. -->
-                                {#if worthLine}<div aria-hidden="true" class="invisible">·</div>{/if}
-                                {#each rows as balance (balance.unit)}
-                                    <div>{balance.asOf}</div>
-                                    <!-- Keeps each date beside its balance when a worth line follows the balance. -->
-                                    {#if balance.unit !== "TWD" && balance.worth !== undefined}<div aria-hidden="true" class="invisible text-[12px]">·</div>{/if}
-                                {/each}
-                            </td>
-                            <td class="py-2.5 pl-2">
-                                {#if account.continuity === "unknown"}
-                                    <span class="text-mute" title="它的來源只給餘額、沒有明細，無法逐期檢查">—</span>
-                                {:else if account.gaps.length > 0}
-                                    <span class="text-neg">缺 {account.gaps.length} 段</span>
-                                {:else}
-                                    <span class="text-pos">ok</span>
+                            <!-- Quiet while all is well: how old its newest balance is, then only what needs a look. -->
+                            <td class="py-2.5 pl-4">
+                                {#if status.days !== undefined}
+                                    <div class={status.stale ? "text-accent" : "text-dim"} title="最新的餘額是 {status.asOf} 的">{daysAgo(status.days)}</div>
                                 {/if}
+                                {#if status.stale}
+                                    <div class="text-[12px] text-accent">● 太久沒更新</div>
+                                {:else if status.note}
+                                    <div class="text-[12px] text-mute">{status.note}</div>
+                                {/if}
+                                {#if status.gaps > 0}<div class="text-[12px] text-neg">● 不連續 · {status.gaps} 段</div>{/if}
                             </td>
                         </tr>
                     {:else}
-                        <tr><td colspan="5" class="py-2.5 text-mute">都不到 NT$1,000：取消勾選「隱藏 &lt; NT$1,000」就會列出。</td></tr>
+                        <tr><td colspan="4" class="py-2.5 text-mute">都不到 NT$1,000：取消勾選「隱藏 &lt; NT$1,000」就會列出。</td></tr>
                     {/each}
                 </tbody>
             </table>

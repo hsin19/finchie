@@ -1,5 +1,7 @@
 <script lang="ts">
 import {
+    accountStatus,
+    daysAgo,
     describePrice,
     historyByDay,
     holdingsByWorth,
@@ -41,6 +43,8 @@ const exchange = $derived(account.kind === "exchange");
 const points = $derived(account.kind === "points");
 // One the owner opened and keeps by hand: its number is its unit (ADR 0019).
 const owned = $derived(account.institution === "owner");
+// The owner's day, wherever the browser is (ADR 0004).
+const status = $derived(accountStatus(account, new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" })));
 const holdings = $derived(holdingsByWorth(account.balances));
 const unpriced = $derived(account.balances.filter(b => b.worth === undefined).length);
 const snapshots = $derived(historyByDay(account.history));
@@ -157,14 +161,21 @@ function amountTone(value: string) {
             <div>{accountKinds[account.kind].label}</div>
         </div>
         <div>
-            <div class="label">CONTINUITY</div>
-            {#if account.continuity === "unknown"}
-                <div class="text-mute">無法檢查</div>
-                <div class="text-[12px] text-mute">它的來源只給餘額、沒有明細，接不起來</div>
-            {:else if account.gaps.length > 0}
-                <div class="text-neg">缺 {account.gaps.length} 段</div>
-            {:else}
-                <div class="text-pos">ok · 每一期都接得起來</div>
+            <div class="label">STATUS · 狀態</div>
+            {#if status.days !== undefined}
+                <div class={status.stale ? "text-accent" : "text-ink"} title="最新的餘額是 {status.asOf} 的">{daysAgo(status.days)}更新</div>
+            {/if}
+            {#if status.stale}
+                <div class="text-[12px] text-accent">● 太久沒更新</div>
+            {:else if status.note}
+                <div class="text-[12px] text-mute">{status.note}</div>
+            {/if}
+            {#if status.gaps > 0}
+                <div class="text-[12px] text-neg">● 不連續 · {status.gaps} 段</div>
+            {:else if !status.checked && !owned}
+                <div class="text-[12px] text-mute">來源只給餘額、沒有明細，接不起來</div>
+            {:else if status.checked}
+                <div class="text-[12px] text-pos">● 每一期都接得起來</div>
             {/if}
         </div>
     </div>
