@@ -313,6 +313,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/net-worth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the owner has less what they owe on cards, in NT$
+         * @description Every account's worth added up, overall and by kind (accounts without a worth are counted, not
+         *     guessed), less what is owed: each bank's newest card bill that owes something and that no deposit
+         *     account or later bill has shown paid (ADR 0016). Worked out on every read, like the accounts.
+         */
+        get: operations["getNetWorth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The deployment's settings the web app shows or obeys */
+        get: operations["getSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mail-filters.xml": {
         parameters: {
             query?: never;
@@ -442,24 +481,27 @@ export interface components {
         /**
          * @description pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
          *     transactions don't add up to the statement. duplicate: the same statement came from
-         *     another document. failed: the parser could not read it (see `error`).
+         *     another document (`duplicateOf`). failed: it could not be parsed (`failure`, `error`).
+         *     skipped: no parser handles it, so there is nothing to fix or retry.
          * @enum {string}
          */
-        DocumentStatus: "pending" | "parsed" | "needs_review" | "duplicate" | "failed";
+        DocumentStatus: "pending" | "parsed" | "needs_review" | "duplicate" | "failed" | "skipped";
         /**
-         * @description A document's status as the web app shows it: a failure because no parser handles the file
-         *     (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
-         *     failure.
+         * @description Why a document could not be parsed: what has to change first. unsupported: no parser
+         *     handles it (the document is skipped). locked: its PDF needs a password the parser lacks.
+         *     unreadable: it is no e-mail, or cannot be read as one. layout: its layout is not the one
+         *     the parser knows. unavailable: the parser could not be reached in time; the backend tries
+         *     again by itself. invalid_response: the parser broke its contract. other: anything else.
          * @enum {string}
          */
-        DocumentState: "pending" | "parsed" | "needs_review" | "duplicate" | "failed" | "skipped";
+        DocumentFailure: "unsupported" | "locked" | "unreadable" | "layout" | "unavailable" | "invalid_response" | "other";
         DocumentPage: {
             items: components["schemas"]["Document"][];
             /** @description Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out */
             byState: components["schemas"]["StateCount"][];
         };
         StateCount: {
-            state: components["schemas"]["DocumentState"];
+            state: components["schemas"]["DocumentStatus"];
             count: number;
         };
         Document: {
@@ -473,7 +515,15 @@ export interface components {
             /** Format: date-time */
             receivedAt: string;
             status: components["schemas"]["DocumentStatus"];
+            /** @description Why it failed or was skipped; absent otherwise */
+            failure?: components["schemas"]["DocumentFailure"];
+            /** @description The details of a failure, for reading */
             error?: string;
+            /**
+             * Format: int64
+             * @description The document holding the statement this one repeats, when a duplicate
+             */
+            duplicateOf?: number;
             parser?: string;
             parserVersion?: string;
             warnings: string[];
@@ -829,7 +879,7 @@ export interface components {
             originalCurrency?: string;
             country?: string;
             cardLast4?: string;
-            accountKind?: components["schemas"]["AccountKind"];
+            accountKind: components["schemas"]["AccountKind"];
             /**
              * Format: int64
              * @description A deposit account; absent for a card line
@@ -840,12 +890,12 @@ export interface components {
             /** @description A deposit account's full number where given, else as printed */
             accountNumber?: string;
             /** @description ISO 4217, or a points program's code */
-            unit?: string;
+            unit: string;
             memo?: string;
             counterparty?: string;
             balance?: components["schemas"]["Decimal"];
             /** @description Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it */
-            flow?: components["schemas"]["Decimal"];
+            flow: components["schemas"]["Decimal"];
             counterpart?: components["schemas"]["LineCounterpart"];
             trade?: components["schemas"]["Trade"];
             /** @description The line this one adjusts, such as the purchase a fee or refund belongs to */
@@ -916,6 +966,35 @@ export interface components {
             count: number;
             amount: components["schemas"]["Decimal"];
         };
+        NetWorth: {
+            holdings: components["schemas"]["Decimal"];
+            byKind: components["schemas"]["KindWorth"][];
+            /** @description Accounts without a worth, left out of holdings */
+            unvalued: number;
+            owed: components["schemas"]["Decimal"];
+            /** @description Unpaid bills in another currency than NT$, left out of owed */
+            owedElsewhere: number;
+            /** @description The statements that make up what is owed */
+            unpaidBills: number[];
+            net: components["schemas"]["Decimal"];
+        };
+        KindWorth: {
+            kind: components["schemas"]["AccountKind"];
+            worth: components["schemas"]["Decimal"];
+            /** @description Accounts of the kind without a worth, left out of it */
+            unvalued: number;
+        };
+        Settings: {
+            /**
+             * Format: int64
+             * @description The largest file an upload may be (BACKEND_MAX_UPLOAD_MB)
+             */
+            maxUploadBytes: number;
+            /** @description How often rates, closes, and exchanges are read */
+            sourceIntervalHours: number;
+            /** @description What every worth is in, e.g. TWD */
+            baseCurrency: string;
+        };
         Problem: {
             message: string;
         };
@@ -947,9 +1026,11 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 /** @description The last document of the page before; the list continues after it */
                 before?: number;
-                state?: components["schemas"]["DocumentState"][];
+                state?: components["schemas"]["DocumentStatus"][];
                 /** @description Case-insensitive substring of the filename */
                 q?: string;
+                /** @description Only these documents, wherever they fall in the list (for refreshing ones already shown) */
+                id?: number[];
             };
             header?: never;
             path?: never;
@@ -1404,6 +1485,46 @@ export interface operations {
                 };
             };
             404: components["responses"]["Problem"];
+        };
+    };
+    getNetWorth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The net worth */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetWorth"];
+                };
+            };
+        };
+    };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
         };
     };
     getMailFilters: {

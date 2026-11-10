@@ -1,15 +1,15 @@
 <script lang="ts">
-import {
-    type MonthBill,
-    sortInstitutions,
-} from "#lib/bills.js";
+import type { MonthBill } from "#lib/bills.js";
 import type { Month } from "#lib/dates.js";
-import { institution } from "#lib/labels.js";
+import {
+    institution,
+    sortInstitutions,
+} from "#lib/institutions.js";
 import {
     approx,
     formatAmount,
 } from "#lib/money.js";
-import { resolve } from "$app/paths";
+import { statementsHref } from "#lib/urls.js";
 
 let { bills, partial }: {
     /** Oldest first. */
@@ -83,7 +83,7 @@ const views = ["chart", "table"] as const;
                     {#each bills as bill, i (bill.month)}
                         {@const { parts, total } = stack(bill)}
                         <a
-                            href={resolve(`/statements?m=${bill.month}`)}
+                            href={statementsHref(bill.month)}
                             aria-label={describe(bill)}
                             class="flex h-full flex-1 flex-col justify-end rounded-t-[4px] hover:bg-raised focus-visible:bg-raised"
                             onmouseenter={() => (active = i)}
@@ -153,7 +153,7 @@ const views = ["chart", "table"] as const;
                 <tbody>
                     {#each bills.toReversed() as bill (bill.month)}
                         <tr class="border-t border-rule">
-                            <td class="py-1.5 pr-2"><a href={resolve(`/statements?m=${bill.month}`)}>{bill.month}</a></td>
+                            <td class="py-1.5 pr-2"><a href={statementsHref(bill.month)}>{bill.month}</a></td>
                             {#each banks as bank (bank)}
                                 {@const part = bill.parts.find(p => p.institution === bank)}
                                 <td class="px-2 py-1.5 text-right {part ? 'text-dim' : 'text-mute'}">{part ? formatAmount(part.amount) : "—"}</td>

@@ -1,5 +1,6 @@
 import {
     api,
+    LEDGER,
     need,
     type TransactionQuery,
 } from "#lib/api/client.js";
@@ -8,21 +9,22 @@ import {
     closingRange,
 } from "#lib/bills.js";
 import {
-    isMonth,
     shiftMonth,
     thisMonth,
 } from "#lib/dates.js";
+import { readStatementsView } from "#lib/urls.js";
 import type { PageLoad } from "./$types";
 
 // ?all lists every statement; otherwise one month's bill: the statements that closed in it (?m=,
 // the newest such month by default) and the transactions on them.
-export const load = (async ({ fetch, url, parent }) => {
+export const load = (async ({ fetch, url, parent, depends }) => {
+    depends(LEDGER);
     const { statements } = await parent();
-    if (url.searchParams.has("all")) return { view: "all" as const };
+    const view = readStatementsView(url.searchParams);
+    if (view.all) return { view: "all" as const };
 
     const months = closingMonths(statements);
-    const m = url.searchParams.get("m");
-    const month = isMonth(m) ? m : (months[0] ?? thisMonth());
+    const month = view.month ?? months[0] ?? thisMonth();
 
     // Totals only (limit 0), of card lines alone, whose amounts add up as the bills print them. With
     // kind=purchase, `sum` and byCard are spending, while byKind (which ignores the kind filter) still has

@@ -5,23 +5,24 @@ import type {
 } from "#lib/api/client.js";
 import Tag from "#lib/components/Tag.svelte";
 import { monthOf } from "#lib/dates.js";
-import { institution } from "#lib/labels.js";
+import { institution } from "#lib/institutions.js";
+import { formatAmount } from "#lib/money.js";
 import {
-    formatAmount,
-    subtract,
-} from "#lib/money.js";
+    reconciliationText,
+    statementStatus,
+} from "#lib/statements.js";
+import { statementsHref } from "#lib/urls.js";
 import { resolve } from "$app/paths";
 
 // Documents, those that produced no statement among them, are on /documents.
-let { statements, documents: allDocuments }: { statements: Statement[]; documents: Document[]; } = $props();
-
-const documents = $derived(new Map(allDocuments.map(d => [d.id, d])));
+let { statements, documents }: { statements: Statement[]; documents: ReadonlyMap<number, Document>; } = $props();
 </script>
 
 <section class="panel px-3.5 pt-1 pb-2.5">
     <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
+        <!-- The layout's statements: the newest ones, a window of the API's largest page. -->
         <h1 class="label">STATEMENTS · 全部帳單（{statements.length}）</h1>
-        <span class="text-[12px] text-mute">依結帳日，新的在上 · <a href={resolve("/statements")} class="text-dim hover:text-ink"><span class="text-accent">[l]</span> 按月看 →</a></span>
+        <span class="text-[12px] text-mute">依結帳日，新的在上 · <a href={statementsHref()} class="text-dim hover:text-ink"><span class="text-accent">[l]</span> 按月看 →</a></span>
     </div>
     <div class="overflow-x-auto">
         <table class="w-full min-w-[680px] border-collapse">
@@ -39,10 +40,8 @@ const documents = $derived(new Map(allDocuments.map(d => [d.id, d])));
             </thead>
             <tbody>
                 {#each statements as s (s.id)}
-                    {@const doc = documents.get(s.documentId)}
-                    {@const delta = subtract(s.reconciliation.stated, s.reconciliation.computed)}
                     <tr class="border-t border-rule hover:bg-raised">
-                        <td class="py-2.5 pr-2"><Tag status={doc?.status ?? (s.reconciliation.balanced ? "parsed" : "needs_review")} /></td>
+                        <td class="py-2.5 pr-2"><Tag status={statementStatus(s, documents.get(s.documentId))} /></td>
                         <td class="px-2 py-2.5">
                             <a href={resolve("/statements/[id]", { id: String(s.id) })}>{institution(s.institution).name} {monthOf(s.closingDate)}</a>
                         </td>
@@ -52,7 +51,7 @@ const documents = $derived(new Map(allDocuments.map(d => [d.id, d])));
                         <td class="px-2 py-2.5 text-right">{formatAmount(s.totalDue)} <span class="text-mute">{s.currency}</span></td>
                         <td class="px-2 py-2.5 text-right text-dim">{s.transactionCount}</td>
                         <td class="py-2.5 pl-2 {s.reconciliation.balanced ? 'text-pos' : 'text-neg'}">
-                            {s.reconciliation.balanced ? "balanced" : `Δ ${formatAmount(delta, { signed: true })}`}
+                            {reconciliationText(s)}
                         </td>
                     </tr>
                 {:else}

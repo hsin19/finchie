@@ -1,19 +1,23 @@
 import {
     api,
+    LEDGER,
     need,
 } from "#lib/api/client.js";
 import { monthOf } from "#lib/dates.js";
 import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
-// No parent(): the layout reloads while a re-parse runs, and this page waits for it to finish before
-// reloading the statement, which may be gone by then (a duplicate, or a failure).
-export const load = (async ({ fetch, params }) => {
+export const load = (async ({ fetch, params, depends }) => {
+    // A re-parse keeps the statement's id: once it is done, the ledger reloads and so does this page.
+    depends(LEDGER);
     const id = Number(params.id);
     if (!Number.isSafeInteger(id) || id <= 0) error(404, `statement ${params.id} not found`);
 
     const client = api(fetch);
-    const statement = need(await client.GET("/api/statements/{id}", { params: { path: { id } } }));
+    const found = await client.GET("/api/statements/{id}", { params: { path: { id } } });
+    // Gone: a re-parse found its document a duplicate, or an old link.
+    if (found.response.status === 404) error(404, `statement ${id} not found: a re-parse may have replaced it`);
+    const statement = need(found);
     const [transactions, document, accounts] = await Promise.all([
         client.GET("/api/statements/{id}/transactions", { params: { path: { id } } }),
         client.GET("/api/documents/{id}", { params: { path: { id: statement.documentId } } }),

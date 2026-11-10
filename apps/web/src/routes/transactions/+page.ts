@@ -1,5 +1,6 @@
 import {
     api,
+    LEDGER,
     need,
     type TransactionQuery,
     TRANSACTIONS_PAGE_SIZE as PAGE_SIZE,
@@ -10,12 +11,14 @@ import {
     pageCount,
     readFilters,
     searchPeriod,
+    transactionsQueryHref,
     withChanges,
 } from "#lib/filters.js";
 import { redirect } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
-export const load = (async ({ fetch, url, parent }) => {
+export const load = (async ({ fetch, url, parent, depends }) => {
+    depends(LEDGER);
     const { latestMonth } = await parent();
     const filters = readFilters(url.searchParams);
     const period = searchPeriod(filters, latestMonth);
@@ -41,7 +44,7 @@ export const load = (async ({ fetch, url, parent }) => {
     const pages = pageCount(result.total);
     if (filters.page > pages) {
         const clamped = withChanges(url.searchParams, { page: pages === 1 ? null : String(pages) }).toString();
-        redirect(307, clamped ? `${url.pathname}?${clamped}` : url.pathname);
+        redirect(307, transactionsQueryHref(clamped));
     }
     return { filters, result };
 }) satisfies PageLoad;

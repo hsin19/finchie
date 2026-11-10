@@ -1,15 +1,12 @@
 <script lang="ts">
+import { ownedKinds } from "#lib/accounts.js";
 import {
     type AccountKind,
     api,
-    LEDGER,
-    unwrap,
 } from "#lib/api/client.js";
-import { accountKinds } from "#lib/labels.js";
-import {
-    goto,
-    invalidate,
-} from "$app/navigation";
+import { change } from "#lib/api/mutations.js";
+import { accountKinds } from "#lib/kinds.js";
+import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 
 /**
@@ -18,20 +15,17 @@ import { resolve } from "$app/paths";
  */
 let { onclose }: { onclose: () => void; } = $props();
 
-const kinds: AccountKind[] = ["points", "deposit", "securities", "exchange"];
+// Points first: what is most often kept by hand.
+const kinds: AccountKind[] = ["points", ...ownedKinds.filter(k => k !== "points")];
 let name = $state("");
 let kind = $state<AccountKind>("points");
 let error = $state<string>();
 
 async function create(event: SubmitEvent) {
     event.preventDefault();
-    try {
-        const { id } = unwrap(await api().POST("/api/accounts", { body: { kind, name: name.trim() } }));
-        await invalidate(LEDGER);
-        await goto(resolve("/accounts/[id]", { id: String(id) }));
-    } catch (e) {
-        error = (e as Error).message;
-    }
+    const created = await change(api().POST("/api/accounts", { body: { kind, name: name.trim() } }));
+    if (created.error !== undefined) error = created.error;
+    else await goto(resolve("/accounts/[id]", { id: String(created.data.id) }));
 }
 </script>
 

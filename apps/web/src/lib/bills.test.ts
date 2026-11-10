@@ -11,6 +11,7 @@ import type {
 import {
     closingMonths,
     closingRange,
+    dueBills,
     fxFeeShare,
     monthlyBills,
     pendingInstitutions,
@@ -82,5 +83,14 @@ describe("bills", () => {
         const all = search("1063", [{ kind: "purchase", count: 2, amount: "5200", flow: "-5200" }, fee, refund]);
         expect(fxFeeShare(all, search("63", [booking, refund]))).toEqual({ percent: 1.5, of: "4200" });
         expect(fxFeeShare(all, search("0", []))).toBeUndefined();
+    });
+});
+
+describe("dueBills", () => {
+    it("adds up the bills due today or later that are not seen paid, and says the next due date", () => {
+        const due = (id: number, dueDate: string, totalDue: string, paidOn?: string) => ({ ...statement("esun", "2026-10-07", totalDue), id, dueDate, paidOn });
+        expect(dueBills([due(1, "2026-11-10", "100"), due(2, "2026-11-25", "200.5"), due(3, "2026-11-09", "999"), due(4, "2026-11-20", "50", "2026-11-08")], "2026-11-10"))
+            .toEqual({ amount: "300.5", next: "2026-11-10", count: 2 });
+        expect(dueBills([], "2026-11-10")).toEqual({ amount: "0", next: undefined, count: 0 });
     });
 });

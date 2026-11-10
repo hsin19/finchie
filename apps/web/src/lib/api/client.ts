@@ -18,14 +18,16 @@ export type CardTotal = Schemas["CardTotal"];
 export type Document = Schemas["Document"];
 export type DocumentPage = Schemas["DocumentPage"];
 export type DocumentPreview = Schemas["DocumentPreview"];
-export type DocumentState = Schemas["DocumentState"];
+export type DocumentFailure = Schemas["DocumentFailure"];
 export type DocumentStatus = Schemas["DocumentStatus"];
 export type KindTotal = Schemas["KindTotal"];
 export type LineCounterpart = Schemas["LineCounterpart"];
+export type Position = Schemas["Position"];
 export type PreviewFile = Schemas["PreviewFile"];
 export type Price = Schemas["Price"];
 export type PriceSource = Schemas["PriceSource"];
 export type StateCount = Schemas["StateCount"];
+export type Settings = Schemas["Settings"];
 export type Statement = Schemas["Statement"];
 export type Trade = Schemas["Trade"];
 export type Transaction = Schemas["Transaction"];
@@ -37,7 +39,10 @@ export type TransactionSort = Schemas["TransactionSort"];
 export type UnitFlow = Schemas["UnitFlow"];
 export type TransactionQuery = NonNullable<paths["/api/transactions"]["get"]["parameters"]["query"]>;
 
-/** Dependency of the layout load: invalidate it after an upload or re-parse. */
+/**
+ * What every load that reads the ledger depends on (declared with depends(), never only through
+ * parent()): a change to it (mutations.ts) or a parse that finished (the layout's poll) reloads them all.
+ */
 export const LEDGER = "app:ledger";
 
 export const TRANSACTIONS_PAGE_SIZE = 50;
@@ -48,15 +53,15 @@ export function api(fetchFn: typeof fetch = fetch) {
     return createClient<paths>({ fetch: fetchFn });
 }
 
-interface Result {
+export interface Result {
     data?: unknown;
     error?: unknown;
     response: Response;
 }
 
-type Data<R extends Result> = NonNullable<R["data"]>;
+export type Data<R extends Result> = NonNullable<R["data"]>;
 
-function message(result: Result): string {
+export function message(result: Result): string {
     const body = result.error as { message?: unknown; } | undefined;
     return typeof body?.message === "string" ? body.message : result.response.statusText || `HTTP ${result.response.status}`;
 }

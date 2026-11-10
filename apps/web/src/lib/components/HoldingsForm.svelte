@@ -4,10 +4,8 @@ import {
     api,
     type Balance,
     type Expiry,
-    LEDGER,
-    unwrap,
 } from "#lib/api/client.js";
-import { invalidate } from "$app/navigation";
+import { change } from "#lib/api/mutations.js";
 
 /**
  * What an account the owner keeps holds, unit by unit, and of points what lapses by when (ADR 0019). Saved
@@ -44,11 +42,15 @@ const points = $derived(kind === "points");
 // An account's units are of its kind's (ADR 0020).
 const unitKind = $derived(kind === "securities" ? "security" : points ? "points" : "money");
 const unitLabel = $derived(kind === "securities" ? "證券名稱（同對帳單）" : points ? "點數名稱" : "幣別");
+// The units already known, to pick from; the form works without them, so a failure is quiet.
 let known = $state<string[]>([]);
 $effect(() => {
-    void api().GET("/api/units", { params: { query: { kind: unitKind } } }).then(result => {
-        known = (result.data ?? []).map(u => u.symbol);
-    });
+    const controller = new AbortController();
+    api()
+        .GET("/api/units", { params: { query: { kind: unitKind } }, signal: controller.signal })
+        .then(result => (known = (result.data ?? []).map(u => u.symbol)))
+        .catch(() => undefined);
+    return () => controller.abort();
 });
 const held = $derived(new Set(balances.map(b => b.unit)));
 
@@ -68,22 +70,17 @@ async function save(event: SubmitEvent) {
         error = "到期的數量和日期要一起填";
         return;
     }
-    try {
-        const holdings = filled.map(r => ({
-            unit: r.unit.trim(),
-            amount: r.amount.trim(),
-            expiries: r.lapses.filter(l => l.amount.trim() !== "").map(l => ({ amount: l.amount.trim(), by: l.by })),
-        }));
-        unwrap(await api().PUT("/api/accounts/{id}/holdings", { params: { path: { id: accountId } }, body: { holdings } }));
-        error = undefined;
-        await invalidate(LEDGER);
-        // Again from what the account now has: amounts as stored, units at 0 gone, and only what is still
-        // to lapse.
-        rows = rowsOf(balances, expiries);
-        saved = true;
-    } catch (e) {
-        error = (e as Error).message;
-    }
+    const holdings = filled.map(r => ({
+        unit: r.unit.trim(),
+        amount: r.amount.trim(),
+        expiries: r.lapses.filter(l => l.amount.trim() !== "").map(l => ({ amount: l.amount.trim(), by: l.by })),
+    }));
+    ({ error } = await change(api().PUT("/api/accounts/{id}/holdings", { params: { path: { id: accountId } }, body: { holdings } })));
+    if (error) return;
+    // Again from what the account now has (change() returns once the page has reloaded): amounts as
+    // stored, units at 0 gone, and only what is still to lapse.
+    rows = rowsOf(balances, expiries);
+    saved = true;
 }
 </script>
 

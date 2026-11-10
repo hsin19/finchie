@@ -3,40 +3,27 @@ import { describePrice } from "#lib/accounts.js";
 import {
     api,
     type Balance,
-    LEDGER,
-    unwrap,
 } from "#lib/api/client.js";
-import { invalidate } from "$app/navigation";
+import { change } from "#lib/api/mutations.js";
 
 /**
  * Each unit the account holds with its newest price and where it came from (ADR 0020), and the owner's
- * own price for any of them: like any price, it counts until a newer one comes. NT$ is worth itself.
+ * own price for any of them: like any price, it counts until a newer one comes. The base currency is
+ * worth itself.
  */
-let { balances }: { balances: Balance[]; } = $props();
+let { balances, base }: { balances: Balance[]; base: string; } = $props();
 
-const units = $derived(balances.filter(b => b.unitId !== undefined && b.unit !== "TWD"));
+const units = $derived(balances.filter(b => b.unitId !== undefined && b.unit !== base));
 let values = $state<Record<number, string>>({});
 let error = $state<string>();
 
 async function save(id: number, value: string) {
-    try {
-        unwrap(await api().PUT("/api/units/{id}/price", { params: { path: { id } }, body: { value: value.trim() } }));
-        error = undefined;
-        delete values[id];
-        await invalidate(LEDGER);
-    } catch (e) {
-        error = (e as Error).message;
-    }
+    ({ error } = await change(api().PUT("/api/units/{id}/price", { params: { path: { id } }, body: { value: value.trim() } })));
+    if (!error) values[id] = "";
 }
 
 async function clear(id: number) {
-    try {
-        unwrap(await api().DELETE("/api/units/{id}/price", { params: { path: { id } } }));
-        error = undefined;
-        await invalidate(LEDGER);
-    } catch (e) {
-        error = (e as Error).message;
-    }
+    ({ error } = await change(api().DELETE("/api/units/{id}/price", { params: { path: { id } } })));
 }
 </script>
 
@@ -57,7 +44,7 @@ async function clear(id: number) {
                     }}
                 >
                     <span class="min-w-0 flex-1 basis-64 text-[13px] {balance.price ? 'text-dim' : 'text-mute'}">
-                        {balance.price ? describePrice(balance.unit, balance.price) : `${balance.unit} 沒有價格`}
+                        {balance.price ? describePrice(balance.unit, balance.price, base) : `${balance.unit} 沒有價格`}
                     </span>
                     <span class="flex items-center gap-2 text-dim">
                         1 {balance.unit} = NT$

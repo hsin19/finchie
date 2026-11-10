@@ -4,6 +4,7 @@ import {
     it,
 } from "vitest";
 import {
+    formatBytes,
     isMonth,
     monthRange,
     monthsBetween,
@@ -44,5 +45,14 @@ describe("weekday", () => {
 describe("today", () => {
     it("is the calendar day in Taipei, wherever the browser is", () => {
         expect(today(new Date("2026-11-09T20:00:00Z"))).toBe("2026-11-10");
+    });
+});
+
+describe("formatBytes", () => {
+    it("says a size the short way", () => {
+        expect(formatBytes(512)).toBe("512 B");
+        expect(formatBytes(12 * 1024)).toBe("12 KB");
+        expect(formatBytes(1.5 * 1024 * 1024)).toBe("1.5 MB");
+        expect(formatBytes(32 * 1024 * 1024)).toBe("32 MB");
     });
 });

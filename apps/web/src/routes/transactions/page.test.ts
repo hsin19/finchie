@@ -31,7 +31,7 @@ function run(query: string, total: number) {
         const body = { items: [], total, sum: "0", flows: [], byKind: [], byCard: [], byAccount: [] };
         return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
     };
-    const event = { url: new URL(`https://finchie.test/transactions${query}`), fetch, parent: async () => ({ latestMonth: "2026-10" }) };
+    const event = { url: new URL(`https://finchie.test/transactions${query}`), fetch, depends: () => {}, parent: async () => ({ latestMonth: "2026-10" }) };
     return { result: load(event as unknown as Event), requested };
 }
 

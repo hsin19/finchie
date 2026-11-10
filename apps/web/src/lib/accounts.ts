@@ -1,10 +1,18 @@
 import type {
     Account,
+    AccountKind,
     Balance,
+    Position,
     Price,
-    Statement,
+    PriceSource,
+    Transaction,
 } from "#lib/api/client.js";
-import { priceSources } from "#lib/labels.js";
+import {
+    cardLabel,
+    institution,
+    OWNER,
+} from "#lib/institutions.js";
+import { accountKinds } from "#lib/kinds.js";
 import {
     formatAmount,
     formatPrice,
@@ -12,14 +20,41 @@ import {
     roundWhole,
     sign,
     subtract,
-    sum,
 } from "#lib/money.js";
+import { resolve } from "$app/paths";
+import type { ResolvedPathname } from "$app/types";
+
+/** The owner's name for an account, else the bank's ("臺幣活存"), else its kind's. */
+export function accountName(account: Pick<Account, "kind" | "label" | "name">): string {
+    return account.name ?? account.label ?? accountKinds[account.kind].label;
+}
+
+/** Where a line is: "ESUN··3381" for a card, "ESUN 臺幣活存" for a deposit account, "SKIS 證券" for a brokerage. */
+export function lineAccount(t: Pick<Transaction, "institution" | "cardLast4" | "accountKind" | "accountName">): string {
+    if (t.accountKind === "credit_card") return cardLabel(t.institution, t.cardLast4);
+    return `${institution(t.institution).code} ${t.accountName ?? accountKinds[t.accountKind].label}`;
+}
+
+/** An account the owner keeps by hand (ADR 0019). */
+export function isOwned(account: Pick<Account, "institution">): boolean {
+    return account.institution === OWNER;
+}
 
 export type AccountSort = "bank" | "balance";
 
 /** By worth unless the URL asks for the bank order. */
 export function accountSort(value: string | null): AccountSort {
     return value === "bank" ? "bank" : "balance";
+}
+
+/** /accounts: in which order (?sort=bank), and whether small accounts and balances are listed (?all). */
+export function readAccountsView(params: Pick<URLSearchParams, "get" | "has">): { sort: AccountSort; all: boolean; } {
+    return { sort: accountSort(params.get("sort")), all: params.has("all") };
+}
+
+export function accountsHref({ sort, all }: { sort: AccountSort; all: boolean; }): ResolvedPathname {
+    const query = [sort === "bank" ? "sort=bank" : "", all ? "all" : ""].filter(Boolean).join("&");
+    return query ? resolve(`/accounts?${query}`) : resolve("/accounts");
 }
 
 /**
@@ -32,25 +67,6 @@ export function sortAccounts(accounts: Account[], by: AccountSort): Account[] {
         if (a.worth === undefined || b.worth === undefined) return a.worth === undefined ? (b.worth === undefined ? 0 : 1) : -1;
         return sign(subtract(b.worth, a.worth));
     });
-}
-
-/** The accounts' worth in NT$ added up, and how many had none to add. */
-export function totalWorth(accounts: Account[]): { total: string; missing: number; } {
-    const worths = accounts.flatMap(a => (a.worth === undefined ? [] : [a.worth]));
-    return { total: sum(worths), missing: accounts.length - worths.length };
-}
-
-/**
- * What the owner still owes on cards: each bank's newest bill that owes something and no deposit
- * account or later bill has shown paid (ADR 0016). An older unpaid bill is the newer one's past.
- */
-export function unpaidBills(statements: Statement[]): Statement[] {
-    const newest = new Map<string, Statement>();
-    for (const s of statements) {
-        const seen = newest.get(s.institution);
-        if (!seen || s.closingDate > seen.closingDate) newest.set(s.institution, s);
-    }
-    return [...newest.values()].filter(s => !s.paidOn && sign(s.totalDue) > 0);
 }
 
 /** Below this worth in NT$, either way, an account or a balance is small: the accounts page leaves it out unless ?all. */
@@ -129,6 +145,17 @@ export function historyByDay(history: Balance[]): { asOf: string; balances: Bala
     return [...days].sort(([a], [b]) => b.localeCompare(a)).map(([asOf, balances]) => ({ asOf, balances }));
 }
 
+/** Where a price came from (ADR 0020). */
+export const priceSources: Record<PriceSource, string> = {
+    fawaz: "匯率",
+    twse: "證交所收盤",
+    tpex: "櫃買收盤",
+    max: "MAX",
+    binance: "Binance",
+    bitget: "Bitget",
+    owner: "自訂",
+};
+
 const taipei = new Intl.DateTimeFormat("sv-SE", {
     timeZone: "Asia/Taipei",
     year: "numeric",
@@ -147,9 +174,9 @@ export function pricedAt(price: Price): string {
  * A unit's price in words (ADR 0020): "1 USD ≈ NT$32.85 · 匯率 2026-11-07", or through its quote unit,
  * "1 BGB = 0.85 USDT ≈ NT$27.93 · Bitget 2026-11-09 14:00".
  */
-export function describePrice(unit: string, price: Price): string {
-    const quoted = price.quote === "TWD" ? `≈ NT$${formatPrice(price.quoted)}` : `= ${formatPrice(price.quoted)} ${price.quote}`;
-    const twd = price.quote === "TWD" ? "" : price.twd !== undefined ? ` ≈ NT$${formatPrice(price.twd)}` : `（${price.quote} 沒有新臺幣價格）`;
+export function describePrice(unit: string, price: Price, base: string): string {
+    const quoted = price.quote === base ? `≈ NT$${formatPrice(price.quoted)}` : `= ${formatPrice(price.quoted)} ${price.quote}`;
+    const twd = price.quote === base ? "" : price.twd !== undefined ? ` ≈ NT$${formatPrice(price.twd)}` : `（${price.quote} 沒有新臺幣價格）`;
     return `1 ${unit} ${quoted}${twd} · ${priceSources[price.source]} ${pricedAt(price)}`;
 }
 
@@ -198,7 +225,7 @@ export function accountStatus(account: Account, today: string): AccountStatus {
     const days = Math.round((Date.parse(today) - Date.parse(asOf)) / 86_400_000);
     status.asOf = asOf;
     status.days = days;
-    if (account.institution === "owner") status.note = "手動";
+    if (isOwned(account)) status.note = "手動";
     else status.stale = days > (account.kind === "exchange" ? SNAPSHOT_DAYS : STATEMENT_DAYS);
     return status;
 }
@@ -206,4 +233,106 @@ export function accountStatus(account: Account, today: string): AccountStatus {
 /** "今天", "昨天", "41 天前". */
 export function daysAgo(days: number): string {
     return days <= 0 ? "今天" : days === 1 ? "昨天" : `${days} 天前`;
+}
+
+// ---- What an account's page shows, by kind
+
+/**
+ * The parts of an account's page. Each kind says what it has in one place (`pages`), so a new kind is
+ * a type error until it is described, rather than a branch missed somewhere in the page.
+ */
+export interface AccountPage {
+    /** The header leads with the account's worth (shares, coins), or with its balances. */
+    headline: "worth" | "balances";
+    /** Said in place of a worth that is not known. */
+    noWorth: string;
+    /** A table of what it holds and each one's worth: an exchange's coins (ADR 0018). */
+    holdings: boolean;
+    /** Each security's shares, cost, and gains (ADR 0017). */
+    positions: boolean;
+    /** What will lapse by when (ADR 0019). */
+    expiring: boolean;
+    /** Its lines, and what their amounts mean; none for a source that reports no lines. */
+    lines?: { note: string; trade: boolean; };
+    /** Its history: a balance a day (snapshots), or one per statement. */
+    history: "days" | "statements";
+    /** What a gap in its balances most likely means. */
+    gaps: string;
+    /** The owner keeps it by hand (ADR 0019): it takes what it holds, a row a unit. */
+    form: boolean;
+}
+
+const MISSING_STATEMENT = "這兩個日期之間有錢進出、卻沒有任何明細：多半是少了一期對帳單。上傳那期之後就會接起來。";
+
+const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
+    deposit: {
+        headline: "balances",
+        noWorth: "",
+        holdings: false,
+        positions: false,
+        expiring: false,
+        lines: { note: "存入是正數", trade: false },
+        history: "statements",
+        gaps: MISSING_STATEMENT,
+    },
+    // A card bill's account only holds its lines (ADR 0013); /statements shows the bills.
+    credit_card: {
+        headline: "balances",
+        noWorth: "",
+        holdings: false,
+        positions: false,
+        expiring: false,
+        lines: { note: "存入是正數", trade: false },
+        history: "statements",
+        gaps: MISSING_STATEMENT,
+    },
+    // Shares, one unit per security; its lines are trades (ADR 0017).
+    securities: {
+        headline: "worth",
+        noWorth: "有證券沒有收盤價",
+        holdings: false,
+        positions: true,
+        expiring: false,
+        lines: { note: "買進的股數是正數", trade: true },
+        history: "statements",
+        gaps: MISSING_STATEMENT,
+    },
+    // Coins, and nothing but snapshots of them (ADR 0018).
+    exchange: {
+        headline: "worth",
+        noWorth: "有幣種沒有價格",
+        holdings: true,
+        positions: false,
+        expiring: false,
+        history: "days",
+        gaps: MISSING_STATEMENT,
+    },
+    // Its bills print its programs' balances, their totals as lines, and what will lapse (ADR 0019).
+    points: {
+        headline: "balances",
+        noWorth: "",
+        holdings: false,
+        positions: false,
+        expiring: true,
+        lines: { note: "帳單上每一期的合計，獲得是正數", trade: false },
+        history: "statements",
+        gaps: "這兩期之間少了點數，帳單卻沒列出：多半是點數過期了（過期的點數不會出現在任何欄位），或少了一期帳單。",
+    },
+};
+
+/** What an account's page shows: its kind's parts; one the owner keeps has no lines, and a form. */
+export function accountPage(account: Pick<Account, "kind" | "institution">): AccountPage {
+    const owned = isOwned(account);
+    const page = pages[account.kind];
+    return { ...page, lines: owned ? undefined : page.lines, form: owned };
+}
+
+/** Kinds an owner can keep by hand, in the order the accounts page lists kinds: every one but a card's. */
+export const ownedKinds: AccountKind[] = ["deposit", "securities", "exchange", "points"];
+
+/** A securities account's positions: held first, then those sold out whose sales are known to have gained or lost. */
+export function shownPositions(positions: Position[] = []): Position[] {
+    const held = positions.filter(p => sign(p.shares) !== 0);
+    const soldOut = positions.filter(p => sign(p.shares) === 0 && p.realized !== undefined && sign(p.realized) !== 0);
+    return [...held, ...soldOut];
 }

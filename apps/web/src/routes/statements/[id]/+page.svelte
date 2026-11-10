@@ -1,12 +1,6 @@
 <script lang="ts">
 import { lapsesSoon } from "#lib/accounts.js";
-import {
-    api,
-    LEDGER,
-    type Transaction,
-    type TransactionLink,
-    unwrap,
-} from "#lib/api/client.js";
+import type { Transaction } from "#lib/api/client.js";
 import FileLink from "#lib/components/FileLink.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import {
@@ -16,27 +10,39 @@ import {
     shortDateTime,
     today,
 } from "#lib/dates.js";
-import { openUrl } from "#lib/documents.js";
+import {
+    openUrl,
+    outcome,
+} from "#lib/documents.js";
+import { transactionsHref } from "#lib/filters.js";
 import { isPoints } from "#lib/flows.js";
-import { onKeys } from "#lib/keys.svelte.js";
 import {
     cardLabel,
     institution,
+} from "#lib/institutions.js";
+import { onKeys } from "#lib/keys.svelte.js";
+import {
     kindOrder,
     kinds,
-    tone,
-} from "#lib/labels.js";
+} from "#lib/kinds.js";
 import {
     formatAmount,
-    sign,
-    subtract,
     sum,
 } from "#lib/money.js";
+import { Reparse } from "#lib/reparse.svelte.js";
 import {
-    afterNavigate,
-    goto,
-    invalidate,
-} from "$app/navigation";
+    billPoints,
+    deltaMeaning,
+    reconciliationDelta,
+    statementStatus,
+} from "#lib/statements.js";
+import { tone } from "#lib/tone.js";
+import {
+    readLine,
+    statementHref,
+    statementsHref,
+} from "#lib/urls.js";
+import { afterNavigate } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { page } from "$app/state";
 import type { PageProps } from "./$types";
@@ -44,18 +50,18 @@ import type { PageProps } from "./$types";
 let { data }: PageProps = $props();
 
 const s = $derived(data.statement);
+// Loaded with the page, which reloads with the ledger: pending while a re-parse runs, then its result.
 const doc = $derived(data.document);
 const bank = $derived(institution(s.institution));
-const delta = $derived(subtract(s.reconciliation.stated, s.reconciliation.computed));
+const delta = $derived(reconciliationDelta(s));
+const month = $derived(monthOf(s.closingDate));
 
-// Re-parsing replaces the statement's lines, and it keeps its id: wait for the document to finish,
-// then reload it. The layout keeps data.documents fresh while anything is pending. Finished means a
-// new parsedAt: until the ledger reloads, data.documents still shows the previous parse.
-let reparsing = $state(false);
-let parsedBefore: string | undefined;
-let reparseMessage = $state<string>();
-const live = $derived(data.documents.find(d => d.id === doc.id) ?? doc);
-const status = $derived(reparsing || live.status === "pending" ? "pending" : s.reconciliation.balanced ? "parsed" : "needs_review");
+// Once done, the ledger reloads and so does the statement, with new lines (they get new ids).
+const reparse = new Reparse(() => doc.id);
+const parsing = $derived(reparse.requesting || doc.status === "pending");
+const status = $derived(statementStatus(s, doc, { reparsing: reparse.requesting }));
+// A re-parse that gave no bill leaves this one as it was: say what it gave.
+const reparsed = $derived(reparse.askedAt && !parsing ? outcome(doc, s) : undefined);
 
 // Money only: points are not added to it (ADR 0019), they have a panel of their own.
 const byKind = $derived(
@@ -67,41 +73,20 @@ const byKind = $derived(
         .filter(k => k.rows > 0),
 );
 
-// The points the bill reports, by program: its lines, the balance after it, and what will lapse, which
-// is known as of the newest bill only. A program with no movement in the period still has its balance.
-const points = $derived(
-    data.points.flatMap(account => {
-        const lines = data.transactions.filter(t => isPoints(t) && t.accountId === account.id);
-        const balances = account.history.filter(b => b.statementId === s.id);
-        const units = [...new Set([...lines.map(t => t.unit ?? ""), ...balances.map(b => b.unit)])];
-        return units.map(unit => ({
-            account,
-            unit,
-            lines: lines.filter(t => (t.unit ?? "") === unit),
-            balance: balances.find(b => b.unit === unit),
-            expiries: account.history.find(b => b.unit === unit)?.statementId === s.id
-                ? account.expiries.filter(e => e.unit === unit)
-                : [],
-        }));
-    }),
-);
+const points = $derived(billPoints(s.id, data.points, data.transactions));
 
 // Lines linked to these (ADR 0009) may be on other statements; ?line= picks the line to show. Scrolled
 // to once the navigation is done, since SvelteKit sets the scroll position at the very end of it; Back
 // keeps the position it restores.
-const target = $derived(Number(page.url.searchParams.get("line")) || undefined);
+const target = $derived(readLine(page.url.searchParams));
 afterNavigate(({ to, type }) => {
-    if (type === "popstate") return;
-    const line = Number(to?.url.searchParams.get("line"));
+    if (type === "popstate" || !to) return;
+    const line = readLine(to.url.searchParams);
     if (line) document.getElementById(`tx-${line}`)?.scrollIntoView({ block: "center" });
 });
 
-function lineHref(link: TransactionLink) {
-    return resolve(`/statements/[id]?line=${link.id}`, { id: String(link.statementId) });
-}
-
 /** " · 國泰 2026-11" for a line on another statement. */
-function elsewhere(link: TransactionLink) {
+function elsewhere(link: Pick<Transaction, "statementId">) {
     if (link.statementId === s.id) return "";
     const other = data.statements.find(st => st.id === link.statementId);
     return other ? ` · ${institution(other.institution).name} ${monthOf(other.closingDate)}` : "";
@@ -141,43 +126,20 @@ const log = $derived(
     ].filter(entry => !!entry),
 );
 
-async function reparse() {
-    if (reparsing) return;
-    reparseMessage = undefined;
-    parsedBefore = live.parsedAt;
-    reparsing = true;
-    try {
-        unwrap(await api().POST("/api/documents/{id}/reparse", { params: { path: { id: doc.id } } }));
-        await invalidate(LEDGER);
-    } catch (error) {
-        reparsing = false;
-        reparseMessage = (error as Error).message;
-    }
-}
-
-$effect(() => {
-    if (!reparsing) return;
-    if (live.status === "pending" || live.parsedAt === parsedBefore) return;
-    reparsing = false;
-    const next = data.statements.find(st => st.documentId === doc.id);
-    if (next) void goto(resolve("/statements/[id]", { id: String(next.id) }), { replace: true, refreshAll: true });
-    else reparseMessage = `重新解析後沒有帳單：${live.status}${live.error ? ` · ${live.error}` : ""}`;
-});
-
-onKeys({
+onKeys("statement", {
     f: () => window.open(openUrl(doc), "_blank", "noreferrer"),
-    r: () => void reparse(),
+    r: () => void reparse.run(),
 });
 </script>
 
 <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
     <h1 class="m-0 text-[18px] font-bold">{bank.name} · {monthOf(s.closingDate)}</h1>
     <Tag {status} label />
-    {#if reparsing}<span class="text-accent">re-parsing…</span>{/if}
+    {#if parsing}<span class="text-accent">re-parsing…</span>{/if}
     <span class="ml-auto flex flex-wrap gap-x-4 text-[12px]">
-        <a href={resolve(`/statements?m=${monthOf(s.closingDate)}`)} class="text-dim hover:text-ink">← {monthOf(s.closingDate)} 的帳單</a>
+        <a href={statementsHref(month)} class="text-dim hover:text-ink">← {month} 的帳單</a>
         <!-- The lines on this statement: one statement per bank closes in a month. -->
-        <a href={resolve(`/transactions?closing=${monthOf(s.closingDate)}&card=${s.institution}`)} class="text-dim hover:text-ink">這張帳單的交易 →</a>
+        <a href={transactionsHref({ closing: month, institution: s.institution })} class="text-dim hover:text-ink">這張帳單的交易 →</a>
         {#if doc.contentType === "message/rfc822"}
             <a href={resolve("/documents/[id]", { id: String(doc.id) })} class="text-dim hover:text-ink">原始信件 →</a>
         {/if}
@@ -248,7 +210,7 @@ onKeys({
                 <span class="text-pos">Δ</span><span class="text-pos">兩邊一致</span><span class="text-right text-pos">0</span>
             {:else}
                 <span class="text-neg">Δ</span>
-                <span class="text-neg">{sign(delta) > 0 ? "帳單比明細多，可能漏抓了一列" : "明細比帳單多，可能多抓或重複了一列"}</span>
+                <span class="text-neg">{deltaMeaning(delta)}</span>
                 <span class="text-right text-neg">{formatAmount(delta, { signed: true })}</span>
             {/if}
         </div>
@@ -272,9 +234,12 @@ onKeys({
         </table>
         <div class="flex flex-wrap gap-2">
             <FileLink {doc} class="control inline-flex items-center text-ink hover:text-ink"><span class="text-accent">[f]</span>&nbsp;開啟帳單 PDF</FileLink>
-            <button type="button" class="control" disabled={reparsing} onclick={() => void reparse()}><span class="text-accent">[r]</span> 修正 parser 後重新解析</button>
+            <button type="button" class="control" disabled={parsing} onclick={() => void reparse.run()}><span class="text-accent">[r]</span> 修正 parser 後重新解析</button>
         </div>
-        {#if reparseMessage}<p class="m-0 text-neg">{reparseMessage}</p>{/if}
+        {#if reparse.error}<p class="m-0 text-neg">{reparse.error}</p>{/if}
+        {#if reparsed}
+            <p class="m-0 {reparsed.tone === 'neg' ? 'text-neg' : 'text-dim'}">{reparse.askedAt} 重新解析完成：{reparsed.text}</p>
+        {/if}
     </section>
 </div>
 
@@ -308,12 +273,12 @@ onKeys({
                             <td class="px-2 py-2">
                                 {line.t.description}
                                 {#if line.t.parent}
-                                    <a href={lineHref(line.t.parent)} class="ml-2 text-[12px] whitespace-nowrap">
+                                    <a href={statementHref(line.t.parent.statementId, line.t.parent.id)} class="ml-2 text-[12px] whitespace-nowrap">
                                         ↑ {kinds[line.t.parent.kind].short} {shortDate(line.t.parent.transactionDate)}{elsewhere(line.t.parent)}
                                     </a>
                                 {/if}
                                 {#each line.t.children ?? [] as child (child.id)}
-                                    <a href={lineHref(child)} class="ml-2 text-[12px] whitespace-nowrap">
+                                    <a href={statementHref(child.statementId, child.id)} class="ml-2 text-[12px] whitespace-nowrap">
                                         ↓ {kinds[child.kind].label} {formatAmount(child.amount, { signed: true })}{elsewhere(child)}
                                     </a>
                                 {/each}

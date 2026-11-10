@@ -1,11 +1,8 @@
 <script lang="ts">
 import {
-    api,
     documentContentUrl,
-    LEDGER,
     previewBodyUrl,
     previewFileUrl,
-    unwrap,
 } from "#lib/api/client.js";
 import Tag from "#lib/components/Tag.svelte";
 import {
@@ -14,15 +11,14 @@ import {
 } from "#lib/dates.js";
 import { outcome } from "#lib/documents.js";
 import { onKeys } from "#lib/keys.svelte.js";
-import { documentStatus } from "#lib/labels.js";
-import { invalidate } from "$app/navigation";
+import { Reparse } from "#lib/reparse.svelte.js";
 import { resolve } from "$app/paths";
 import type { PageProps } from "./$types";
 
 let { data }: PageProps = $props();
 
-// The layout keeps data.documents fresh while the document is parsing.
-const doc = $derived(data.documents.find(d => d.id === data.document.id) ?? data.document);
+// Loaded with the page, which reloads with the ledger: pending while a parse runs, then its result.
+const doc = $derived(data.document);
 const email = $derived(data.preview?.email);
 const files = $derived(data.preview?.files ?? []);
 const statement = $derived(data.statements.find(s => s.documentId === doc.id));
@@ -30,46 +26,38 @@ const result = $derived(outcome(doc, statement));
 // A deposit statement that does not add up says which account in its warnings: the result already.
 const warnings = $derived(doc.status === "needs_review" && !statement ? [] : doc.warnings);
 
-// Queued: the document turns pending, and the layout follows it until the parser is done. A parse
-// that fails the same way again can be over before the page shows it pending, so the page says when
-// it asked.
-let reparseError = $state<string>();
-let reparsedAt = $state<string>();
-async function reparse() {
-    if (doc.status === "pending") return;
-    reparseError = undefined;
-    try {
-        unwrap(await api().POST("/api/documents/{id}/reparse", { params: { path: { id: doc.id } } }));
-        reparsedAt = new Date().toLocaleTimeString("en-GB", { hour12: false });
-        await invalidate(LEDGER);
-    } catch (error) {
-        reparseError = (error as Error).message;
-    }
-}
+const reparse = new Reparse(() => doc.id);
+const parsing = $derived(reparse.requesting || doc.status === "pending");
 
 function open(index: number) {
     window.open(previewFileUrl(doc.id, index), "_blank", "noreferrer");
 }
 
 // [1]–[9] open that file; [f] the statement and [r] re-parses, as on a statement's page.
-const keys: Record<string, () => void> = {
-    r: () => void reparse(),
+const attachment = (n: number) => () => {
+    if (n <= files.length) open(n - 1);
+};
+onKeys("document", {
+    r: () => void reparse.run(),
     f: () => {
         const statementFile = files.find(f => f.primary);
         if (statementFile) open(statementFile.index);
     },
-};
-for (let n = 1; n <= 9; n++) {
-    keys[String(n)] = () => {
-        if (n <= files.length) open(n - 1);
-    };
-}
-onKeys(keys);
+    1: attachment(1),
+    2: attachment(2),
+    3: attachment(3),
+    4: attachment(4),
+    5: attachment(5),
+    6: attachment(6),
+    7: attachment(7),
+    8: attachment(8),
+    9: attachment(9),
+});
 </script>
 
 <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
     <h1 class="m-0 min-w-0 text-[18px] font-bold break-words">{email?.subject || doc.filename}</h1>
-    <Tag status={documentStatus(doc)} label />
+    <Tag status={doc.status} label />
     <span class="ml-auto flex flex-wrap gap-x-4 text-[12px]">
         <a href={resolve("/documents")} class="text-dim hover:text-ink">← 全部文件</a>
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
@@ -80,16 +68,15 @@ onKeys(keys);
 <section class="panel p-3.5">
     <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 class="label">PARSE · 解析結果</h2>
-        {#if reparsedAt && doc.status !== "pending"}<span class="ml-auto text-[12px] text-mute">{reparsedAt} 重新解析完成</span>{/if}
-        <button type="button" class="control min-h-9" disabled={doc.status === "pending"} onclick={() => void reparse()}>
-            <span class="text-accent">[r]</span> {doc.status === "pending" ? "解析中…" : "重新解析"}
+        {#if reparse.askedAt && !parsing}<span class="ml-auto text-[12px] text-mute">{reparse.askedAt} 重新解析完成</span>{/if}
+        <button type="button" class="control min-h-9" disabled={parsing} onclick={() => void reparse.run()}>
+            <span class="text-accent">[r]</span> {parsing ? "解析中…" : "重新解析"}
         </button>
     </div>
     <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
         <dt class="text-mute">result</dt>
         <dd class="m-0 min-w-0 break-words {result.tone === 'neg' ? 'text-neg' : result.tone === 'dim' ? 'text-dim' : 'text-ink'}">
             {result.text}
-            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved where the outcome is described -->
             {#if result.link}<a href={result.link.href} class="ml-1">{result.link.text}</a>{/if}
         </dd>
         {#if result.hint}
@@ -105,9 +92,9 @@ onKeys(keys);
             <dt class="text-mute">{i === 0 ? "warnings" : ""}</dt>
             <dd class="m-0 min-w-0 break-words text-neg">{warning}</dd>
         {/each}
-        {#if reparseError}
+        {#if reparse.error}
             <dt class="text-mute">re-parse</dt>
-            <dd class="m-0 min-w-0 break-words text-neg">{reparseError}</dd>
+            <dd class="m-0 min-w-0 break-words text-neg">{reparse.error}</dd>
         {/if}
     </dl>
 </section>
