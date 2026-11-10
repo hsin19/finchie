@@ -6,10 +6,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument, row, securities
+from fakes import FakeDocument, row, securities, trade_detail
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import SecuritiesStatement, TradeSide
+from finchie_parser.model import AccountKind, Balance, LineKind, Statement, Trade
 from finchie_parser.parsers.skis_securities import SkisSecuritiesParser
 from finchie_parser.pdf import Word
 
@@ -140,72 +140,72 @@ HOLDINGS = [
 WORDS = [*HEADINGS, *TRADES, *TOTALS, *HOLDINGS]
 
 
-def parse(words: list[Word] = WORDS) -> SecuritiesStatement:
-    statement = securities(SkisSecuritiesParser().parse(FakeDocument([PAGE_1], words={0: words}), ocr=None))
-    return statement
+def parse(words: list[Word] = WORDS) -> Statement:
+    return securities(SkisSecuritiesParser().parse(FakeDocument([PAGE_1], words={0: words}), ocr=None))
 
 
-def test_skis_reads_the_month_the_account_and_the_holdings_as_of_their_day() -> None:
+def test_skis_reads_the_month_the_account_and_the_holdings_as_balances_on_their_day() -> None:
     statement = parse()
-    assert (statement.period_start, statement.period_end) == (date(2026, 7, 1), date(2026, 7, 31))
-    assert statement.account_number == "12**345"
-    # Into the next month: the day the statement prints, its trades counted.
-    assert statement.holdings_date == date(2026, 8, 4)
-    assert [(h.name, h.shares) for h in statement.holdings] == [
-        ("範例一號ETF", Decimal(1000)),
-        ("範例電子", Decimal(3500)),
-        ("範例航運", Decimal(12000)),
+    # Closing on the day the holdings print, into the next month, its trades counted.
+    assert (statement.period_start, statement.closing_date) == (date(2026, 7, 1), date(2026, 8, 4))
+    [brokerage] = statement.accounts
+    assert (brokerage.kind, brokerage.number) == (AccountKind.SECURITIES, "12**345")
+    assert brokerage.balances == [
+        Balance("範例一號ETF", date(2026, 8, 4), Decimal(1000)),
+        Balance("範例電子", date(2026, 8, 4), Decimal(3500)),
+        Balance("範例航運", date(2026, 8, 4), Decimal(12000)),
     ]
 
 
-def test_skis_reads_trades_with_their_money_and_a_prepaid_buy() -> None:
-    trades = parse().trades
-    assert [(t.date, t.name, t.side, t.shares, t.price, t.amount, t.fee, t.tax, t.net, t.prepaid) for t in trades] == [
-        (
-            date(2026, 7, 3),
-            "範例電子",
-            TradeSide.SELL,
-            Decimal(2000),
-            Decimal("50.5"),
-            Decimal(101000),
-            Decimal(143),
-            Decimal(303),
-            Decimal(100554),
-            None,
-        ),
-        (
-            date(2026, 7, 10),
-            "範例一號ETF",
-            TradeSide.BUY,
-            Decimal(1000),
-            Decimal("20.00"),
-            Decimal(20000),
-            Decimal(28),
-            Decimal(0),
-            Decimal(-20028),
-            None,
-        ),
-        (
-            date(2026, 7, 20),
-            "範例電子",
-            TradeSide.BUY,
-            Decimal(500),
-            Decimal("48.0"),
-            Decimal(24000),
-            Decimal(34),
-            Decimal(0),
-            Decimal(0),
-            Decimal(24034),
-        ),
+def test_skis_reads_trades_as_lines_of_shares_sold_negative_with_their_money() -> None:
+    [brokerage] = parse().accounts
+    assert [(t.date, t.unit, t.description, t.kind, t.amount) for t in brokerage.lines] == [
+        (date(2026, 7, 3), "範例電子", "範例電子", LineKind.SELL, Decimal(-2000)),
+        (date(2026, 7, 10), "範例一號ETF", "範例一號ETF", LineKind.BUY, Decimal(1000)),
+        (date(2026, 7, 20), "範例電子", "範例電子", LineKind.BUY, Decimal(500)),
+    ]
+    assert [trade_detail(t) for t in brokerage.lines] == [
+        Trade(Decimal("50.5"), "集賣", Decimal(101000), Decimal(143), Decimal(303), Decimal(100554)),
+        Trade(Decimal("20.00"), "集買", Decimal(20000), Decimal(28), Decimal(0), Decimal(-20028)),
+        # Paid in advance.
+        Trade(Decimal("48.0"), "集買", Decimal(24000), Decimal(34), Decimal(0), Decimal(0), prepaid=Decimal(24034)),
     ]
 
 
-def test_skis_reconciles_the_trades_against_the_totals_column_by_column() -> None:
-    assert parse().reconciliation.balanced
-    wrong = [Word("146,000", w.x0, w.x1, w.top) if w.text == "145,000" else w for w in WORDS]
-    reconciliation = parse(wrong).reconciliation
-    assert not reconciliation.balanced
-    assert reconciliation.stated_label == "價金"
+def test_skis_checks_each_total_against_the_trades() -> None:
+    statement = parse()
+    assert [(c.name, c.unit, c.computed, c.stated) for c in statement.checks] == [
+        ("價金", "TWD", Decimal(145000), Decimal(145000)),
+        ("手續費", "TWD", Decimal(205), Decimal(205)),
+        ("交易稅", "TWD", Decimal(303), Decimal(303)),
+        ("應收付金額", "TWD", Decimal(80526), Decimal(80526)),
+    ]
+    assert statement.balanced
+
+
+def test_skis_reports_every_total_that_does_not_add_up_not_only_the_first() -> None:
+    wrong = {"145,000": "146,000", "205": "206", "80,526(收)": "80,000(收)"}
+    statement = parse([Word(wrong.get(w.text, w.text), w.x0, w.x1, w.top) for w in WORDS])
+    assert [(c.name, c.balanced) for c in statement.checks] == [
+        ("價金", False),
+        ("手續費", False),
+        ("交易稅", True),
+        ("應收付金額", False),
+    ]
+    assert not statement.balanced
+
+
+def test_skis_without_trades_has_nothing_to_check() -> None:
+    statement = parse([*HEADINGS, *HOLDINGS])
+    assert statement.checks == []
+    assert statement.accounts[0].lines == []
+    assert len(statement.accounts[0].balances) == 3
+
+
+def test_skis_refuses_a_security_held_twice() -> None:
+    twice = [*WORDS[:-1], *row(702, ("範例航運", 24, 52), ("1,000", 99, 119)), WORDS[-1]]
+    with pytest.raises(LayoutError, match="held twice"):
+        parse(twice)
 
 
 @pytest.mark.parametrize(

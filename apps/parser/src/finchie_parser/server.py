@@ -14,7 +14,7 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.grpc import filters, server_interceptor
 from opentelemetry.trace import StatusCode
 
-from finchie.parser.v1 import parser_pb2, parser_pb2_grpc
+from finchie.parser.v2 import parser_pb2, parser_pb2_grpc
 from finchie_parser import telemetry
 from finchie_parser.auth import TokenInterceptor
 from finchie_parser.convert import to_open_response, to_response

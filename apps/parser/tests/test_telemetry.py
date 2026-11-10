@@ -15,8 +15,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, StatusCode
 from pdfs import email_with, text_pdf
 
-from finchie.parser.v1 import parser_pb2 as pb
-from finchie.parser.v1 import parser_pb2_grpc
+from finchie.parser.v2 import parser_pb2 as pb
+from finchie.parser.v2 import parser_pb2_grpc
 from finchie_parser import server as server_module
 from finchie_parser import telemetry
 from finchie_parser.model import ParseResult
@@ -59,9 +59,7 @@ def channel() -> Iterator[grpc.Channel]:
 
 def parse(channel: grpc.Channel, content: bytes) -> pb.ParseDocumentResponse:
     stub = parser_pb2_grpc.ParserServiceStub(channel)
-    request = pb.ParseDocumentRequest(
-        document_id="d1", filename="mail.eml", content_type="message/rfc822", content=content
-    )
+    request = pb.ParseDocumentRequest(document_id="d1", content=content)
     # SimpleSpanProcessor exports a span as it ends, which is before the server answers.
     response: pb.ParseDocumentResponse = stub.ParseDocument(request, metadata=TRACEPARENT, timeout=10)
     return response

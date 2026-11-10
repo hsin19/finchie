@@ -6,11 +6,12 @@ from decimal import Decimal
 import pycountry
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import Kind, PointsExpiry, PointsProgram, Reconciliation, Statement, Transaction
+from finchie_parser.model import Expiry, Line, LineKind
 from finchie_parser.ocr import Ocr, OcrLine
 from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.card import card_bill, card_line, check
 from finchie_parser.parsers.kinds import by_sign, card_kind, card_kind_by_words, is_charge
-from finchie_parser.parsers.points import earned, points_program, used
+from finchie_parser.parsers.points import Program, earned, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ISO_DATE, amount, iso_date, month_day, next_month_end, token
@@ -55,7 +56,7 @@ class _Row:
 
 class HsbcParser(StatementParser):
     name = "hsbc.credit_card"
-    version = "4"
+    version = "5"
     institution = "hsbc"
     # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
     sender_domains = ("hsbc.com.tw",)
@@ -84,17 +85,16 @@ class HsbcParser(StatementParser):
         else:
             warnings += _attach_descriptions(document, rows, ocr)
 
-        transactions = [self._transaction(row, closing) for row in rows]
-        computed = sum((tx.amount for tx, row in zip(transactions, rows, strict=True) if row.new_charge), Decimal(0))
-        statement = Statement(
-            institution=self.institution,
-            closing_date=closing,
-            due_date=due,
-            currency="TWD",
+        lines = [self._line(row, closing) for row in rows]
+        computed = sum((line.amount for line, row in zip(lines, rows, strict=True) if row.new_charge), Decimal(0))
+        statement = card_bill(
+            self.institution,
+            closing=closing,
+            due=due,
             total_due=numbers[_TOTAL_DUE - 1],
-            transactions=transactions,
-            reconciliation=Reconciliation(computed, numbers[_NEW_CHARGES - 1], "消費/新增款項/循環息/其他費用小計"),
-            points=_points(document, closing, warnings),
+            lines=lines,
+            checks=[check("消費/新增款項/循環息/其他費用小計", computed, numbers[_NEW_CHARGES - 1])],
+            programs=_points(document, closing, warnings),
         )
         return Parsed(statement, warnings)
 
@@ -114,26 +114,26 @@ class HsbcParser(StatementParser):
         return rows, numbers
 
     @staticmethod
-    def _transaction(row: _Row, closing: date) -> Transaction:
+    def _line(row: _Row, closing: date) -> Line:
         match = row.match
         value = amount(match["amt"])
         foreign = "cur" in match.re.groupindex
         description = row.description
         kind = card_kind(description, value) if foreign else _plain_kind(description, value, row.new_charge)
         currency = match["cur"] if foreign else ""
-        return Transaction(
-            transaction_date=month_day(match["date"], closing),
+        return card_line(
+            month_day(match["date"], closing),
+            description,
+            kind,
+            value,
             posting_date=month_day(match["posted"], closing),
-            description=description,
-            kind=kind,
-            amount=value,
             original_amount=amount(match["orig"]) if foreign and currency != "TWD" else None,
             original_currency=currency if currency != "TWD" else "",
             country=_alpha2(match["country"]) if foreign else "",
         )
 
 
-def _plain_kind(description: str, value: Decimal, new_charge: bool) -> Kind:
+def _plain_kind(description: str, value: Decimal, new_charge: bool) -> LineKind:
     # Words before sections: the payments section also lists credits that are not payments, such as the
     # annual fee's waiver.
     if kind := card_kind_by_words(description, value):
@@ -142,8 +142,8 @@ def _plain_kind(description: str, value: Decimal, new_charge: bool) -> Kind:
         return by_sign(value)
     # No such word (OCR off or too noisy): what nearly every plain row is, a payment or a foreign transaction fee.
     if not new_charge and value < 0:
-        return Kind.PAYMENT
-    return Kind.FOREIGN_TRANSACTION_FEE
+        return LineKind.PAYMENT
+    return LineKind.FOREIGN_TRANSACTION_FEE
 
 
 def _attach_descriptions(document: Document, rows: list[_Row], ocr: Ocr) -> list[str]:
@@ -169,7 +169,7 @@ def _alpha2(alpha3: str) -> str:
     return country.alpha_2 if country else ""
 
 
-def _points(document: Document, closing: date, warnings: list[str]) -> list[PointsProgram]:
+def _points(document: Document, closing: date, warnings: list[str]) -> list[Program]:
     """The travel points box, where the card has one; next month's expiring points lapse by its last day."""
     figures = [
         word
@@ -186,9 +186,8 @@ def _points(document: Document, closing: date, warnings: list[str]) -> list[Poin
         points_program(
             _POINTS_NAME,
             opening=opening,
-            lines=(earned("本期新增積分", added), used("本期使用積分(含調整)", spent)),
+            moves=(earned("本期新增積分", added), used("本期使用積分(含調整)", spent)),
             closing=balance,
-            expiries=[PointsExpiry(lapsing, next_month_end(closing))],
-            warnings=warnings,
+            expiries=[Expiry(_POINTS_NAME, lapsing, next_month_end(closing))],
         )
     ]

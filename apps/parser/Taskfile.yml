@@ -33,7 +33,7 @@ tasks:
       - uv run python -m finchie_parser.mail_filter ../backend/internal/mailfilter/gmail-filters.xml
 
   test-real:
-    desc: Parse every statement in .local/statements and assert it reconciles (ADR 0006); reads ../../.local/parser.env
+    desc: Parse every statement in .local/statements and assert every check balances (ADR 0006); reads ../../.local/parser.env
     env:
       FINCHIE_REAL_STATEMENTS_DIR: '{{.FINCHIE_REAL_STATEMENTS_DIR | default "../../.local/statements"}}'
     cmds:

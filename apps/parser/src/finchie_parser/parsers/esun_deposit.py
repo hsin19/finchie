@@ -9,10 +9,9 @@ import re
 from collections.abc import Sequence
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
-from finchie_parser.parsers.deposit import Accounts, amount_and_balance
+from finchie_parser.parsers.deposit import Accounts, Entry, amount_and_balance
 from finchie_parser.parsers.kinds import deposit_kind
 from finchie_parser.parsers.layout import rows_of
 from finchie_parser.passwords import Identity
@@ -42,7 +41,7 @@ _COLUMNS = ("交易日期", "摘要", "提款", "存款", "轉入帳戶/備註",
 
 class EsunDepositParser(StatementParser):
     name = "esun.deposit"
-    version = "2"
+    version = "3"
     institution = "esun"
     # 玉山銀行2026年09月綜合對帳單; the card bill comes from the same address.
     sender_domains = ("esunbank.com",)
@@ -69,7 +68,7 @@ class EsunDepositParser(StatementParser):
                 case _:
                     # A foreign currency account holding several currencies would need the table's currency.
                     raise LayoutError(f"lines of {number}, which holds several currencies")
-        # No opening balance: each account is reconciled from before its first line.
+        # No opening balance: each account is checked from before its first line.
         return Parsed(accounts.statement(self.institution, start, end, "存款餘額"))
 
 
@@ -92,10 +91,10 @@ def _balances(texts: Sequence[str]) -> Accounts:
     raise LayoutError("deposit section not found")
 
 
-def _lines(document: Document, pages: int) -> dict[str, list[DepositLine]]:
+def _lines(document: Document, pages: int) -> dict[str, list[Entry]]:
     """Every account's lines, in printed order. A 銀行帳號 row starts an account's table, a header row
     says where its columns are, and each row after it that starts with a date is a line."""
-    by_account: dict[str, list[DepositLine]] = {}
+    by_account: dict[str, list[Entry]] = {}
     number = ""
     columns: dict[str, Word] = {}
     for page in range(pages):
@@ -110,7 +109,7 @@ def _lines(document: Document, pages: int) -> dict[str, list[DepositLine]]:
     return by_account
 
 
-def _line(row: list[Word], columns: dict[str, Word]) -> DepositLine:
+def _line(row: list[Word], columns: dict[str, Word]) -> Entry:
     when, rest = row[0], row[1:]
     amounts = [word for word in rest if _AMOUNT.fullmatch(word.text)]
     # Amounts are right-aligned under their column's heading.
@@ -123,7 +122,7 @@ def _line(row: list[Word], columns: dict[str, Word]) -> DepositLine:
     # 對方帳號 (bank code and account) starts left of its heading; 轉入帳戶/備註 well right of its own.
     split = (columns["轉入帳戶/備註"].x0 + columns["對方帳號"].x0) / 2
     text_description = clean(" ".join(description))
-    return DepositLine(
+    return Entry(
         date=roc_date(when.text),
         description=text_description,
         amount=value,

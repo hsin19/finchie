@@ -6,10 +6,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument, deposit, row
+from fakes import FakeDocument, check, deposit, deposit_detail, row
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositStatement
+from finchie_parser.model import Balance, Statement
 from finchie_parser.parsers.fubon_deposit import FubonDepositParser
 from finchie_parser.pdf import Word
 
@@ -66,33 +66,45 @@ LINES = [
 ]
 
 
-def parse(words: list[Word]) -> DepositStatement:
+def parse(words: list[Word]) -> Statement:
     statement = deposit(FubonDepositParser().parse(FakeDocument([PAGE_1], words={1: words}), ocr=None))
     return statement
 
 
 def test_fubon_deposit_reads_the_holdings_and_the_balance_brought_forward() -> None:
     statement = parse(HOLDINGS + LINES)
-    assert (statement.period_start, statement.period_end) == (date(2026, 10, 1), date(2026, 10, 31))
+    assert (statement.period_start, statement.closing_date) == (date(2026, 10, 1), date(2026, 10, 31))
     (account,) = statement.accounts
-    assert (account.name, account.number, account.currency) == ("活期存款", NUMBER, "TWD")
-    assert (account.opening_balance, account.closing_balance) == (Decimal(30000), Decimal(16000))
+    assert (account.name, account.number) == ("活期存款", NUMBER)
+    # The balance brought forward is the one at the end of the day before the period.
+    assert account.balances == [
+        Balance("TWD", date(2026, 9, 30), Decimal(30000)),
+        Balance("TWD", date(2026, 10, 31), Decimal(16000)),
+    ]
 
 
 def test_fubon_deposit_tells_withdrawals_from_deposits_by_the_centred_headings() -> None:
     (account,) = parse(HOLDINGS + LINES).accounts
-    assert [(line.description, line.amount, line.counterparty, line.balance) for line in account.lines] == [
+    details = [(line, deposit_detail(line)) for line in account.lines]
+    assert [(line.description, line.amount, d.counterparty, d.balance) for line, d in details] == [
         ("行動自轉", Decimal(-20000), "00000000012345", Decimal(10000)),
         ("跨行轉入", Decimal(6000), "", Decimal(16000)),
     ]
 
 
-def test_fubon_deposit_reconciles_from_the_printed_opening_balance() -> None:
-    (account,) = parse(HOLDINGS + LINES).accounts
-    assert account.reconciliation is not None
-    assert account.reconciliation.balanced
+def test_fubon_deposit_checks_the_lines_from_the_printed_opening_balance() -> None:
+    name = f"活期存款 {NUMBER} TWD 餘額"
+    assert check(parse(HOLDINGS + LINES), name).balanced
     off = [Word("31,000.00", w.x0, w.x1, w.top) if w.text == "30,000.00" else w for w in LINES]
-    assert not parse(HOLDINGS + off).balanced
+    statement = parse(HOLDINGS + off)
+    # From the opening balance, the first line's running balance is the first that no longer adds up.
+    (only,) = statement.checks
+    assert (only.name, only.computed, only.stated) == (
+        f"活期存款 {NUMBER} TWD 2026-10-01 行動自轉 的餘額",
+        Decimal(11000),
+        Decimal(10000),
+    )
+    assert not statement.balanced
 
 
 def test_fubon_deposit_refuses_lines_of_an_account_the_holdings_do_not_list() -> None:

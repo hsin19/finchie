@@ -12,10 +12,9 @@ from collections.abc import Sequence
 from decimal import Decimal
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
-from finchie_parser.parsers.deposit import Accounts, amounts_by_column, moved_in
+from finchie_parser.parsers.deposit import Accounts, Entry, amounts_by_column, moved_in
 from finchie_parser.parsers.kinds import deposit_kind
 from finchie_parser.parsers.layout import nearest_column, rows_of
 from finchie_parser.passwords import Identity
@@ -38,7 +37,7 @@ def _money(text: str) -> Decimal:
 
 class TaishinDepositParser(StatementParser):
     name = "taishin.deposit"
-    version = "2"
+    version = "3"
     institution = "taishin"
     # 台新銀行綜合對帳單 2026年9月份; the card bill comes from the same address.
     sender_domains = ("taishinbank.com.tw",)
@@ -56,7 +55,7 @@ class TaishinDepositParser(StatementParser):
         for page in range(1, document.page_count()):
             reader.read_page(document.page_words(page))
         start, end = iso_date(period.group(1)), iso_date(period.group(2))
-        # No opening balance: each account is reconciled from before its first line.
+        # No opening balance: each account is checked from before its first line.
         return Parsed(reader.accounts.statement(self.institution, start, end, "帳戶餘額"))
 
 
@@ -155,7 +154,7 @@ class _Reader:
         description = clean(" ".join(w.text for w in text if w.x1 <= next_column.x0))
         memo = clean(" ".join(w.text for w in text if w.x0 > columns["帳戶餘額"].x1))
         account.lines.append(
-            DepositLine(
+            Entry(
                 date=iso_date(when.text),
                 description=description,
                 amount=moved_in(by_column, "存入金額", "支出金額"),

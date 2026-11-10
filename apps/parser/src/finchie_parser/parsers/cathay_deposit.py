@@ -14,10 +14,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
-from finchie_parser.parsers.deposit import Accounts, amount_and_balance
+from finchie_parser.parsers.deposit import Accounts, Entry, amount_and_balance
 from finchie_parser.parsers.kinds import deposit_kind
 from finchie_parser.parsers.layout import rows_of
 from finchie_parser.passwords import Identity
@@ -37,12 +36,12 @@ _SUBROW_REACH = 10.0
 @dataclass
 class _Entry:
     top: float
-    line: DepositLine
+    line: Entry
 
 
 class CathayDepositParser(StatementParser):
     name = "cathay.deposit"
-    version = "2"
+    version = "3"
     institution = "cathay"
     # 【國泰世華銀行】電子存摺, from service@pxbillrc01.cathaybk.com.tw.
     sender_domains = ("cathaybk.com.tw",)
@@ -62,7 +61,7 @@ class CathayDepositParser(StatementParser):
         header = find(_ACCOUNT, texts[:1], "account number and type")
         number, account_name = header.group(1), clean(header.group(2))
 
-        lines: list[DepositLine] = []
+        lines: list[Entry] = []
         for page in range(1, len(texts)):
             for page_number in _PAGE_ACCOUNT.findall(texts[page]):
                 if page_number != number:
@@ -82,7 +81,7 @@ class CathayDepositParser(StatementParser):
         return Parsed(accounts.statement(self.institution, first.date, last.date, "餘額"))
 
 
-def _read_page(words: Sequence[Word]) -> list[DepositLine]:
+def _read_page(words: Sequence[Word]) -> list[Entry]:
     columns: dict[str, Word] = {}
     info_x0: float | None = None
     entries: list[_Entry] = []
@@ -119,9 +118,7 @@ def _main_row(row: list[Word], columns: dict[str, Word]) -> _Entry:
     when = row[1]
     amounts = [w for w in row[2:] if _AMOUNT.fullmatch(w.text)]
     value, balance = amount_and_balance(amounts, columns["提出"], columns["存入"], when.text)
-    return _Entry(
-        top=row[0].top, line=DepositLine(date=iso_date(when.text), description="", amount=value, balance=balance)
-    )
+    return _Entry(top=row[0].top, line=Entry(date=iso_date(when.text), description="", amount=value, balance=balance))
 
 
 def _attach_subrows(entries: list[_Entry], subrows: list[tuple[float, list[Word]]], split_x: float) -> None:

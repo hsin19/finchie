@@ -1,11 +1,11 @@
 import re
 
-from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
+from finchie_parser.model import Expiry, Line, LineKind
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.card import card_bill, card_line, check, new_charges
 from finchie_parser.parsers.kinds import card_kind
 from finchie_parser.parsers.points import adjusted, earned, points_program, used
-from finchie_parser.parsers.reconcile import sum_new_charges
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, amount, clean, either_date, find, month_day, month_end
@@ -43,7 +43,7 @@ _POINTS_EXPIRING = re.compile(r"(?P<y>\d{4})/(?P<m>\d{1,2})共(?P<n>[\d,]+)點")
 
 class EsunParser(StatementParser):
     name = "esun.credit_card"
-    version = "4"
+    version = "5"
     institution = "esun"
     # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
     # comes from the same address.
@@ -64,9 +64,9 @@ class EsunParser(StatementParser):
         subtotal = amount(find(_SUBTOTAL, texts, "本期合計").group(1))
         total_due = amount(find(_TOTAL_DUE, texts, "本期應繳總金額").group(1))
 
-        transactions: list[Transaction] = []
+        lines: list[Line] = []
         program: re.Match[str] | None = None
-        expiries: list[PointsExpiry] = []
+        expiries: list[Expiry] = []
         section = ""
         card = ""
         for line in (line for text in texts for line in text.splitlines()):
@@ -74,7 +74,7 @@ class EsunParser(StatementParser):
                 program = match
             elif "即將到期" in line and _POINTS_NAME in line:
                 expiries = [
-                    PointsExpiry(amount(m["n"]), month_end(int(m["y"]), int(m["m"])))
+                    Expiry(_POINTS_NAME, amount(m["n"]), month_end(int(m["y"]), int(m["m"])))
                     for m in _POINTS_EXPIRING.finditer(line)
                 ]
             elif _FEES.match(line):
@@ -86,12 +86,9 @@ class EsunParser(StatementParser):
             elif match := _CARD.match(line):
                 card = match.group(1)
             elif match := _PAYMENT.match(line):
-                transactions.append(
-                    Transaction(
-                        transaction_date=month_day(match["date"], closing),
-                        description=clean(match["desc"]),
-                        kind=Kind.PAYMENT,
-                        amount=amount(match["amt"]),
+                lines.append(
+                    card_line(
+                        month_day(match["date"], closing), clean(match["desc"]), LineKind.PAYMENT, amount(match["amt"])
                     )
                 )
             elif section and (match := _ROW.match(line)):
@@ -99,45 +96,42 @@ class EsunParser(StatementParser):
                 value = amount(match["amt"])
                 # Foreign merchants that bill in TWD print TWD as the original currency too.
                 foreign = bool(match["cur"]) and match["cur"] != "TWD"
-                transactions.append(
-                    Transaction(
-                        transaction_date=month_day(match["date"], closing),
+                lines.append(
+                    card_line(
+                        month_day(match["date"], closing),
+                        description,
+                        card_kind(description, value),
+                        value,
                         posting_date=month_day(match["posted"], closing),
-                        description=description,
-                        kind=card_kind(description, value),
-                        amount=value,
                         original_amount=amount(match["orig"]) if foreign else None,
                         original_currency=match["cur"] if foreign else "",
                         card_last4=card if section == "purchases" else "",
                     )
                 )
 
-        warnings: list[str] = []
-        points = []
+        programs = []
         if program:
-            points.append(
+            programs.append(
                 points_program(
                     _POINTS_NAME,
                     opening=amount(program["opening"]),
-                    lines=(
+                    moves=(
                         earned("本期加點", amount(program["added"])),
                         adjusted("本期調整點數", amount(program["adjusted"] or "0")),
                         used("本期扣點", amount(program["used"])),
                     ),
                     closing=amount(program["closing"]),
                     expiries=expiries,
-                    warnings=warnings,
                 )
             )
 
-        statement = Statement(
-            institution=self.institution,
-            closing_date=closing,
-            due_date=due,
-            currency="TWD",
+        statement = card_bill(
+            self.institution,
+            closing=closing,
+            due=due,
             total_due=total_due,
-            transactions=transactions,
-            reconciliation=Reconciliation(sum_new_charges(transactions), subtotal, "本期合計"),
-            points=points,
+            lines=lines,
+            checks=[check("本期合計", new_charges(lines), subtotal)],
+            programs=programs,
         )
-        return Parsed(statement, warnings)
+        return Parsed(statement)

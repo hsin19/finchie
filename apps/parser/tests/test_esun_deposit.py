@@ -5,10 +5,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument, deposit, row
+from fakes import FakeDocument, check, deposit, deposit_detail, row
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositStatement
+from finchie_parser.model import Balance, Check, Statement
 from finchie_parser.parsers.esun_deposit import EsunDepositParser
 from finchie_parser.pdf import Word
 
@@ -64,52 +64,56 @@ CARD_OUT = row(
 )
 
 
-def parse(*rows: list[Word]) -> DepositStatement:
+def parse(*rows: list[Word]) -> Statement:
     document = FakeDocument([PAGE_1, PAGE_2], words={1: table(*rows)})
     statement = deposit(EsunDepositParser().parse(document, ocr=None))
     return statement
 
 
-def test_esun_deposit_reads_the_period_and_every_account_with_its_balance() -> None:
+def test_esun_deposit_reads_the_period_and_every_account_with_its_closing_balance() -> None:
     statement = parse(ATM_IN, CARD_OUT)
-    assert (statement.institution, statement.period_start, statement.period_end) == (
+    assert (statement.institution, statement.period_start, statement.closing_date) == (
         "esun",
         date(2026, 9, 1),
         date(2026, 9, 30),
     )
-    assert [(a.name, a.number, a.currency, a.closing_balance) for a in statement.accounts] == [
-        ("臺幣活存", "1234567***890", "TWD", Decimal("1200.00")),
-        ("外幣活存", "7654321***098", "USD", Decimal("12.34")),
+    # No opening balance printed: only the closing one, on the statement's last day.
+    assert [(a.name, a.number, a.balances) for a in statement.accounts] == [
+        ("臺幣活存", "1234567***890", [Balance("TWD", date(2026, 9, 30), Decimal("1200.00"))]),
+        ("外幣活存", "7654321***098", [Balance("USD", date(2026, 9, 30), Decimal("12.34"))]),
     ]
 
 
 def test_esun_deposit_tells_withdrawals_from_deposits_by_their_column() -> None:
     lines = parse(ATM_IN, CARD_OUT).accounts[0].lines
-    assert [(line.date, line.description, line.amount, line.balance) for line in lines] == [
-        (date(2026, 9, 3), "ATM跨行轉", Decimal("500.00"), Decimal("1500.00")),
-        (date(2026, 9, 10), "玉山卡款扣繳", Decimal("-300.00"), Decimal("1200.00")),
+    assert [(line.date, line.unit, line.description, line.amount, deposit_detail(line).balance) for line in lines] == [
+        (date(2026, 9, 3), "TWD", "ATM跨行轉", Decimal("500.00"), Decimal("1500.00")),
+        (date(2026, 9, 10), "TWD", "玉山卡款扣繳", Decimal("-300.00"), Decimal("1200.00")),
     ]
 
 
 def test_esun_deposit_keeps_the_note_and_the_other_sides_account_apart() -> None:
-    transfer, card = parse(ATM_IN, CARD_OUT).accounts[0].lines
+    transfer, card = (deposit_detail(line) for line in parse(ATM_IN, CARD_OUT).accounts[0].lines)
     assert (transfer.memo, transfer.counterparty) == ("永*銀行", "807 0000000000***123")
     assert (card.memo, card.counterparty) == ("王*明", "")
 
 
-def test_esun_deposit_reconciles_through_every_running_balance() -> None:
+def test_esun_deposit_checks_an_account_with_lines_through_every_running_balance() -> None:
     statement = parse(ATM_IN, CARD_OUT)
-    twd, usd = statement.accounts
-    assert twd.reconciliation is not None
-    assert twd.reconciliation.balanced
-    assert usd.lines == []
-    assert usd.reconciliation is None
+    # The US$ account has no lines and no opening balance: nothing to check it against.
+    assert statement.accounts[1].lines == []
+    assert statement.checks == [
+        Check("臺幣活存 1234567***890 TWD 存款餘額", "TWD", Decimal("1200.00"), Decimal("1200.00"))
+    ]
     assert statement.balanced
 
 
 def test_esun_deposit_flags_lines_that_do_not_reach_the_printed_balance() -> None:
     # The withdrawal dropped: the deposit's running balance no longer leads to the closing balance.
-    assert not parse(ATM_IN).balanced
+    statement = parse(ATM_IN)
+    closing = check(statement, "臺幣活存 1234567***890 TWD 存款餘額")
+    assert (closing.computed, closing.stated, closing.balanced) == (Decimal("1500.00"), Decimal("1200.00"), False)
+    assert not statement.balanced
 
 
 def test_esun_deposit_refuses_lines_of_an_account_it_has_no_balance_for() -> None:

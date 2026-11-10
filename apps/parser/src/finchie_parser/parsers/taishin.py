@@ -1,11 +1,11 @@
 import re
 
-from finchie_parser.model import Kind, PointsExpiry, PointsProgram, Reconciliation, Statement, Transaction
+from finchie_parser.model import Expiry, Line, LineKind
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.card import card_bill, card_line, check, new_charges
 from finchie_parser.parsers.kinds import card_kind
-from finchie_parser.parsers.points import adjusted, earned, points_program, used
-from finchie_parser.parsers.reconcile import sum_new_charges
+from finchie_parser.parsers.points import Program, adjusted, earned, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ROC_DATE, amount, clean, find, roc_date
@@ -42,7 +42,7 @@ _POINTS_EXPIRING = re.compile(rf"到期提醒[：:】]?\s*您有(?P<n>[\d,]+)點
 
 class TaishinParser(StatementParser):
     name = "taishin.credit_card"
-    version = "7"
+    version = "8"
     institution = "taishin"
     # 台新信用卡電子帳單 2026年10月; the combined (deposit) statement, 台新銀行綜合對帳單 2026年9月份,
     # comes from the same address.
@@ -61,12 +61,12 @@ class TaishinParser(StatementParser):
         texts = document.page_texts()
         closing = roc_date(find(_CLOSING, texts, "帳單結帳日").group(1))
         due = roc_date(find(_DUE, texts, "繳款截止日").group(1))
-        new_charges = amount(find(_NEW_CHARGES, texts, "本期新增款項").group(1))
+        stated_new_charges = amount(find(_NEW_CHARGES, texts, "本期新增款項").group(1))
         total_due = amount(find(_TOTAL_DUE, texts, "本期累計應繳金額").group(1))
 
         # (page index, line): a wrapped description never continues across a page break.
         lines = [(page, line) for page, text in enumerate(texts) for line in text.splitlines() if line.strip()]
-        transactions: list[Transaction] = []
+        transactions: list[Line] = []
         card = ""
         i = 0
         while i < len(lines):
@@ -86,35 +86,33 @@ class TaishinParser(StatementParser):
                 # Payments are told by their words: 扣繳, 自動扣款, and older ones (ADR 0013).
                 kind = card_kind(description, value)
                 transactions.append(
-                    Transaction(
-                        transaction_date=roc_date(match["date"]),
+                    card_line(
+                        roc_date(match["date"]),
+                        description,
+                        kind,
+                        value,
                         posting_date=roc_date(match["posted"]),
-                        description=description,
-                        kind=kind,
-                        amount=value,
                         original_amount=amount(match["orig"]) if match["orig"] else None,
                         original_currency=match["cur"] or "",
                         country=match["fxcountry"] or match["country"] or "",
-                        card_last4="" if kind is Kind.PAYMENT else card,
+                        card_last4="" if kind is LineKind.PAYMENT else card,
                     )
                 )
             i += 1
 
-        warnings: list[str] = []
-        statement = Statement(
-            institution=self.institution,
-            closing_date=closing,
-            due_date=due,
-            currency="TWD",
+        statement = card_bill(
+            self.institution,
+            closing=closing,
+            due=due,
             total_due=total_due,
-            transactions=transactions,
-            reconciliation=Reconciliation(sum_new_charges(transactions), new_charges, "本期新增款項"),
-            points=_points(texts, warnings),
+            lines=transactions,
+            checks=[check("本期新增款項", new_charges(transactions), stated_new_charges)],
+            programs=_points(texts),
         )
-        return Parsed(statement, warnings)
+        return Parsed(statement)
 
 
-def _points(texts: list[str], warnings: list[str]) -> list[PointsProgram]:
+def _points(texts: list[str]) -> list[Program]:
     """Each column of the points table with a figure in it, as a program of its own."""
     rows: dict[str, tuple[str, str]] = {}
     first_name = _POINTS_NAME
@@ -134,21 +132,20 @@ def _points(texts: list[str], warnings: list[str]) -> list[PointsProgram]:
         figures = {label: values[column] for label, values in rows.items()}
         if any(value == "**" for value in figures.values()):
             continue
-        expiries = []
+        expiries: list[Expiry] = []
         if column == 0 and expiring:
-            expiries.append(PointsExpiry(amount(expiring["n"]), roc_date(expiring["date"])))
+            expiries.append(Expiry(name, amount(expiring["n"]), roc_date(expiring["date"])))
         programs.append(
             points_program(
                 name,
                 opening=amount(figures["上期結餘點數/里數"]),
-                lines=(
+                moves=(
                     earned("新增回饋", amount(figures["新增回饋"])),
                     adjusted("活動回饋/調整", amount(figures["活動回饋/調整"])),
                     used("本期使用點數/里數", amount(figures["本期使用點數/里數"])),
                 ),
                 closing=amount(figures["本期結餘回饋"]),
                 expiries=expiries,
-                warnings=warnings,
             )
         )
     return programs

@@ -11,8 +11,8 @@ from grpc_health.v1 import health_pb2, health_pb2_grpc
 from pdfs import PNG, blank_pdf, email_with, statement_email, text_pdf
 from pydantic import SecretStr
 
-from finchie.parser.v1 import parser_pb2 as pb
-from finchie.parser.v1 import parser_pb2_grpc
+from finchie.parser.v2 import parser_pb2 as pb
+from finchie.parser.v2 import parser_pb2_grpc
 from finchie_parser import server as server_module
 from finchie_parser.errors import UnsupportedDocumentError
 from finchie_parser.model import ParseResult
@@ -86,6 +86,14 @@ def test_a_chosen_password_for_an_unknown_institution_stops_the_server_from_star
     settings = Settings(pdf_passwords={"other": "abc"})
     with pytest.raises(ValueError, match="PARSER_PDF_PASSWORDS__OTHER"):
         server_module.build_server(settings, None, "127.0.0.1:0", parsers=[FakeParser()])
+
+
+def test_only_the_v2_contract_is_served(channel: grpc.Channel) -> None:
+    assert server_module.SERVICE_NAME == "finchie.parser.v2.ParserService"
+    retired = channel.unary_unary("/finchie.parser.v1.ParserService/DescribeParsers")
+    with pytest.raises(grpc.RpcError) as error:
+        retired(b"", timeout=5)
+    assert error.value.code() is grpc.StatusCode.UNIMPLEMENTED
 
 
 def test_health_reports_serving(channel: grpc.Channel) -> None:

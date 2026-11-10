@@ -15,10 +15,9 @@ import re
 from collections.abc import Sequence
 
 from finchie_parser.errors import ConfigurationError, LayoutError
-from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr, OcrLine
 from finchie_parser.parsers.base import Parsed, StatementParser
-from finchie_parser.parsers.deposit import Account, Accounts, amounts_by_column, moved_in
+from finchie_parser.parsers.deposit import Account, Accounts, Entry, amounts_by_column, moved_in
 from finchie_parser.parsers.kinds import deposit_kind
 from finchie_parser.parsers.layout import rows_of
 from finchie_parser.passwords import Identity
@@ -40,7 +39,7 @@ _CURRENCIES = {"美元": "USD", "日圓": "JPY", "日幣": "JPY", "歐元": "EUR
 
 class CtbcDepositParser(StatementParser):
     name = "ctbc.deposit"
-    version = "3"
+    version = "4"
     institution = "ctbc"
     # 中國信託銀行電子對帳單 11510, from ebill@estats.ctbcbank.com.
     sender_domains = ("ctbcbank.com",)
@@ -158,7 +157,7 @@ class _Reader:
             line.text for line in beside if description_column is None or abs(line.left - description_column.left) <= 40
         )
         self.current.lines.append(
-            DepositLine(
+            Entry(
                 date=iso_date(row[0].text),
                 description=description,
                 amount=moved_in(by_column, "存入", "支出"),

@@ -3,12 +3,12 @@ from datetime import date
 from decimal import Decimal
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
+from finchie_parser.model import Expiry, Line, LineKind
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.card import card_bill, card_line, check, new_charges, payments
 from finchie_parser.parsers.kinds import card_kind
 from finchie_parser.parsers.points import earned, points_program, used
-from finchie_parser.parsers.reconcile import sum_new_charges
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import (
@@ -60,7 +60,7 @@ _PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?)
 
 class CathayParser(StatementParser):
     name = "cathay.credit_card"
-    version = "6"
+    version = "7"
     institution = "cathay"
     sender_domains = ("cathaybk.com.tw",)
     subject_terms = ("信用卡", "電子帳單")
@@ -81,18 +81,18 @@ class CathayParser(StatementParser):
         due = roc_date(find(_DUE, texts, "due date").group(1))
         total_due = amount(find(_TOTAL_DUE, texts, "本期應繳總額").group(1))
         # One subtotal per card holder (正卡, 附卡). None until one is read: taking a missing subtotal as
-        # zero would let a layout change that also hides every row reconcile as balanced and empty.
-        new_charges: Decimal | None = None
-        payments: Decimal | None = None
+        # zero would let a layout change that also hides every row check as balanced and empty.
+        stated_new_charges: Decimal | None = None
+        stated_payments: Decimal | None = None
 
-        transactions: list[Transaction] = []
-        programs: list[re.Match[str]] = []
-        expiring: dict[str, list[PointsExpiry]] = {}
+        transactions: list[Line] = []
+        program_rows: list[re.Match[str]] = []
+        expiring: dict[str, list[Expiry]] = {}
         for line in (line for text in texts for line in text.splitlines()):
             if match := _NEW_CHARGES.match(line):
-                new_charges = (new_charges or Decimal(0)) + amount(match.group(1))
+                stated_new_charges = (stated_new_charges or Decimal(0)) + amount(match.group(1))
             elif match := _PAYMENTS.match(line):
-                payments = (payments or Decimal(0)) + amount(match.group(1))
+                stated_payments = (stated_payments or Decimal(0)) + amount(match.group(1))
             elif match := _ROW.match(line):
                 foreign = match["cur"] != "TWD"
                 transactions.append(
@@ -109,71 +109,68 @@ class CathayParser(StatementParser):
                 transactions.append(_transaction(match, closing, card_last4=match["card"]))
             elif match := _PAYMENT.match(line):
                 # No card: a payment, whatever its words.
-                transactions.append(_transaction(match, closing, kind=Kind.PAYMENT))
+                transactions.append(_transaction(match, closing, kind=LineKind.PAYMENT))
             elif match := _POINTS.match(line):
-                programs.append(match)
+                program_rows.append(match)
             elif match := _POINTS_EXPIRING.search(line):
                 by = roc_date(f"{match['y']}/{match['m']}/{match['d']}")
                 expiring[match["name"]] = [
-                    PointsExpiry(amount(match["month"]), month_end(closing.year, closing.month)),
-                    PointsExpiry(amount(match["total"]), by),
+                    Expiry(match["name"], amount(match["month"]), month_end(closing.year, closing.month)),
+                    Expiry(match["name"], amount(match["total"]), by),
                 ]
 
-        if new_charges is None:
+        if stated_new_charges is None:
             raise LayoutError("statement field not found: 本期消費")
-        warnings: list[str] = []
-        paid = sum((tx.amount for tx in transactions if tx.kind is Kind.PAYMENT), Decimal(0))
+        checks = [check("本期消費", new_charges(transactions), stated_new_charges)]
         # Payments are not part of the new charges, so only this subtotal shows a payment line was missed.
-        if payments is not None and paid != payments:
-            warnings.append(f"payment lines add up to {paid}, but 繳款小計 is {payments}")
+        if stated_payments is not None:
+            checks.append(check("繳款小計", payments(transactions), stated_payments))
 
-        points = [
+        programs = [
             points_program(
                 m["name"],
                 opening=amount(m["opening"]),
-                lines=(
+                moves=(
                     earned("本期新增/扣除", amount(m["added"])),
                     earned("本期贈送", amount(m["gift"])),
                     used("本期兌/轉換", amount(m["used"])),
                 ),
                 closing=amount(m["closing"]),
                 expiries=expiring.get(m["name"], ()),
-                warnings=warnings,
             )
-            for m in programs
+            for m in program_rows
         ]
 
-        statement = Statement(
-            institution=self.institution,
-            closing_date=closing,
-            due_date=due,
-            currency="TWD",
+        statement = card_bill(
+            self.institution,
+            closing=closing,
+            due=due,
             total_due=total_due,
-            transactions=transactions,
-            reconciliation=Reconciliation(sum_new_charges(transactions), new_charges, "本期消費"),
-            points=points,
+            lines=transactions,
+            checks=checks,
+            programs=programs,
         )
-        return Parsed(statement, warnings)
+        return Parsed(statement)
 
 
 def _transaction(
     match: re.Match[str],
     closing: date,
     *,
-    kind: Kind | None = None,
+    kind: LineKind | None = None,
     original_amount: Decimal | None = None,
     original_currency: str = "",
     country: str = "",
     card_last4: str = "",
-) -> Transaction:
+) -> Line:
     value = amount(match["amt"])
     description = clean(match["desc"])
-    return Transaction(
-        transaction_date=month_day(match["date"], closing),
+    return card_line(
+        month_day(match["date"], closing),
+        description,
+        kind or card_kind(description, value),
+        value,
         posting_date=month_day(match["posted"], closing),
-        description=description,
-        kind=kind or card_kind(description, value),
-        amount=value,
         original_amount=original_amount,
         original_currency=original_currency,
         country=country,

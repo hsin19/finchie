@@ -3,9 +3,9 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument, baseline, card
+from fakes import FakeDocument, account, baseline, card, card_detail, card_lines, check
 
-from finchie_parser.model import Kind, Statement
+from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LineKind, Statement
 from finchie_parser.ocr import OcrLine
 from finchie_parser.parsers import Parsed
 from finchie_parser.parsers.hsbc import HsbcParser
@@ -62,40 +62,42 @@ OCR = {
 }
 
 
+NEW_CHARGES = "消費/新增款項/循環息/其他費用小計"
+
+
 def parse(ocr: LineOcr | None) -> Parsed:
     return HsbcParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=ocr)
 
 
 def test_hsbc_reads_unlabelled_statement_fields() -> None:
     statement = card(parse(LineOcr(OCR)))
-    assert statement.due_date == date(2026, 5, 8)
     assert statement.closing_date == date(2026, 4, 21)
-    assert statement.reconciliation.stated == Decimal(12162)
-    assert statement.total_due == Decimal(11822)
+    assert statement.card_bill == CardBill(date(2026, 5, 8), "TWD", Decimal(11822))
+    assert check(statement, NEW_CHARGES).stated == Decimal(12162)
 
 
 def test_hsbc_reconciles_new_charges_only() -> None:
     # The payment and the refund belong to the previous balance, not to this period's charges.
-    reconciliation = card(parse(LineOcr(OCR))).reconciliation
-    assert reconciliation.balanced
-    assert reconciliation.computed == Decimal(12162)
+    new_charges = check(card(parse(LineOcr(OCR))), NEW_CHARGES)
+    assert new_charges.balanced
+    assert new_charges.computed == Decimal(12162)
 
 
 def test_hsbc_takes_descriptions_from_ocr_and_classifies_with_them() -> None:
-    rows = [(tx.description, tx.kind, tx.amount) for tx in card(parse(LineOcr(OCR))).transactions]
+    rows = [(line.description, line.kind, line.amount) for line in card_lines(card(parse(LineOcr(OCR))))]
     assert rows == [
-        ("全國繳費網繳款", Kind.PAYMENT, Decimal(-3000)),
-        ("RefundTaxFreeShop", Kind.REFUND, Decimal(-340)),
-        ("年費", Kind.ANNUAL_FEE, Decimal(8000)),
-        ("國外交易手續費CAFEDEFLORE", Kind.FOREIGN_TRANSACTION_FEE, Decimal(30)),
-        ("CAFEDEFLOREPARIS", Kind.PURCHASE, Decimal(2000)),
-        ("RAMENSHOPTOKYO", Kind.PURCHASE, Decimal(2100)),
-        ("國外交易手續費RAMENSHOP", Kind.FOREIGN_TRANSACTION_FEE, Decimal(32)),
+        ("全國繳費網繳款", LineKind.PAYMENT, Decimal(-3000)),
+        ("RefundTaxFreeShop", LineKind.REFUND, Decimal(-340)),
+        ("年費", LineKind.ANNUAL_FEE, Decimal(8000)),
+        ("國外交易手續費CAFEDEFLORE", LineKind.FOREIGN_TRANSACTION_FEE, Decimal(30)),
+        ("CAFEDEFLOREPARIS", LineKind.PURCHASE, Decimal(2000)),
+        ("RAMENSHOPTOKYO", LineKind.PURCHASE, Decimal(2100)),
+        ("國外交易手續費RAMENSHOP", LineKind.FOREIGN_TRANSACTION_FEE, Decimal(32)),
     ]
 
 
 def test_hsbc_maps_countries_and_foreign_amounts() -> None:
-    by_description = {tx.description: tx for tx in card(parse(LineOcr(OCR))).transactions}
+    by_description = {line.description: card_detail(line) for line in card_lines(card(parse(LineOcr(OCR))))}
     cafe = by_description["CAFEDEFLOREPARIS"]
     assert (cafe.country, cafe.original_currency, cafe.original_amount) == ("FR", "EUR", Decimal("60.00"))
     assert by_description["RAMENSHOPTOKYO"].country == "JP"
@@ -104,8 +106,8 @@ def test_hsbc_maps_countries_and_foreign_amounts() -> None:
 
 def test_hsbc_without_ocr_still_reconciles_and_warns() -> None:
     parsed = parse(None)
-    assert card(parsed).reconciliation.balanced
-    assert all(tx.description == "" for tx in card(parsed).transactions)
+    assert card(parsed).balanced
+    assert all(line.description == "" for line in card_lines(card(parsed)))
     assert parsed.warnings
 
 
@@ -113,7 +115,7 @@ def test_hsbc_warns_about_rows_ocr_missed() -> None:
     partial = {1: {n: text for n, text in OCR[1].items() if n != 9}}
     parsed = parse(LineOcr(partial))
     assert len(parsed.warnings) == 1
-    assert card(parsed).reconciliation.balanced
+    assert card(parsed).balanced
 
 
 # The payments section lists a payment and the annual fee's waiver; the new charges the annual fee,
@@ -152,25 +154,27 @@ def parse_charges(ocr: LineOcr | None) -> Statement:
 
 def test_hsbc_classifies_plain_rows_by_the_words_in_their_description() -> None:
     statement = parse_charges(LineOcr(CHARGES_OCR))
-    assert [(tx.description, tx.kind, tx.amount) for tx in statement.transactions] == [
-        ("全國繳費網繳款", Kind.PAYMENT, Decimal(-3000)),
-        ("年費減免", Kind.ANNUAL_FEE, Decimal(-1800)),
-        ("年費", Kind.ANNUAL_FEE, Decimal(1800)),
-        ("循環信用利息", Kind.PURCHASE, Decimal(150)),
-        ("違約金", Kind.PURCHASE, Decimal(300)),
-        ("現金回饋", Kind.REBATE, Decimal(-50)),
-        ("國外交易手續費CAFEDEFLORE", Kind.FOREIGN_TRANSACTION_FEE, Decimal(32)),
+    assert [(line.description, line.kind, line.amount) for line in card_lines(statement)] == [
+        ("全國繳費網繳款", LineKind.PAYMENT, Decimal(-3000)),
+        ("年費減免", LineKind.ANNUAL_FEE, Decimal(-1800)),
+        ("年費", LineKind.ANNUAL_FEE, Decimal(1800)),
+        ("循環信用利息", LineKind.PURCHASE, Decimal(150)),
+        ("違約金", LineKind.PURCHASE, Decimal(300)),
+        ("現金回饋", LineKind.REBATE, Decimal(-50)),
+        ("國外交易手續費CAFEDEFLORE", LineKind.FOREIGN_TRANSACTION_FEE, Decimal(32)),
     ]
-    assert statement.reconciliation.balanced
-    assert statement.reconciliation.computed == Decimal(2232)
+    assert check(statement, NEW_CHARGES).balanced
+    assert check(statement, NEW_CHARGES).computed == Decimal(2232)
 
 
 @pytest.mark.parametrize("ocr", [None, LineOcr({1: dict.fromkeys(CHARGES_OCR[1], "#?!")})], ids=["no OCR", "noisy"])
 def test_hsbc_without_readable_words_keeps_payments_and_foreign_transaction_fees(ocr: LineOcr | None) -> None:
     statement = parse_charges(ocr)
-    assert [tx.kind for tx in statement.transactions] == [Kind.PAYMENT] * 2 + [Kind.FOREIGN_TRANSACTION_FEE] * 5
-    assert statement.reconciliation.balanced
-    assert statement.reconciliation.computed == Decimal(2232)
+    assert [line.kind for line in card_lines(statement)] == [LineKind.PAYMENT] * 2 + [
+        LineKind.FOREIGN_TRANSACTION_FEE
+    ] * 5
+    assert check(statement, NEW_CHARGES).balanced
+    assert check(statement, NEW_CHARGES).computed == Decimal(2232)
 
 
 # Page 1's summary as positioned words: its own figures at the left, the travel points box at the right,
@@ -189,17 +193,34 @@ def summary_words(*points: str) -> list[Word]:
 def test_hsbc_reads_its_travel_points_box_by_position() -> None:
     document = FakeDocument([PAGE_1, PAGE_2], words={0: summary_words("10,770", "18,077", "0", "28,847", "120")})
     parsed = HsbcParser().parse(document, ocr=None)
-    [program] = card(parsed).points
-    assert (program.name, program.closing) == ("滙豐旅遊積分", Decimal(28847))
-    assert [(line.label, line.amount) for line in program.lines] == [("本期新增積分", Decimal(18077))]
+    statement = card(parsed)
+    points = account(statement, AccountKind.POINTS)
+    assert points.balances == [Balance("滙豐旅遊積分", date(2026, 4, 21), Decimal(28847))]
+    assert [(line.description, line.amount) for line in points.lines] == [("本期新增積分", Decimal(18077))]
     # Next month's expiring points, by its last day.
-    assert [(e.amount, e.by) for e in program.expiries] == [(Decimal(120), date(2026, 5, 31))]
+    assert points.expiries == [Expiry("滙豐旅遊積分", Decimal(120), date(2026, 5, 31))]
+    assert check(statement, "滙豐旅遊積分").balanced
+    assert not any("滙豐旅遊積分" in w for w in parsed.warnings)
+
+
+def test_hsbc_reports_travel_points_that_do_not_add_up_as_an_unbalanced_check() -> None:
+    document = FakeDocument([PAGE_1, PAGE_2], words={0: summary_words("10,770", "18,077", "0", "28,000", "120")})
+    parsed = HsbcParser().parse(document, ocr=None)
+    program = check(card(parsed), "滙豐旅遊積分")
+    assert (program.unit, program.computed, program.stated, program.balanced) == (
+        "滙豐旅遊積分",
+        Decimal(28847),
+        Decimal(28000),
+        False,
+    )
     assert not any("滙豐旅遊積分" in w for w in parsed.warnings)
 
 
 def test_hsbc_card_without_a_points_box_has_no_points_and_a_broken_box_is_a_warning() -> None:
-    assert card(HsbcParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None)).points == []
+    statement = card(HsbcParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None))
+    assert [a.kind for a in statement.accounts] == [AccountKind.CREDIT_CARD]
+    assert [c.name for c in statement.checks] == [NEW_CHARGES]
     broken = FakeDocument([PAGE_1, PAGE_2], words={0: summary_words("10,770", "18,077", "0")})
     parsed = HsbcParser().parse(broken, ocr=None)
-    assert card(parsed).points == []
+    assert [a.kind for a in card(parsed).accounts] == [AccountKind.CREDIT_CARD]
     assert "滙豐旅遊積分: 3 figures in its box, not 5; points not read" in parsed.warnings

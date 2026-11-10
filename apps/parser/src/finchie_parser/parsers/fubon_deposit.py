@@ -9,10 +9,9 @@ import re
 from collections.abc import Sequence
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
-from finchie_parser.parsers.deposit import Account, Accounts, amounts_by_column, moved_in
+from finchie_parser.parsers.deposit import Account, Accounts, Entry, amounts_by_column, moved_in
 from finchie_parser.parsers.kinds import deposit_kind
 from finchie_parser.parsers.layout import nearest_centre, rows_of
 from finchie_parser.passwords import Identity
@@ -31,7 +30,7 @@ _AMOUNT_COLUMNS = ("支出", "收入", "餘額")
 
 class FubonDepositParser(StatementParser):
     name = "fubon.deposit"
-    version = "2"
+    version = "3"
     institution = "fubon"
     # 台北富邦銀行2026年10月 銀行對帳單
     sender_domains = ("taipeifubon.com.tw",)
@@ -108,7 +107,7 @@ class _Reader:
         counterparty = [w.text for w in notes if self._column(w) not in ("日期", "摘要")]
         text = clean(" ".join(description))
         self.current.lines.append(
-            DepositLine(
+            Entry(
                 date=iso_date(when.text),
                 description=text,
                 amount=moved_in(by_column, "收入", "支出"),

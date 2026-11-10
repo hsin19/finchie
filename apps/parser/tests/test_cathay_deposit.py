@@ -6,10 +6,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument, deposit, row
+from fakes import FakeDocument, check, deposit, deposit_detail, row
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositKind, DepositStatement
+from finchie_parser.model import Balance, LineKind, Statement
 from finchie_parser.parsers.cathay_deposit import CathayDepositParser
 from finchie_parser.pdf import Word
 
@@ -56,7 +56,7 @@ LINES = [
 ]
 
 
-def parse(pages: dict[int, list[Word]], texts: list[str] | None = None) -> DepositStatement:
+def parse(pages: dict[int, list[Word]], texts: list[str] | None = None) -> Statement:
     document = FakeDocument(texts or [COVER, PAGE_2_TEXT], words=pages)
     statement = deposit(CathayDepositParser().parse(document, ocr=None))
     return statement
@@ -64,28 +64,32 @@ def parse(pages: dict[int, list[Word]], texts: list[str] | None = None) -> Depos
 
 def test_cathay_deposit_reads_cover_lines_and_counterparties() -> None:
     statement = parse({1: HEADINGS + LINES})
-    assert (statement.institution, statement.period_start, statement.period_end) == (
+    assert (statement.institution, statement.period_start, statement.closing_date) == (
         "cathay",
         date(2026, 5, 19),
         date(2026, 8, 18),
     )
     (account,) = statement.accounts
-    assert (account.number, account.name, account.currency) == (ACCOUNT, "數位存款帳戶1—1類", "TWD")
-    assert (account.opening_balance, account.closing_balance) == (Decimal(10000), Decimal(19200))
-    assert account.reconciliation is not None
-    assert account.reconciliation.balanced
+    assert (account.number, account.name) == (ACCOUNT, "數位存款帳戶1—1類")
+    # The balance before the first line opens the passbook, on the day before it.
+    assert account.balances == [
+        Balance("TWD", date(2026, 5, 18), Decimal(10000)),
+        Balance("TWD", date(2026, 8, 18), Decimal(19200)),
+    ]
+    assert check(statement, f"數位存款帳戶1—1類 {ACCOUNT} TWD 餘額").balanced
+    assert {line.unit for line in account.lines} == {"TWD"}
 
+    details = [(line, deposit_detail(line)) for line in account.lines]
     assert [
-        (line.date, line.description, line.amount, line.kind, line.memo, line.counterparty, line.balance)
-        for line in account.lines
+        (line.date, line.description, line.amount, line.kind, d.memo, d.counterparty, d.balance) for line, d in details
     ] == [
-        (date(2026, 5, 19), "信用卡款", Decimal(-500), DepositKind.OTHER, "國泰世華卡 信用卡款", "", Decimal(9500)),
-        (date(2026, 6, 20), "存款息", Decimal(50), DepositKind.INTEREST, "", "", Decimal(9550)),
+        (date(2026, 5, 19), "信用卡款", Decimal(-500), LineKind.OTHER, "國泰世華卡 信用卡款", "", Decimal(9500)),
+        (date(2026, 6, 20), "存款息", Decimal(50), LineKind.INTEREST, "", "", Decimal(9550)),
         (
             date(2026, 7, 16),
             "網銀轉帳",
             Decimal(-350),
-            DepositKind.OTHER,
+            LineKind.OTHER,
             "範*商店",
             "013 0000111122223333",
             Decimal(9200),
@@ -94,7 +98,7 @@ def test_cathay_deposit_reads_cover_lines_and_counterparties() -> None:
             date(2026, 8, 18),
             "跨行轉入",
             Decimal(10000),
-            DepositKind.OTHER,
+            LineKind.OTHER,
             "",
             "812 0012345***678901",
             Decimal(19200),
@@ -104,9 +108,10 @@ def test_cathay_deposit_reads_cover_lines_and_counterparties() -> None:
 
 def test_cathay_deposit_catches_a_running_balance_that_does_not_add_up() -> None:
     broken = [Word("19,000" if w.text == "19,200" else w.text, w.x0, w.x1, w.top) for w in HEADINGS + LINES]
-    (account,) = parse({1: broken}).accounts
-    assert account.reconciliation is not None
-    assert not account.reconciliation.balanced
+    statement = parse({1: broken})
+    (only,) = statement.checks
+    assert (only.name, only.balanced) == (f"數位存款帳戶1—1類 {ACCOUNT} TWD 2026-08-18 跨行轉入 的餘額", False)
+    assert not statement.balanced
 
 
 def test_cathay_deposit_refuses_an_empty_passbook_or_mismatched_page_account() -> None:

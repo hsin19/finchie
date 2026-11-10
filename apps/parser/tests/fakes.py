@@ -13,7 +13,16 @@ from decimal import Decimal
 
 from PIL.Image import Image
 
-from finchie_parser.model import DepositStatement, Reconciliation, SecuritiesStatement, Statement
+from finchie_parser.model import (
+    AccountKind,
+    AccountReport,
+    CardLine,
+    Check,
+    DepositLine,
+    Line,
+    Statement,
+    Trade,
+)
 from finchie_parser.ocr import Ocr, OcrLine
 from finchie_parser.parsers import Parsed, StatementParser
 from finchie_parser.passwords import Identity
@@ -72,18 +81,59 @@ class FakeOcr:
 
 def card(parsed: Parsed) -> Statement:
     """The card bill a parser read; fails the test if it read another kind of statement."""
-    assert isinstance(parsed.statement, Statement), type(parsed.statement)
-    return parsed.statement
+    statement = parsed.statement
+    assert statement.card_bill is not None, "not a card bill"
+    assert statement.period_start is None
+    return statement
 
 
-def deposit(parsed: Parsed) -> DepositStatement:
-    assert isinstance(parsed.statement, DepositStatement), type(parsed.statement)
-    return parsed.statement
+def deposit(parsed: Parsed) -> Statement:
+    """The deposit statement a parser read: deposit accounts only, each reported once."""
+    statement = parsed.statement
+    assert statement.card_bill is None, "a card bill"
+    assert {a.kind for a in statement.accounts} == {AccountKind.DEPOSIT}
+    numbers = [a.number for a in statement.accounts]
+    assert len(numbers) == len(set(numbers)), f"an account reported twice: {numbers}"
+    return statement
 
 
-def securities(parsed: Parsed) -> SecuritiesStatement:
-    assert isinstance(parsed.statement, SecuritiesStatement), type(parsed.statement)
-    return parsed.statement
+def securities(parsed: Parsed) -> Statement:
+    statement = parsed.statement
+    assert statement.card_bill is None, "a card bill"
+    assert [a.kind for a in statement.accounts] == [AccountKind.SECURITIES]
+    return statement
+
+
+def account(statement: Statement, kind: AccountKind) -> AccountReport:
+    """The statement's one report of an account of `kind`."""
+    [found] = [a for a in statement.accounts if a.kind is kind]
+    return found
+
+
+def card_lines(statement: Statement) -> list[Line]:
+    """A card bill's lines: its card account's."""
+    return account(statement, AccountKind.CREDIT_CARD).lines
+
+
+def card_detail(line: Line) -> CardLine:
+    assert isinstance(line.detail, CardLine), line
+    return line.detail
+
+
+def deposit_detail(line: Line) -> DepositLine:
+    assert isinstance(line.detail, DepositLine), line
+    return line.detail
+
+
+def trade_detail(line: Line) -> Trade:
+    assert isinstance(line.detail, Trade), line
+    return line.detail
+
+
+def check(statement: Statement, name: str) -> Check:
+    """The statement's one check named `name`."""
+    [found] = [c for c in statement.checks if c.name == name]
+    return found
 
 
 def _conforms(document: FakeDocument, ocr: FakeOcr) -> tuple[Document, Ocr]:
@@ -93,12 +143,10 @@ def _conforms(document: FakeDocument, ocr: FakeOcr) -> tuple[Document, Ocr]:
 
 FAKE_STATEMENT = Statement(
     institution="fake",
+    period_start=None,
     closing_date=date(2026, 4, 7),
-    due_date=date(2026, 4, 22),
-    currency="TWD",
-    total_due=Decimal(0),
-    transactions=[],
-    reconciliation=Reconciliation(Decimal(0), Decimal(0), "total"),
+    accounts=[AccountReport(AccountKind.CREDIT_CARD, number="", name="")],
+    checks=[Check("total", "TWD", Decimal(0), Decimal(0))],
 )
 
 

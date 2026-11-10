@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from finchie_parser.documents import Mail
-from finchie_parser.model import AnyStatement
+from finchie_parser.model import Statement
 from finchie_parser.ocr import Ocr
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
@@ -15,7 +15,7 @@ from finchie_parser.pdf import Document
 
 @dataclass
 class Parsed:
-    statement: AnyStatement
+    statement: Statement
     warnings: list[str] = field(default_factory=list)
 
 

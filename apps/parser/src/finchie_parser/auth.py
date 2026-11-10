@@ -11,7 +11,7 @@ from typing import Any
 
 import grpc
 
-from finchie.parser.v1 import parser_pb2
+from finchie.parser.v2 import parser_pb2
 
 _GUARDED = "/" + parser_pb2.DESCRIPTOR.services_by_name["ParserService"].full_name + "/"
 

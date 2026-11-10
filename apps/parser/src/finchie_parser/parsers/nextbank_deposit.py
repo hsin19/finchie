@@ -14,10 +14,9 @@ from dataclasses import replace
 from datetime import date
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
-from finchie_parser.parsers.deposit import Account, Accounts, amounts_by_column, moved_in
+from finchie_parser.parsers.deposit import Account, Accounts, Entry, amounts_by_column, moved_in
 from finchie_parser.parsers.kinds import deposit_kind
 from finchie_parser.parsers.layout import nearest_column, rows_of
 from finchie_parser.passwords import Identity
@@ -51,7 +50,7 @@ _BANK_CODES = {"玉山銀行": "808"}
 
 class NextBankDepositParser(StatementParser):
     name = "nextbank.deposit"
-    version = "4"
+    version = "5"
     institution = "nextbank"
     # 【將來銀行通知】2026年9月綜合對帳單, from no_reply@eblsdr.nextbank.com.tw (the e-mail asks to trust
     # eStatement@nextbank.com.tw).
@@ -147,7 +146,7 @@ class _Reader:
             raise LayoutError(f"{number}: section heading without its balance")
         self.current = self.accounts.add(number, currency, name, amount(balance.group(1)))
 
-    def _line(self, row: list[Word]) -> DepositLine:
+    def _line(self, row: list[Word]) -> Entry:
         columns = {name: self.headings[name] for name in _COLUMNS if name in self.headings}
         if len(columns) != len(_COLUMNS):
             raise LayoutError(f"{row[0].text}: a line before its table's headings")
@@ -167,7 +166,7 @@ class _Reader:
         if "餘額" not in by_column:
             raise LayoutError(f"{when.text}: no balance")
         description = clean(" ".join(w.text for w in text if w.x1 < columns["收入"].x0))
-        return DepositLine(
+        return Entry(
             date=day_in_period(when.text, self.start, self.end),
             description=description,
             amount=moved_in(by_column, "收入", "支出"),

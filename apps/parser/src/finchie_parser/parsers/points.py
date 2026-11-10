@@ -1,40 +1,70 @@
-"""Rewards points on a card bill (ADR 0019): a program's lines as the bill totals them, checked."""
+"""Rewards points on a card bill (ADR 0019): each program a unit of the bank's points account, its lines as the
+bill totals them, checked against its closing."""
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
-from finchie_parser.model import PointsExpiry, PointsKind, PointsLine, PointsProgram
+from finchie_parser.model import AccountKind, AccountReport, Balance, Check, Expiry, Line, LineKind
 
 
-def earned(label: str, value: Decimal) -> PointsLine:
-    return PointsLine(label, PointsKind.EARN, value)
+@dataclass(frozen=True)
+class Move:
+    """A period's movement as the bill totals it, under the bill's own label."""
+
+    label: str
+    kind: LineKind
+    # Seen from the account: added positive, used negative.
+    amount: Decimal
 
 
-def adjusted(label: str, value: Decimal) -> PointsLine:
-    return PointsLine(label, PointsKind.ADJUST, value)
+@dataclass(frozen=True)
+class Program:
+    """A program as the bill prints it: its opening, the columns with a figure, and its closing."""
+
+    name: str
+    opening: Decimal
+    moves: list[Move]
+    closing: Decimal
+    expiries: list[Expiry]
 
 
-def used(label: str, value: Decimal) -> PointsLine:
+def earned(label: str, value: Decimal) -> Move:
+    return Move(label, LineKind.EARN, value)
+
+
+def adjusted(label: str, value: Decimal) -> Move:
+    return Move(label, LineKind.ADJUST, value)
+
+
+def used(label: str, value: Decimal) -> Move:
     """Points used, taken by their size: one bank prints them positive, another negative (ADR 0019)."""
-    return PointsLine(label, PointsKind.REDEEM, -abs(value))
+    return Move(label, LineKind.REDEEM, -abs(value))
 
 
 def points_program(
-    name: str,
-    *,
-    opening: Decimal,
-    lines: Iterable[PointsLine],
-    closing: Decimal,
-    expiries: Sequence[PointsExpiry] = (),
-    warnings: list[str],
-) -> PointsProgram:
-    """A program as the bill prints it, checked: its opening and its lines must give its closing (ADR 0019).
+    name: str, *, opening: Decimal, moves: Iterable[Move], closing: Decimal, expiries: Sequence[Expiry] = ()
+) -> Program:
+    """A program as the bill prints it. Only columns with a figure are lines."""
+    return Program(name, opening, [move for move in moves if move.amount != 0], closing, list(expiries))
 
-    Only columns with a figure are lines. When the figures do not add up, a warning is added to `warnings`
-    and the closing stays as printed (ADR 0005).
-    """
-    moved = [line for line in lines if line.amount != 0]
-    computed = opening + sum((line.amount for line in moved), Decimal(0))
-    if computed != closing:
-        warnings.append(f"{name}: opening {opening} plus added less used is {computed}, but the bill prints {closing}")
-    return PointsProgram(name, closing, list(expiries), moved)
+
+def points_account(programs: Sequence[Program], closing_date: date) -> tuple[list[AccountReport], list[Check]]:
+    """The bank's points account, each program a unit, and each program's check: its opening and its lines
+    must give its closing. Neither when the bill has no points."""
+    if not programs:
+        return [], []
+    account = AccountReport(
+        kind=AccountKind.POINTS,
+        number="",
+        name="",
+        balances=[Balance(p.name, closing_date, p.closing) for p in programs],
+        # The bill totals each column over the period: on the closing date, where its closing is.
+        lines=[Line(closing_date, p.name, m.amount, m.kind, m.label) for p in programs for m in p.moves],
+        expiries=[expiry for p in programs for expiry in p.expiries],
+    )
+    checks = [
+        Check(p.name, p.name, p.opening + sum((m.amount for m in p.moves), Decimal(0)), p.closing) for p in programs
+    ]
+    return [account], checks
