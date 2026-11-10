@@ -1,10 +1,10 @@
-package ingest
+package ledger
 
 import (
 	"cmp"
 	"context"
 	"fmt"
-	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/numeric"
 )
 
 // A line that adjusts another points at it as its parent (ADR 0009): a foreign transaction fee at the
@@ -25,21 +27,29 @@ import (
 // fits no purchase clearly keeps no parent.
 
 const (
-	kindPurchase = "purchase"
-	kindFee      = "foreign_transaction_fee"
-	kindRefund   = "refund"
-
-	// Banks charge about 1.5% of a foreign purchase, as a separate line on the same day and card.
-	typicalFeeRate = 0.015
-	// A fee further than this from the typical rate is not that purchase's.
-	maxRateDistance = 0.01
 	// A refund comes back within this long of its purchase.
 	refundWindow = 90 * 24 * time.Hour
 	// The shorter of two merchant names compared by prefix must be at least this long.
 	minKeyLength = 4
 )
 
+var (
+	// Banks charge about 1.5% of a foreign purchase, as a separate line on the same day and card.
+	typicalFeeRate = big.NewRat(15, 1000)
+	// A fee further than this from the typical rate is not that purchase's.
+	maxRateDistance = big.NewRat(1, 100)
+)
+
 type line = dbq.LinkLinesRow
+
+// linkKinds are the lines a parent link starts or ends at. A points redemption is a rebate, as the parser
+// classes it, or a refund, as banks that print it as a negative purchase have it.
+var linkKinds = []string{string(domain.Purchase), string(domain.ForeignTransactionFee), string(domain.Refund), string(domain.Rebate)}
+
+// redemption reports whether a line spends points on a purchase ("點數折抵_外送-茶飲").
+func redemption(l line) bool {
+	return (l.Kind == domain.Rebate || l.Kind == domain.Refund) && strings.HasPrefix(l.Description, "點數折抵")
+}
 
 // Labels banks put before the merchant on fee and points lines: "國外交易手續費SSPEMIRATESL",
 // "點數折抵_外送-茶飲".
@@ -69,27 +79,33 @@ func sameCard(a, b *string) bool {
 	return a == nil || b == nil || *a == *b
 }
 
-// amount is for matching only (rates, comparisons in cents), never for arithmetic on money.
-func amount(n pgtype.Numeric) float64 {
-	f, err := n.Float64Value()
-	if err != nil || !f.Valid {
-		return math.NaN()
+// amount reads an amount exactly (ADR 0004); a NULL one is 0.
+func amount(n pgtype.Numeric) *big.Rat {
+	if r := numeric.ToRat(n); r != nil {
+		return r
 	}
-	return f.Float64
+	return new(big.Rat)
 }
 
-func cents(v float64) int64 {
-	return int64(math.Round(v * 100))
+// round rounds half away from zero, as banks round a fee.
+func round(r *big.Rat) *big.Int {
+	n, rem := new(big.Int).QuoRem(r.Num(), r.Denom(), new(big.Int))
+	if new(big.Int).Mul(rem.Abs(rem), big.NewInt(2)).Cmp(r.Denom()) >= 0 {
+		n.Add(n, big.NewInt(int64(r.Sign())))
+	}
+	return n
 }
 
-// relink works out every link again from all the lines and stores them, in the caller's transaction.
-// The lock keeps two statements stored at once from interleaving; Store takes it earlier, and taking
-// it again in the same transaction is a no-op. It returns how many lines have a parent.
-func relink(ctx context.Context, queries *dbq.Queries) (int, error) {
+// Relink works out every link again from all the lines and stores them, in the caller's transaction:
+// parents (ADR 0009), transfers, and bills' payments (ADR 0016). Whatever changes the lines, or what fits
+// them, relinks in the same transaction, so that no link is ever stale. The lock keeps two such
+// transactions from interleaving; taking it again in the same transaction is a no-op. It returns how many
+// lines have a parent.
+func Relink(ctx context.Context, queries *dbq.Queries) (int, error) {
 	if err := queries.LockLinks(ctx); err != nil {
 		return 0, fmt.Errorf("lock links: %w", err)
 	}
-	lines, err := queries.LinkLines(ctx)
+	lines, err := queries.LinkLines(ctx, linkKinds)
 	if err != nil {
 		return 0, fmt.Errorf("list lines to link: %w", err)
 	}
@@ -115,13 +131,13 @@ func relink(ctx context.Context, queries *dbq.Queries) (int, error) {
 	return len(parents), nil
 }
 
-// Relink works out every link again; run at start, it links lines stored before links existed or
-// under older rules. It returns how many lines have a parent.
-func Relink(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+// RelinkAll works out every link again in a transaction of its own; run at start, it links lines stored
+// before links existed or under older rules. It returns how many lines have a parent.
+func RelinkAll(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var linked int
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		var err error
-		linked, err = relink(ctx, dbq.New(tx))
+		linked, err = Relink(ctx, dbq.New(tx))
 		return err
 	})
 	if err != nil {
@@ -150,7 +166,7 @@ func matchFees(lines []line) map[int64]int64 {
 	}
 	purchases := map[day][]line{}
 	for _, l := range lines {
-		if l.Kind == kindPurchase {
+		if l.Kind == domain.Purchase {
 			key := day{l.StatementID, l.TransactionDate.Time}
 			purchases[key] = append(purchases[key], l)
 		}
@@ -162,22 +178,36 @@ func matchFees(lines []line) map[int64]int64 {
 		// distance from 1.5%. Named pairs are ranked by rate too: one merchant can have several
 		// purchases on a day.
 		byRate, inexact int
-		distance        float64
+		// Nil when there is no rate: farther than any.
+		distance *big.Rat
 	}
 	rated := func(fee, purchase line, byRate int) pair {
 		feeAmount, purchaseAmount := amount(fee.Amount), amount(purchase.Amount)
-		p := pair{fee: fee.ID, purchase: purchase.ID, byRate: byRate, inexact: 1, distance: math.Inf(1)}
-		if purchaseAmount > 0 {
-			p.distance = math.Abs(feeAmount/purchaseAmount - typicalFeeRate)
-			if math.Round(purchaseAmount*typicalFeeRate) == math.Round(feeAmount) {
+		p := pair{fee: fee.ID, purchase: purchase.ID, byRate: byRate, inexact: 1}
+		if purchaseAmount.Sign() > 0 {
+			rate := new(big.Rat).Quo(feeAmount, purchaseAmount)
+			p.distance = rate.Abs(rate.Sub(rate, typicalFeeRate))
+			if round(new(big.Rat).Mul(purchaseAmount, typicalFeeRate)).Cmp(round(feeAmount)) == 0 {
 				p.inexact = 0
 			}
 		}
 		return p
 	}
+	closer := func(a, b *big.Rat) int {
+		switch {
+		case a == nil && b == nil:
+			return 0
+		case a == nil:
+			return 1
+		case b == nil:
+			return -1
+		default:
+			return a.Cmp(b)
+		}
+	}
 	var pairs []pair
 	for _, fee := range lines {
-		if fee.Kind != kindFee {
+		if fee.Kind != domain.ForeignTransactionFee {
 			continue
 		}
 		var candidates []line
@@ -199,7 +229,7 @@ func matchFees(lines []line) map[int64]int64 {
 			continue
 		}
 		for _, p := range candidates {
-			if r := rated(fee, p, 1); r.distance <= maxRateDistance {
+			if r := rated(fee, p, 1); r.distance != nil && r.distance.Cmp(maxRateDistance) <= 0 {
 				pairs = append(pairs, r)
 			}
 		}
@@ -209,7 +239,7 @@ func matchFees(lines []line) map[int64]int64 {
 		return cmp.Or(
 			cmp.Compare(a.byRate, b.byRate),
 			cmp.Compare(a.inexact, b.inexact),
-			cmp.Compare(a.distance, b.distance),
+			closer(a.distance, b.distance),
 			cmp.Compare(a.fee, b.fee),
 			cmp.Compare(a.purchase, b.purchase),
 		)
@@ -238,10 +268,10 @@ func matchRefunds(lines []line) map[int64]int64 {
 	purchases := map[string][]line{}
 	var refunds []line
 	for _, l := range lines {
-		switch l.Kind {
-		case kindPurchase:
+		switch {
+		case l.Kind == domain.Purchase:
 			purchases[l.Institution] = append(purchases[l.Institution], l)
-		case kindRefund:
+		case l.Kind == domain.Refund || redemption(l):
 			refunds = append(refunds, l)
 		}
 	}
@@ -270,7 +300,7 @@ func matchRefunds(lines []line) map[int64]int64 {
 	var rest []line
 	for _, r := range refunds {
 		found := candidates(r)
-		if strings.HasPrefix(r.Description, "點數折抵") {
+		if redemption(r) {
 			var sameDay []line
 			for _, p := range found {
 				if p.TransactionDate.Time.Equal(r.TransactionDate.Time) {
@@ -334,18 +364,18 @@ func matchRefunds(lines []line) map[int64]int64 {
 // takesBack reports whether the refunds add up to the whole purchase, in NT$ or in its foreign
 // currency.
 func takesBack(refunds []line, purchase line) bool {
-	var twd, foreign float64
+	twd, foreign := new(big.Rat), new(big.Rat)
 	inCurrency := purchase.OriginalCurrency != nil && purchase.OriginalAmount.Valid
 	for _, r := range refunds {
-		twd += amount(r.Amount)
+		twd.Add(twd, amount(r.Amount))
 		if !inCurrency || r.OriginalCurrency == nil || !r.OriginalAmount.Valid || *r.OriginalCurrency != *purchase.OriginalCurrency {
 			inCurrency = false
 			continue
 		}
-		foreign += amount(r.OriginalAmount)
+		foreign.Add(foreign, amount(r.OriginalAmount))
 	}
-	if cents(-twd) == cents(amount(purchase.Amount)) {
+	if twd.Neg(twd).Cmp(amount(purchase.Amount)) == 0 {
 		return true
 	}
-	return inCurrency && cents(-foreign) == cents(amount(purchase.OriginalAmount))
+	return inCurrency && foreign.Neg(foreign).Cmp(amount(purchase.OriginalAmount)) == 0
 }

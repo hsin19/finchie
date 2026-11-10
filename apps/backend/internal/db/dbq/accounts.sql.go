@@ -8,6 +8,7 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -56,14 +57,14 @@ func (q *Queries) AccountBalances(ctx context.Context, accountID int64) ([]Accou
 const accountGaps = `-- name: AccountGaps :many
 WITH ordered AS (
     SELECT b.account_id, b.unit_id, b.as_of, b.amount,
-           (a.kind IN ('securities', 'points') OR EXISTS (
+           (a.kind = ANY ($1::text[]) OR EXISTS (
                SELECT 1 FROM transactions t WHERE t.account_id = b.account_id AND t.unit_id = b.unit_id))::boolean AS itemized,
            lag(b.as_of) OVER w AS prev_as_of,
            lag(b.amount) OVER w AS prev_amount
     FROM balances b
     JOIN accounts a ON a.id = b.account_id
-    WHERE a.kind IN ('deposit', 'securities', 'points') AND b.statement_id IS NOT NULL
-      AND ($1::bigint IS NULL OR b.account_id = $1::bigint)
+    WHERE a.kind = ANY ($2::text[]) AND b.statement_id IS NOT NULL
+      AND ($3::bigint IS NULL OR b.account_id = $3::bigint)
     WINDOW w AS (PARTITION BY b.account_id, b.unit_id ORDER BY b.as_of, b.id)
 )
 SELECT o.account_id, u.symbol AS unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
@@ -79,6 +80,12 @@ WHERE o.prev_as_of IS NOT NULL
 ORDER BY o.account_id, u.symbol, o.as_of
 `
 
+type AccountGapsParams struct {
+	EveryLineListed []string
+	Itemized        []string
+	AccountID       *int64
+}
+
 type AccountGapsRow struct {
 	AccountID int64
 	Unit      string
@@ -90,15 +97,17 @@ type AccountGapsRow struct {
 
 // Where an account's balances do not join up (ADR 0013): two consecutive balances in one unit whose
 // difference the lines dated between them do not account for, so money moved that no report shows.
-// Deposit and securities accounts (a security's shares, ADR 0017): a card bill's lines are dated by
-// purchase, which can fall before the previous bill closed, so dates cannot place them between two bills.
-// Itemized: some statement has listed a line of the account in the unit. A deposit account's unit none
+// Accounts of the itemized kinds (domain.AccountKind.Itemized), such as deposit and securities accounts (a
+// security's shares, ADR 0017): a card bill's lines are dated by purchase, which can fall before the
+// previous bill closed, so dates cannot place them between two bills.
+// Itemized: some statement has listed a line of the account in the unit, or its kind's statements list
+// every line (domain.AccountKind.EveryLineListed). A deposit account's unit none
 // has may be one whose statements print only its balance (CTBC's passbook savings, 活儲有摺): a move
 // there is one no source shows, not a gap. A securities statement lists every trade, so a security
 // never traded is itemized all the same: a stock dividend is a gap. A points account's bills list every
 // movement but points that lapse, so a gap there is points lost (ADR 0019).
-func (q *Queries) AccountGaps(ctx context.Context, accountID *int64) ([]AccountGapsRow, error) {
-	rows, err := q.db.Query(ctx, accountGaps, accountID)
+func (q *Queries) AccountGaps(ctx context.Context, arg AccountGapsParams) ([]AccountGapsRow, error) {
+	rows, err := q.db.Query(ctx, accountGaps, arg.EveryLineListed, arg.Itemized, arg.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +167,7 @@ type AccountLinesRow struct {
 	Description              string
 	Memo                     *string
 	Counterparty             *string
-	Kind                     string
+	Kind                     domain.LineKind
 	Unit                     string
 	Amount                   pgtype.Numeric
 	Balance                  pgtype.Numeric
@@ -173,7 +182,7 @@ type AccountLinesRow struct {
 	CounterpartStatementID   *int64
 	CounterpartDate          pgtype.Date
 	CounterpartAccountID     *int64
-	CounterpartAccountKind   *string
+	CounterpartAccountKind   domain.AccountKind
 	CounterpartInstitution   *string
 	CounterpartAccountName   *string
 	CounterpartAccountNumber *string
@@ -238,7 +247,7 @@ WHERE id = $1 AND kind <> 'credit_card'
 type GetAccountRow struct {
 	ID          int64
 	Institution string
-	Kind        string
+	Kind        domain.AccountKind
 	Number      string
 	Label       *string
 	Name        *string
@@ -295,6 +304,7 @@ SELECT DISTINCT ON (b.account_id, b.unit_id) b.account_id, b.unit_id, u.symbol A
 FROM balances b
 JOIN units u ON u.id = b.unit_id
 LEFT JOIN newest_prices p ON p.unit_id = b.unit_id
+WHERE $1::bigint IS NULL OR b.account_id = $1::bigint
 ORDER BY b.account_id, b.unit_id, b.as_of DESC, b.id DESC
 `
 
@@ -316,9 +326,9 @@ type LatestBalancesRow struct {
 
 // Each account's newest balance in each unit, with its unit's newest price, whatever its source, and its
 // worth in NT$ at that price (ADR 0020). A unit without a price, or priced in a unit without one in NT$,
-// has no worth.
-func (q *Queries) LatestBalances(ctx context.Context) ([]LatestBalancesRow, error) {
-	rows, err := q.db.Query(ctx, latestBalances)
+// has no worth. Of one account, or with none, of all.
+func (q *Queries) LatestBalances(ctx context.Context, accountID *int64) ([]LatestBalancesRow, error) {
+	rows, err := q.db.Query(ctx, latestBalances, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +367,7 @@ SELECT DISTINCT ON (v.account_id) v.account_id, v.as_of, u.symbol AS unit, v.amo
 FROM valuations v
 JOIN units u ON u.id = v.unit_id
 LEFT JOIN newest_prices p ON p.unit_id = v.unit_id
+WHERE $1::bigint IS NULL OR v.account_id = $1::bigint
 ORDER BY v.account_id, v.as_of DESC
 `
 
@@ -370,8 +381,8 @@ type LatestValuationsRow struct {
 
 // Each account's newest valuation (ADR 0018), with its worth in NT$ at its unit's newest price; none for
 // a unit without one.
-func (q *Queries) LatestValuations(ctx context.Context) ([]LatestValuationsRow, error) {
-	rows, err := q.db.Query(ctx, latestValuations)
+func (q *Queries) LatestValuations(ctx context.Context, accountID *int64) ([]LatestValuationsRow, error) {
+	rows, err := q.db.Query(ctx, latestValuations, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -399,23 +410,24 @@ func (q *Queries) LatestValuations(ctx context.Context) ([]LatestValuationsRow, 
 const listAccounts = `-- name: ListAccounts :many
 SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
-WHERE kind <> 'credit_card'
+WHERE kind <> 'credit_card' AND ($1::bigint IS NULL OR id = $1::bigint)
 ORDER BY institution, kind DESC, number
 `
 
 type ListAccountsRow struct {
 	ID          int64
 	Institution string
-	Kind        string
+	Kind        domain.AccountKind
 	Number      string
 	Label       *string
 	Name        *string
 	FullNumber  *string
 }
 
-// The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
-func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listAccounts)
+// The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013). Of one
+// account, or with none, of all.
+func (q *Queries) ListAccounts(ctx context.Context, id *int64) ([]ListAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listAccounts, id)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +494,7 @@ RETURNING id
 
 type UpsertAccountParams struct {
 	Institution string
-	Kind        string
+	Kind        domain.AccountKind
 	Number      string
 	Label       *string
 }

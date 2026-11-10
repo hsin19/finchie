@@ -4,10 +4,12 @@ WHERE document_id = @document_id
 RETURNING id;
 
 -- name: FindStatementByKey :one
+-- The statement another document holds that reports the same accounts over the same period (ADR 0013).
 SELECT id, document_id
 FROM statements
 WHERE institution = @institution
   AND kind = @kind
+  AND account_numbers = @account_numbers
   AND period_start IS NOT DISTINCT FROM @period_start
   AND closing_date = @closing_date;
 
@@ -49,12 +51,12 @@ WHERE b.statement_id = @statement_id::bigint
 -- name: InsertStatement :one
 -- The bill's columns are null for a deposit statement (ADR 0013). With `id`, a re-parsed statement keeps
 -- the id it had, so its page and the links to it keep working; without, it takes the next.
-INSERT INTO statements (id, document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
-                        computed_new_charges, stated_new_charges, stated_label, balanced)
+INSERT INTO statements (id, document_id, institution, kind, account_numbers, period_start, closing_date, due_date,
+                        currency, total_due, computed_new_charges, stated_new_charges, stated_label, balanced)
 OVERRIDING SYSTEM VALUE
 VALUES (coalesce(sqlc.narg(id)::bigint, nextval(pg_get_serial_sequence('statements', 'id'))),
-        @document_id, @institution, @kind, @period_start, @closing_date, @due_date, @currency, @total_due,
-        @computed_new_charges, @stated_new_charges, @stated_label, @balanced)
+        @document_id, @institution, @kind, @account_numbers, @period_start, @closing_date, @due_date, @currency,
+        @total_due, @computed_new_charges, @stated_new_charges, @stated_label, @balanced)
 RETURNING id;
 
 -- name: InsertTransactions :copyfrom
@@ -92,7 +94,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
-       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -124,3 +126,10 @@ LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
                    WHERE c.parent_id = t.id) kids ON true
 WHERE t.statement_id = @statement_id
 ORDER BY t.line_no;
+
+-- name: CardBillsOwed :many
+-- Every card bill with when it was shown paid, for working out what is still owed (domain.Owed).
+SELECT id, institution, closing_date, currency, total_due, paid_on
+FROM statements
+WHERE kind = 'credit_card'
+ORDER BY institution, closing_date;

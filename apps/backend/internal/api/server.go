@@ -8,13 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/mail"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -26,6 +24,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 )
@@ -129,6 +128,7 @@ func (s *Server) ListDocuments(ctx context.Context, request ListDocumentsRequest
 	rows, err := queries.ListDocuments(ctx, dbq.ListDocumentsParams{
 		Before:   params.Before,
 		States:   states,
+		Ids:      ptrSlice(params.Id),
 		Query:    query,
 		RowLimit: limit(params.Limit),
 	})
@@ -144,22 +144,16 @@ func (s *Server) ListDocuments(ctx context.Context, request ListDocumentsRequest
 	for _, row := range rows {
 		page.Items = append(page.Items, toDocument(dbq.GetDocumentRow(row)))
 	}
-	byState := map[string]int{}
+	byState := map[domain.DocumentStatus]int{}
 	for _, row := range counts {
 		byState[row.Status] = int(row.Documents)
 	}
-	for _, state := range documentStates {
-		if n := byState[string(state)]; n > 0 {
-			page.ByState = append(page.ByState, StateCount{State: state, Count: n})
+	for _, status := range domain.DocumentStatuses {
+		if n := byState[status]; n > 0 {
+			page.ByState = append(page.ByState, StateCount{State: DocumentStatus(status), Count: n})
 		}
 	}
 	return ListDocuments200JSONResponse(page), nil
-}
-
-// documentStates in the order the web app lists them.
-var documentStates = []DocumentState{
-	DocumentStatePending, DocumentStateParsed, DocumentStateNeedsReview,
-	DocumentStateDuplicate, DocumentStateFailed, DocumentStateSkipped,
 }
 
 func (s *Server) GetDocument(ctx context.Context, request GetDocumentRequestObject) (GetDocumentResponseObject, error) {
@@ -279,95 +273,6 @@ func (s *Server) ListStatementTransactions(ctx context.Context, request ListStat
 		transactions = append(transactions, tx)
 	}
 	return transactions, nil
-}
-
-func (s *Server) SearchTransactions(ctx context.Context, request SearchTransactionsRequestObject) (SearchTransactionsResponseObject, error) {
-	params := request.Params
-	filter := dbq.SearchTransactionsParams{
-		FromDate:    date(params.From),
-		ToDate:      date(params.To),
-		ClosingFrom: date(params.ClosingFrom),
-		ClosingTo:   date(params.ClosingTo),
-		Institution: blankAsNil(params.Institution),
-		CardLast4:   blankAsNil(params.Card),
-		Overseas:    params.Overseas != nil && *params.Overseas,
-		Query:       blankAsNil(params.Q),
-		AccountID:   params.Account,
-		// A transfer between the owner's lines is neither spent nor received (ADR 0016).
-		HideTransfers: params.HideTransfers != nil && *params.HideTransfers,
-		Sort:          string(Newest),
-		RowLimit:      clamp(params.Limit, defaultLimit, 0, 500),
-		RowOffset:     clamp(params.Offset, 0, 0, math.MaxInt32),
-	}
-	if params.Sort != nil && params.Sort.Valid() {
-		filter.Sort = string(*params.Sort)
-	}
-	if params.AccountKind != nil && params.AccountKind.Valid() {
-		kind := string(*params.AccountKind)
-		filter.AccountKind = &kind
-	}
-	if params.Kind != nil {
-		filter.Kinds = make([]string, 0, len(*params.Kind))
-		for _, kind := range *params.Kind {
-			filter.Kinds = append(filter.Kinds, string(kind))
-		}
-	}
-	// Fees fold into their purchases when purchases are listed; asked for fees alone, they are rows.
-	filter.Fold = filter.Kinds == nil || slices.Contains(filter.Kinds, string(Purchase))
-
-	queries := dbq.New(s.pool)
-	result := TransactionSearch{Items: []Transaction{}}
-	if filter.RowLimit > 0 {
-		rows, err := queries.SearchTransactions(ctx, filter)
-		if err != nil {
-			return nil, fmt.Errorf("search transactions: %w", err)
-		}
-		for _, row := range rows {
-			tx, err := toTransaction(dbq.ListTransactionsRow(row))
-			if err != nil {
-				return nil, err
-			}
-			result.Items = append(result.Items, tx)
-		}
-	}
-	groups, err := queries.TransactionTotals(ctx, dbq.TransactionTotalsParams{
-		Fold:          filter.Fold,
-		Kinds:         filter.Kinds,
-		Institution:   filter.Institution,
-		CardLast4:     filter.CardLast4,
-		AccountID:     filter.AccountID,
-		AccountKind:   filter.AccountKind,
-		HideTransfers: filter.HideTransfers,
-		FromDate:      filter.FromDate,
-		ToDate:        filter.ToDate,
-		ClosingFrom:   filter.ClosingFrom,
-		ClosingTo:     filter.ClosingTo,
-		Overseas:      filter.Overseas,
-		Query:         filter.Query,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("total transactions: %w", err)
-	}
-	kinds, err := queries.KindTotals(ctx, dbq.KindTotalsParams{
-		Institution:   filter.Institution,
-		CardLast4:     filter.CardLast4,
-		AccountID:     filter.AccountID,
-		AccountKind:   filter.AccountKind,
-		HideTransfers: filter.HideTransfers,
-		FromDate:      filter.FromDate,
-		ToDate:        filter.ToDate,
-		ClosingFrom:   filter.ClosingFrom,
-		ClosingTo:     filter.ClosingTo,
-		Overseas:      filter.Overseas,
-		Query:         filter.Query,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("total transactions by kind: %w", err)
-	}
-	summary := summarize(groups)
-	result.Total, result.Sum, result.Flows = summary.total.count, decimalString(summary.total.amount), summary.flows
-	result.ByKind, result.ByCard, result.ByAccount = kindTotals(kinds), summary.byCard, summary.byAccount
-	return SearchTransactions200JSONResponse(result), nil
 }
 
 func (s *Server) GetTransaction(ctx context.Context, request GetTransactionRequestObject) (GetTransactionResponseObject, error) {
@@ -494,4 +399,12 @@ func blankAsNil(s *string) *string {
 
 func notFound(what string, id int64) ProblemJSONResponse {
 	return ProblemJSONResponse{Message: fmt.Sprintf("%s %d not found", what, id)}
+}
+
+// ptrSlice is a repeatable query parameter's values; nil, no filter, when it is absent.
+func ptrSlice[T any](values *[]T) []T {
+	if values == nil {
+		return nil
+	}
+	return *values
 }

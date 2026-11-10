@@ -5,16 +5,16 @@
 package dbq
 
 import (
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Account struct {
 	ID          int64
 	Institution string
-	Kind        string
+	Kind        domain.AccountKind
 	Number      string
 	Name        *string
-	Expiry      string
 	CreatedAt   pgtype.Timestamptz
 	Label       *string
 	FullNumber  *string
@@ -30,18 +30,21 @@ type Balance struct {
 }
 
 type Document struct {
-	ID            int64
-	Sha256        []byte
-	Filename      string
-	ContentType   string
-	Content       []byte
-	ReceivedAt    pgtype.Timestamptz
-	Status        string
-	Error         *string
-	Parser        *string
-	ParserVersion *string
-	Warnings      []string
-	ParsedAt      pgtype.Timestamptz
+	ID             int64
+	Sha256         []byte
+	Filename       string
+	ContentType    string
+	Content        []byte
+	ReceivedAt     pgtype.Timestamptz
+	Status         domain.DocumentStatus
+	Error          *string
+	Parser         *string
+	ParserVersion  *string
+	Warnings       []string
+	ParsedAt       pgtype.Timestamptz
+	Failure        *domain.Failure
+	DuplicateOf    *int64
+	ParserInstance *string
 }
 
 type Expiry struct {
@@ -70,7 +73,8 @@ type Price struct {
 	Amount      pgtype.Numeric
 	QuoteUnitID int64
 	QuoteAmount pgtype.Numeric
-	Source      string
+	Source      domain.PriceSource
+	WithdrawnAt pgtype.Timestamptz
 }
 
 type Statement struct {
@@ -85,10 +89,11 @@ type Statement struct {
 	StatedNewCharges   pgtype.Numeric
 	StatedLabel        *string
 	Balanced           bool
-	Kind               string
+	Kind               domain.AccountKind
 	PeriodStart        pgtype.Date
 	PaidOn             pgtype.Date
 	PaidBy             *int64
+	AccountNumbers     string
 }
 
 type Trade struct {
@@ -109,7 +114,7 @@ type Transaction struct {
 	TransactionDate  pgtype.Date
 	PostingDate      pgtype.Date
 	Description      string
-	Kind             string
+	Kind             domain.LineKind
 	Amount           pgtype.Numeric
 	OriginalAmount   pgtype.Numeric
 	OriginalCurrency *string
@@ -117,7 +122,6 @@ type Transaction struct {
 	CardLast4        *string
 	ParentID         *int64
 	AccountID        int64
-	Status           string
 	Memo             *string
 	Counterparty     *string
 	Balance          pgtype.Numeric
@@ -127,7 +131,7 @@ type Transaction struct {
 
 type Unit struct {
 	ID     int64
-	Kind   string
+	Kind   domain.UnitKind
 	Symbol string
 	Code   *string
 	Market *string

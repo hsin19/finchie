@@ -8,8 +8,53 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const cardBillsOwed = `-- name: CardBillsOwed :many
+SELECT id, institution, closing_date, currency, total_due, paid_on
+FROM statements
+WHERE kind = 'credit_card'
+ORDER BY institution, closing_date
+`
+
+type CardBillsOwedRow struct {
+	ID          int64
+	Institution string
+	ClosingDate pgtype.Date
+	Currency    *string
+	TotalDue    pgtype.Numeric
+	PaidOn      pgtype.Date
+}
+
+// Every card bill with when it was shown paid, for working out what is still owed (domain.Owed).
+func (q *Queries) CardBillsOwed(ctx context.Context) ([]CardBillsOwedRow, error) {
+	rows, err := q.db.Query(ctx, cardBillsOwed)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CardBillsOwedRow
+	for rows.Next() {
+		var i CardBillsOwedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Institution,
+			&i.ClosingDate,
+			&i.Currency,
+			&i.TotalDue,
+			&i.PaidOn,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const deleteStatementsForDocument = `-- name: DeleteStatementsForDocument :many
 DELETE FROM statements
@@ -42,15 +87,17 @@ SELECT id, document_id
 FROM statements
 WHERE institution = $1
   AND kind = $2
-  AND period_start IS NOT DISTINCT FROM $3
-  AND closing_date = $4
+  AND account_numbers = $3
+  AND period_start IS NOT DISTINCT FROM $4
+  AND closing_date = $5
 `
 
 type FindStatementByKeyParams struct {
-	Institution string
-	Kind        string
-	PeriodStart pgtype.Date
-	ClosingDate pgtype.Date
+	Institution    string
+	Kind           domain.AccountKind
+	AccountNumbers string
+	PeriodStart    pgtype.Date
+	ClosingDate    pgtype.Date
 }
 
 type FindStatementByKeyRow struct {
@@ -58,10 +105,12 @@ type FindStatementByKeyRow struct {
 	DocumentID int64
 }
 
+// The statement another document holds that reports the same accounts over the same period (ADR 0013).
 func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKeyParams) (FindStatementByKeyRow, error) {
 	row := q.db.QueryRow(ctx, findStatementByKey,
 		arg.Institution,
 		arg.Kind,
+		arg.AccountNumbers,
 		arg.PeriodStart,
 		arg.ClosingDate,
 	)
@@ -116,12 +165,12 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 }
 
 const insertStatement = `-- name: InsertStatement :one
-INSERT INTO statements (id, document_id, institution, kind, period_start, closing_date, due_date, currency, total_due,
-                        computed_new_charges, stated_new_charges, stated_label, balanced)
+INSERT INTO statements (id, document_id, institution, kind, account_numbers, period_start, closing_date, due_date,
+                        currency, total_due, computed_new_charges, stated_new_charges, stated_label, balanced)
 OVERRIDING SYSTEM VALUE
 VALUES (coalesce($1::bigint, nextval(pg_get_serial_sequence('statements', 'id'))),
         $2, $3, $4, $5, $6, $7, $8, $9,
-        $10, $11, $12, $13)
+        $10, $11, $12, $13, $14)
 RETURNING id
 `
 
@@ -129,7 +178,8 @@ type InsertStatementParams struct {
 	ID                 *int64
 	DocumentID         int64
 	Institution        string
-	Kind               string
+	Kind               domain.AccountKind
+	AccountNumbers     string
 	PeriodStart        pgtype.Date
 	ClosingDate        pgtype.Date
 	DueDate            pgtype.Date
@@ -149,6 +199,7 @@ func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams
 		arg.DocumentID,
 		arg.Institution,
 		arg.Kind,
+		arg.AccountNumbers,
 		arg.PeriodStart,
 		arg.ClosingDate,
 		arg.DueDate,
@@ -172,7 +223,7 @@ type InsertTransactionsParams struct {
 	TransactionDate  pgtype.Date
 	PostingDate      pgtype.Date
 	Description      string
-	Kind             string
+	Kind             domain.LineKind
 	Amount           pgtype.Numeric
 	OriginalAmount   pgtype.Numeric
 	OriginalCurrency *string
@@ -251,7 +302,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
-       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -290,7 +341,7 @@ type ListTransactionsRow struct {
 	TransactionDate          pgtype.Date
 	PostingDate              pgtype.Date
 	Description              string
-	Kind                     string
+	Kind                     domain.LineKind
 	Amount                   pgtype.Numeric
 	OriginalAmount           pgtype.Numeric
 	OriginalCurrency         *string
@@ -299,7 +350,7 @@ type ListTransactionsRow struct {
 	ParentID                 *int64
 	Parent                   []byte
 	Children                 []byte
-	AccountKind              string
+	AccountKind              domain.AccountKind
 	AccountID                int64
 	AccountName              *string
 	AccountNumber            string
@@ -319,7 +370,7 @@ type ListTransactionsRow struct {
 	CounterpartStatementID   *int64
 	CounterpartDate          pgtype.Date
 	CounterpartAccountID     *int64
-	CounterpartAccountKind   *string
+	CounterpartAccountKind   domain.AccountKind
 	CounterpartInstitution   *string
 	CounterpartAccountName   *string
 	CounterpartAccountNumber *string

@@ -13,52 +13,33 @@ import (
 	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
-)
-
-// Document statuses, as stored in documents.status.
-const (
-	StatusPending     = "pending"
-	StatusParsed      = "parsed"
-	StatusNeedsReview = "needs_review"
-	StatusDuplicate   = "duplicate"
-	StatusFailed      = "failed"
-)
-
-// Kinds of statement, as stored in statements.kind, and of account, in accounts.kind (ADR 0013): a
-// card bill reports a credit card account, a deposit statement deposit accounts, a securities
-// statement a brokerage account (ADR 0017), and a card bill the bank's points too (ADR 0019). An
-// exchange account has no statements: its API reports snapshots (ADR 0018).
-const (
-	KindCreditCard = "credit_card"
-	KindDeposit    = "deposit"
-	KindSecurities = "securities"
-	KindExchange   = "exchange"
-	KindPoints     = "points"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 )
 
 // ErrInvalidResponse means the parser returned something that breaks the contract; retrying won't help.
 var ErrInvalidResponse = errors.New("invalid parser response")
 
-var kinds = map[parserv1.TransactionKind]string{
-	parserv1.TransactionKind_TRANSACTION_KIND_PURCHASE:                "purchase",
-	parserv1.TransactionKind_TRANSACTION_KIND_FOREIGN_TRANSACTION_FEE: "foreign_transaction_fee",
-	parserv1.TransactionKind_TRANSACTION_KIND_ANNUAL_FEE:              "annual_fee",
-	parserv1.TransactionKind_TRANSACTION_KIND_REFUND:                  "refund",
-	parserv1.TransactionKind_TRANSACTION_KIND_REBATE:                  "rebate",
-	parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT:                 "payment",
+var kinds = map[parserv1.TransactionKind]domain.LineKind{
+	parserv1.TransactionKind_TRANSACTION_KIND_PURCHASE:                domain.Purchase,
+	parserv1.TransactionKind_TRANSACTION_KIND_FOREIGN_TRANSACTION_FEE: domain.ForeignTransactionFee,
+	parserv1.TransactionKind_TRANSACTION_KIND_ANNUAL_FEE:              domain.AnnualFee,
+	parserv1.TransactionKind_TRANSACTION_KIND_REFUND:                  domain.Refund,
+	parserv1.TransactionKind_TRANSACTION_KIND_REBATE:                  domain.Rebate,
+	parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT:                 domain.Payment,
 }
 
-var pointsKinds = map[parserv1.PointsLineKind]string{
-	parserv1.PointsLineKind_POINTS_LINE_KIND_EARN:   "earn",
-	parserv1.PointsLineKind_POINTS_LINE_KIND_ADJUST: "adjust",
-	parserv1.PointsLineKind_POINTS_LINE_KIND_REDEEM: "redeem",
+var pointsKinds = map[parserv1.PointsLineKind]domain.LineKind{
+	parserv1.PointsLineKind_POINTS_LINE_KIND_EARN:   domain.Earn,
+	parserv1.PointsLineKind_POINTS_LINE_KIND_ADJUST: domain.Adjust,
+	parserv1.PointsLineKind_POINTS_LINE_KIND_REDEEM: domain.Redeem,
 }
 
-var depositKinds = map[parserv1.DepositLineKind]string{
-	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER:    "other",
-	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_INTEREST: "interest",
-	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_FEE:      "fee",
+var depositKinds = map[parserv1.DepositLineKind]domain.LineKind{
+	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER:    domain.Other,
+	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_INTEREST: domain.Interest,
+	parserv1.DepositLineKind_DEPOSIT_LINE_KIND_FEE:      domain.Fee,
 }
 
 // stored is a statement of any kind, converted and ready to store.
@@ -81,133 +62,164 @@ type storedAccount struct {
 }
 
 // Store replaces everything previously derived from the document with the parser's result, in one
-// transaction, and returns the document's new status.
-func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, response *parserv1.ParseDocumentResponse) (string, error) {
+// transaction, and returns the document's new status: the statement unless another document holds it,
+// what the statement's kind derives from it, and every link worked out again.
+func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, instance string, response *parserv1.ParseDocumentResponse) (domain.DocumentStatus, error) {
 	result, err := convertResponse(documentID, response)
 	if err != nil {
 		return "", err
 	}
-	statement := result.statement
+	finish := dbq.FinishDocumentParams{
+		ID:             documentID,
+		ParserInstance: optionalString(instance),
+		Parser:         &response.Parser,
+		ParserVersion:  &response.ParserVersion,
+		Warnings:       append(append([]string{}, response.GetWarnings()...), result.unbalanced...),
+	}
 
-	var outcome string
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		queries := dbq.New(tx)
-		// Before deleting anything: relinking (below, and in a statement stored at the same time)
-		// updates every linked line, so taking the lock only then would let each side hold rows the
-		// other waits for.
-		if err := queries.LockLinks(ctx); err != nil {
-			return fmt.Errorf("lock links: %w", err)
-		}
-		previous, err := queries.DeleteStatementsForDocument(ctx, documentID)
+		holder, err := replace(ctx, queries, documentID, &result.statement)
 		if err != nil {
 			return err
 		}
-		// A re-parse keeps the statement's id: its page and the links to it stay where they were.
-		if len(previous) > 0 {
-			statement.ID = &previous[0]
-		}
-
-		finish := dbq.FinishDocumentParams{
-			ID:            documentID,
-			Parser:        &response.Parser,
-			ParserVersion: &response.ParserVersion,
-			Warnings:      append(append([]string{}, response.GetWarnings()...), result.unbalanced...),
-		}
-
-		existing, err := queries.FindStatementByKey(ctx, dbq.FindStatementByKeyParams{
-			Institution: statement.Institution,
-			Kind:        statement.Kind,
-			PeriodStart: statement.PeriodStart,
-			ClosingDate: statement.ClosingDate,
-		})
-		switch {
-		case err == nil:
+		if holder != nil {
 			// Another document already holds this statement (an e-mail and the same one forwarded).
-			reason := fmt.Sprintf("same statement as document %d", existing.DocumentID)
-			finish.Status, finish.Error, outcome = StatusDuplicate, &reason, StatusDuplicate
-			if err := queries.FinishDocument(ctx, finish); err != nil {
+			finish.Status, finish.DuplicateOf = domain.Duplicate, holder
+		} else {
+			if err := insert(ctx, queries, result); err != nil {
 				return err
 			}
-			// A statement this document had before may have been a parent's.
-			_, err := relink(ctx, queries)
-			return err
-		case !errors.Is(err, pgx.ErrNoRows):
-			return err
+			finish.Status = domain.Outcome(result.statement.Balanced)
 		}
-
-		statementID, err := queries.InsertStatement(ctx, statement)
-		if err != nil {
+		// Its lines, or the ones it had before, may be parents or children of lines on other statements.
+		if _, err := ledger.Relink(ctx, queries); err != nil {
 			return err
 		}
-		var lines []dbq.InsertTransactionsParams
-		var accountIDs []int64
-		var unitIDs []map[string]int64
-		for _, reported := range result.accounts {
-			// Found, or created the first time a statement reports it (ADR 0013).
-			accountID, err := queries.UpsertAccount(ctx, reported.account)
-			if err != nil {
-				return fmt.Errorf("find account: %w", err)
-			}
-			accountIDs = append(accountIDs, accountID)
-			// Likewise its units (ADR 0020).
-			units, err := reported.unitIDs(ctx, queries)
-			if err != nil {
-				return err
-			}
-			unitIDs = append(unitIDs, units)
-			for _, line := range reported.lines {
-				line.StatementID, line.AccountID, line.UnitID = statementID, accountID, units[line.unit]
-				lines = append(lines, line.InsertTransactionsParams)
-			}
-			for _, balance := range reported.balances {
-				balance.StatementID, balance.AccountID, balance.UnitID = statementID, accountID, units[balance.unit]
-				if err := queries.InsertBalance(ctx, balance.InsertBalanceParams); err != nil {
-					return fmt.Errorf("record balance: %w", err)
-				}
-			}
-			for _, expiry := range reported.expiries {
-				expiry.StatementID, expiry.AccountID, expiry.UnitID = statementID, accountID, units[expiry.unit]
-				if err := queries.InsertExpiry(ctx, expiry.InsertExpiryParams); err != nil {
-					return fmt.Errorf("record expiry: %w", err)
-				}
-			}
-		}
-		if _, err := queries.InsertTransactions(ctx, lines); err != nil {
-			return err
-		}
-		if statement.Kind == KindDeposit {
-			this := span{id: statementID, documentID: documentID, start: statement.PeriodStart.Time, end: statement.ClosingDate.Time}
-			for i, reported := range result.accounts {
-				// Each section reports one currency, and always its closing balance.
-				if err := trimOverlaps(ctx, queries, this, accountIDs[i], unitIDs[i][reported.balances[0].unit]); err != nil {
-					return err
-				}
-			}
-		}
-		if statement.Kind == KindSecurities {
-			if err := storeHoldings(ctx, queries, statementID, result.trades, accountIDs); err != nil {
-				return err
-			}
-		}
-		// Its lines may be parents or children of lines on other statements.
-		if _, err := relink(ctx, queries); err != nil {
-			return err
-		}
-
-		outcome = StatusParsed
-		if !statement.Balanced {
-			outcome = StatusNeedsReview
-		}
-		finish.Status = outcome
 		return queries.FinishDocument(ctx, finish)
 	})
 	if err != nil {
 		return "", fmt.Errorf("store parse result: %w", err)
 	}
-	return outcome, nil
+	return finish.Status, nil
+}
+
+// replace deletes what the document derived before and, when another document already holds the same
+// statement, returns that document. A re-parse keeps the statement's id: its page and the links to it stay
+// where they were.
+func replace(ctx context.Context, queries *dbq.Queries, documentID int64, statement *dbq.InsertStatementParams) (*int64, error) {
+	// Before deleting anything: relinking (in Store, and in a statement stored at the same time) updates
+	// every linked line, so taking the lock only then would let each side hold rows the other waits for.
+	if err := queries.LockLinks(ctx); err != nil {
+		return nil, fmt.Errorf("lock links: %w", err)
+	}
+	previous, err := queries.DeleteStatementsForDocument(ctx, documentID)
+	if err != nil {
+		return nil, fmt.Errorf("delete statements: %w", err)
+	}
+	if len(previous) > 0 {
+		statement.ID = &previous[0]
+	}
+	existing, err := queries.FindStatementByKey(ctx, dbq.FindStatementByKeyParams{
+		Institution:    statement.Institution,
+		Kind:           statement.Kind,
+		AccountNumbers: statement.AccountNumbers,
+		PeriodStart:    statement.PeriodStart,
+		ClosingDate:    statement.ClosingDate,
+	})
+	switch {
+	case err == nil:
+		return &existing.DocumentID, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("find statement: %w", err)
+	}
+}
+
+// insert stores the statement and what it reports of each account, then what its kind derives from them.
+func insert(ctx context.Context, queries *dbq.Queries, result stored) error {
+	statementID, err := queries.InsertStatement(ctx, result.statement)
+	if err != nil {
+		return fmt.Errorf("insert statement: %w", err)
+	}
+	var lines []dbq.InsertTransactionsParams
+	found := make([]foundAccount, 0, len(result.accounts))
+	for _, reported := range result.accounts {
+		// Found, or created the first time a statement reports it (ADR 0013); likewise its units (ADR 0020).
+		accountID, err := queries.UpsertAccount(ctx, reported.account)
+		if err != nil {
+			return fmt.Errorf("find account: %w", err)
+		}
+		units, err := reported.unitIDs(ctx, queries)
+		if err != nil {
+			return err
+		}
+		found = append(found, foundAccount{storedAccount: reported, id: accountID, units: units})
+		for _, line := range reported.lines {
+			line.StatementID, line.AccountID, line.UnitID = statementID, accountID, reported.unitID(units, line.unit)
+			lines = append(lines, line.InsertTransactionsParams)
+		}
+		for _, balance := range reported.balances {
+			balance.StatementID, balance.AccountID, balance.UnitID = statementID, accountID, reported.unitID(units, balance.unit)
+			if err := queries.InsertBalance(ctx, balance.InsertBalanceParams); err != nil {
+				return fmt.Errorf("record balance: %w", err)
+			}
+		}
+		for _, expiry := range reported.expiries {
+			expiry.StatementID, expiry.AccountID, expiry.UnitID = statementID, accountID, reported.unitID(units, expiry.unit)
+			if err := queries.InsertExpiry(ctx, expiry.InsertExpiryParams); err != nil {
+				return fmt.Errorf("record expiry: %w", err)
+			}
+		}
+	}
+	if _, err := queries.InsertTransactions(ctx, lines); err != nil {
+		return fmt.Errorf("insert lines: %w", err)
+	}
+
+	switch result.statement.Kind {
+	case domain.Deposit:
+		this := span{id: statementID, documentID: result.statement.DocumentID, start: result.statement.PeriodStart.Time, end: result.statement.ClosingDate.Time}
+		for _, account := range found {
+			// Each section reports one currency, and always its closing balance.
+			if err := trimOverlaps(ctx, queries, this, account.id, account.unitID(account.units, account.balances[0].unit)); err != nil {
+				return err
+			}
+		}
+	case domain.Securities:
+		accountIDs := make([]int64, 0, len(found))
+		for _, account := range found {
+			accountIDs = append(accountIDs, account.id)
+		}
+		if err := storeHoldings(ctx, queries, statementID, result.trades, accountIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// foundAccount is what a statement reports of an account, with the account and its units found.
+type foundAccount struct {
+	storedAccount
+	id    int64
+	units map[string]int64
 }
 
 func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse) (stored, error) {
+	result, err := convertStatement(documentID, response)
+	if err != nil {
+		return stored{}, err
+	}
+	// A statement is the accounts it reports over its period (ADR 0013).
+	numbers := make([]string, 0, len(result.accounts))
+	for _, a := range result.accounts {
+		numbers = append(numbers, a.account.Number)
+	}
+	result.statement.AccountNumbers = domain.AccountNumbers(numbers...)
+	return result, nil
+}
+
+func convertStatement(documentID int64, response *parserv1.ParseDocumentResponse) (stored, error) {
 	bill, deposit, securities := response.GetStatement(), response.GetDepositStatement(), response.GetSecuritiesStatement()
 	switch {
 	case bill != nil && deposit == nil && securities == nil:
@@ -217,7 +229,7 @@ func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse)
 		}
 		// A bank's card lines belong to its credit_card account, which holds no balance: what the bill
 		// says is owed stays on the bill (ADR 0013).
-		card := storedAccount{account: dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindCreditCard}}
+		card := storedAccount{account: dbq.UpsertAccountParams{Institution: statement.Institution, Kind: domain.CreditCard}}
 		for _, line := range lines {
 			card.lines = append(card.lines, storedLine{unit: *statement.Currency, InsertTransactionsParams: line})
 		}
@@ -232,7 +244,7 @@ func convertResponse(documentID int64, response *parserv1.ParseDocumentResponse)
 			return stored{}, err
 		}
 		if points != nil {
-			points.account = dbq.UpsertAccountParams{Institution: statement.Institution, Kind: KindPoints}
+			points.account = dbq.UpsertAccountParams{Institution: statement.Institution, Kind: domain.Points}
 			accounts = append(accounts, *points)
 		}
 		return stored{statement: statement, accounts: accounts}, nil
@@ -255,7 +267,7 @@ func convert(documentID int64, s *parserv1.Statement) (dbq.InsertStatementParams
 	statement := dbq.InsertStatementParams{
 		DocumentID:  documentID,
 		Institution: s.GetInstitution(),
-		Kind:        KindCreditCard,
+		Kind:        domain.CreditCard,
 		Currency:    optionalString(s.GetCurrency()),
 		StatedLabel: optionalString(rec.GetStatedLabel()),
 		Balanced:    rec.GetBalanced(),
@@ -352,7 +364,7 @@ func convertDeposit(documentID int64, d *parserv1.DepositStatement) (stored, err
 	statement := dbq.InsertStatementParams{
 		DocumentID:  documentID,
 		Institution: d.GetInstitution(),
-		Kind:        KindDeposit,
+		Kind:        domain.Deposit,
 		Balanced:    true,
 	}
 	if statement.Institution == "" {
@@ -379,7 +391,7 @@ func convertDeposit(documentID int64, d *parserv1.DepositStatement) (stored, err
 		seen[key] = true
 
 		reported := storedAccount{account: dbq.UpsertAccountParams{
-			Institution: statement.Institution, Kind: KindDeposit, Number: a.GetNumber(), Label: optionalString(a.GetName()),
+			Institution: statement.Institution, Kind: domain.Deposit, Number: a.GetNumber(), Label: optionalString(a.GetName()),
 		}}
 		var closing pgtype.Numeric
 		closing, errs = requiredNumeric(a.GetClosingBalance(), where+" closing balance", errs)

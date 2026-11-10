@@ -17,6 +17,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/jobs"
 )
 
 // Snapshot is what an exchange account holds now, and what the exchange says the whole is worth.
@@ -41,7 +44,7 @@ func (s *Snapshot) add(unit string, amount *big.Rat) {
 	if s.Holdings == nil {
 		s.Holdings = map[string]*big.Rat{}
 	}
-	unit = strings.ToUpper(unit)
+	unit = domain.Symbol(domain.Money, unit)
 	if held, ok := s.Holdings[unit]; ok {
 		held.Add(held, amount)
 		return
@@ -51,7 +54,7 @@ func (s *Snapshot) add(unit string, amount *big.Rat) {
 
 // price keeps what one of unit is worth in quote; a unit is not priced in itself.
 func (s *Snapshot) price(unit, quote string, amount *big.Rat) {
-	unit, quote = strings.ToUpper(unit), strings.ToUpper(quote)
+	unit, quote = domain.Symbol(domain.Money, unit), domain.Symbol(domain.Money, quote)
 	if unit == quote {
 		return
 	}
@@ -76,21 +79,15 @@ type FetchArgs struct {
 
 func (FetchArgs) Kind() string { return "fetch_exchange" }
 
-func (FetchArgs) InsertOpts() river.InsertOpts {
-	// The next run is six hours away; a few retries cover an API that is briefly down.
-	return river.InsertOpts{MaxAttempts: 4}
-}
+func (FetchArgs) InsertOpts() river.InsertOpts { return jobs.SourceOpts() }
 
-// Periodic runs each exchange's job every 6 hours and when the backend starts, like the rates and quotes.
+// Periodic reads each exchange as a source of its own (jobs.Source).
 func Periodic(exchanges []Exchange) []*river.PeriodicJob {
-	jobs := make([]*river.PeriodicJob, 0, len(exchanges))
+	periodic := make([]*river.PeriodicJob, 0, len(exchanges))
 	for _, e := range exchanges {
-		institution := e.Institution()
-		jobs = append(jobs, river.NewPeriodicJob(river.PeriodicInterval(6*time.Hour),
-			func() (river.JobArgs, *river.InsertOpts) { return FetchArgs{Institution: institution}, nil },
-			&river.PeriodicJobOpts{RunOnStart: true, ID: "fetch_exchange_" + institution}))
+		periodic = append(periodic, jobs.Source("fetch_exchange_"+e.Institution(), FetchArgs{Institution: e.Institution()}))
 	}
-	return jobs
+	return periodic
 }
 
 type Worker struct {

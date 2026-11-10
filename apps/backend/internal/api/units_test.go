@@ -94,8 +94,17 @@ func TestTheNewestPriceCountsWhateverItsSource(t *testing.T) {
 	if b := dollars(); *b.Worth != "320.00" || b.Price.Source != Fawaz {
 		t.Fatalf("cleared: %+v", b)
 	}
-	// A rate of a later day is newer than what the owner said: it counts.
+	// Withdrawn, not forgotten: what the owner said the unit was worth stays on record.
+	var kept int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM prices WHERE unit_id = $1 AND source = 'owner' AND withdrawn_at IS NOT NULL", usd.Id).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("withdrawn owner prices kept = %d (%v), want 1", kept, err)
+	}
+	// Given again the same day, it counts again.
 	set(usd.Id, `{"value": "40"}`, http.StatusNoContent)
+	if b := dollars(); *b.Worth != "400.00" || b.Price.Source != Owner {
+		t.Fatalf("given again: %+v", b)
+	}
+	// A rate of a later day is newer than what the owner said: it counts.
 	rate(t, pool, taipei.Today(time.Now()).AddDate(0, 0, 1).Format(time.DateOnly), "USD", "0.02")
 	if b := dollars(); *b.Worth != "500.00" || b.Price.Source != Fawaz {
 		t.Fatalf("a later rate: %+v", b)
@@ -114,8 +123,9 @@ func TestTheNewestPriceCountsWhateverItsSource(t *testing.T) {
 	}
 
 	set(miles.Id, `{"value": "-1"}`, http.StatusBadRequest)
-	set(miles.Id, `{"value": "1", "quote": "XYZ"}`, http.StatusBadRequest) // no account holds it
-	set(usd.Id, `{"value": "1", "quote": "USD"}`, http.StatusBadRequest)   // not in itself
+	set(miles.Id, `{"value": "1", "quote": "XYZ"}`, http.StatusBadRequest)                           // no account holds it
+	set(usd.Id, `{"value": "1", "quote": "USD"}`, http.StatusBadRequest)                             // not in itself
+	set(unitNamed(t, e, "money", "TWD").Id, `{"value": "1", "quote": "USD"}`, http.StatusBadRequest) // worth itself
 	set(999999, `{"value": "1"}`, http.StatusNotFound)
 }
 

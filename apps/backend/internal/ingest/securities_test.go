@@ -11,6 +11,7 @@ import (
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
@@ -139,7 +140,7 @@ func TestASecurityAStatementDoesNotListIsAtZeroWhicheverStatementArrivesFirst(t 
 		t.Fatalf("holdings = %v, want %v", got, want)
 	}
 	// Every change has its trade.
-	if gaps, err := dbq.New(pool).AccountGaps(t.Context(), &account); err != nil || len(gaps) != 0 {
+	if gaps, err := ledger.Gaps(t.Context(), dbq.New(pool), &account); err != nil || len(gaps) != 0 {
 		t.Fatalf("gaps = %+v (%v)", gaps, err)
 	}
 }
@@ -152,11 +153,11 @@ func TestSharesNoTradeExplainsAreAGap(t *testing.T) {
 		trade(7, 3, "範例電子", sell, "2000", "101000", "100554"),
 	))
 	account := securitiesAccount(t, pool)
-	gaps, err := dbq.New(pool).AccountGaps(t.Context(), &account)
+	gaps, err := ledger.Gaps(t.Context(), dbq.New(pool), &account)
 	if err != nil || len(gaps) == 0 {
 		t.Fatalf("gaps = %+v (%v), want one", gaps, err)
 	}
-	if unseen, _ := gaps[0].Unseen.Value(); len(gaps) != 1 || gaps[0].Unit != "範例電子" || unseen != "100" {
+	if len(gaps) != 1 || gaps[0].Unit != "範例電子" || gaps[0].Unseen.RatString() != "100" {
 		t.Fatalf("gaps = %+v", gaps)
 	}
 }

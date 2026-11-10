@@ -10,6 +10,8 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/numeric"
 )
 
 func toDocument(row dbq.GetDocumentRow) Document {
@@ -21,16 +23,17 @@ func toDocument(row dbq.GetDocumentRow) Document {
 		Sha256:        hex.EncodeToString(row.Sha256),
 		ReceivedAt:    row.ReceivedAt.Time,
 		Status:        DocumentStatus(row.Status),
+		Failure:       (*DocumentFailure)(row.Failure),
 		Error:         row.Error,
+		DuplicateOf:   row.DuplicateOf,
 		Parser:        row.Parser,
 		ParserVersion: row.ParserVersion,
 		Warnings:      row.Warnings,
 		LineCount:     int(row.LineCount),
 		AccountCount:  int(row.AccountCount),
 	}
-	if row.StatementKind != nil {
-		kind := AccountKind(*row.StatementKind)
-		doc.StatementKind = &kind
+	if row.StatementKind != "" {
+		doc.StatementKind = ptr(AccountKind(row.StatementKind))
 	}
 	if doc.Warnings == nil {
 		doc.Warnings = []string{}
@@ -51,11 +54,11 @@ func toStatement(row dbq.ListStatementsRow) Statement {
 		ClosingDate: openapi_types.Date{Time: row.ClosingDate.Time},
 		DueDate:     openapi_types.Date{Time: row.DueDate.Time},
 		Currency:    deref(row.Currency),
-		TotalDue:    decimalString(row.TotalDue),
+		TotalDue:    numeric.String(row.TotalDue),
 		Reconciliation: Reconciliation{
 			Balanced:    row.Balanced,
-			Computed:    decimalString(row.ComputedNewCharges),
-			Stated:      decimalString(row.StatedNewCharges),
+			Computed:    numeric.String(row.ComputedNewCharges),
+			Stated:      numeric.String(row.StatedNewCharges),
 			StatedLabel: deref(row.StatedLabel),
 		},
 		TransactionCount: int(row.TransactionCount),
@@ -78,12 +81,14 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		TransactionDate:  openapi_types.Date{Time: row.TransactionDate.Time},
 		Description:      row.Description,
 		Kind:             TransactionKind(row.Kind),
-		Amount:           decimalString(row.Amount),
+		Amount:           numeric.String(row.Amount),
 		OriginalCurrency: row.OriginalCurrency,
 		Country:          row.Country,
 		CardLast4:        row.CardLast4,
 		AccountName:      row.AccountName,
-		Unit:             &row.Unit,
+		Unit:             row.Unit,
+		Flow:             numeric.String(row.Flow),
+		AccountKind:      AccountKind(row.AccountKind),
 		Memo:             row.Memo,
 		Counterparty:     row.Counterparty,
 		Counterpart: lineCounterpart(row.CounterpartID, row.CounterpartStatementID, row.CounterpartDate, row.CounterpartAccountID,
@@ -91,25 +96,19 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 			cmp.Or(row.CounterpartFullNumber, row.CounterpartAccountNumber)),
 		Trade: tradeOf(row.TradeCategory, row.TradePrice, row.TradeAmount, row.TradeFee, row.TradeTax, row.TradeNet, row.TradePrepaid),
 	}
-	accountKind := AccountKind(row.AccountKind)
-	tx.AccountKind = &accountKind
 	// A card bill's container is no account the owner has (ADR 0013): a card line names its card instead.
-	if accountKind != AccountKindCreditCard {
+	if row.AccountKind.OwnersAccount() {
 		tx.AccountId, tx.AccountNumber = &row.AccountID, &row.AccountNumber
 	}
 	if row.Balance.Valid {
-		balance := decimalString(row.Balance)
+		balance := numeric.String(row.Balance)
 		tx.Balance = &balance
-	}
-	if row.Flow.Valid {
-		flow := decimalString(row.Flow)
-		tx.Flow = &flow
 	}
 	if row.PostingDate.Valid {
 		tx.PostingDate = &openapi_types.Date{Time: row.PostingDate.Time}
 	}
 	if row.OriginalAmount.Valid {
-		original := decimalString(row.OriginalAmount)
+		original := numeric.String(row.OriginalAmount)
 		tx.OriginalAmount = &original
 	}
 	if row.Parent != nil {
@@ -135,11 +134,11 @@ func tradeOf(category *string, price, amount, fee, tax, net, prepaid pgtype.Nume
 		return nil
 	}
 	trade := Trade{
-		Category: *category, Price: decimalString(price), Amount: decimalString(amount), Fee: decimalString(fee),
-		Tax: decimalString(tax), Net: decimalString(net),
+		Category: *category, Price: numeric.String(price), Amount: numeric.String(amount), Fee: numeric.String(fee),
+		Tax: numeric.String(tax), Net: numeric.String(net),
 	}
 	if prepaid.Valid {
-		value := decimalString(prepaid)
+		value := numeric.String(prepaid)
 		trade.Prepaid = &value
 	}
 	return &trade
@@ -147,29 +146,19 @@ func tradeOf(category *string, price, amount, fee, tax, net, prepaid pgtype.Nume
 
 // lineCounterpart is the other line of a link (ADR 0016), from the counterpart columns a line query
 // selects; nil when the line has none.
-func lineCounterpart(id, statementID *int64, date pgtype.Date, accountID *int64, kind, institution, name, number *string) *LineCounterpart {
+func lineCounterpart(id, statementID *int64, date pgtype.Date, accountID *int64, kind domain.AccountKind, institution, name, number *string) *LineCounterpart {
 	if id == nil {
 		return nil
 	}
 	counterpart := LineCounterpart{
 		Id: *id, StatementId: *statementID, Date: openapi_types.Date{Time: date.Time},
-		AccountKind: AccountKind(*kind), Institution: *institution, AccountName: name,
+		AccountKind: AccountKind(kind), Institution: *institution, AccountName: name,
 	}
 	// A card bill's container is no account to point at (ADR 0013).
-	if counterpart.AccountKind != AccountKindCreditCard {
+	if kind.OwnersAccount() {
 		counterpart.AccountId, counterpart.AccountNumber = accountID, number
 	}
 	return &counterpart
-}
-
-// decimalString renders NUMERIC exactly as Postgres stores it ("780.00", "-6553").
-func decimalString(n pgtype.Numeric) string {
-	value, err := n.Value()
-	if err != nil || value == nil {
-		return ""
-	}
-	s, _ := value.(string)
-	return s
 }
 
 func deref(s *string) string {

@@ -1,15 +1,18 @@
-package ingest
+package ledger
 
 import (
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
 
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
-	"github.com/hsin19/finchie/apps/backend/internal/testdb"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+)
+
+const (
+	kindPurchase = string(domain.Purchase)
+	kindFee      = string(domain.ForeignTransactionFee)
+	kindRefund   = string(domain.Refund)
 )
 
 var nextLine int64
@@ -35,7 +38,7 @@ func newLine(date, description, kind, amount string, options ...lineOption) line
 	if err != nil {
 		panic(err)
 	}
-	l := line{ID: nextLine, StatementID: 1, Institution: "taishin", TransactionDate: pgtype.Date{Time: d, Valid: true}, Description: description, Kind: kind}
+	l := line{ID: nextLine, StatementID: 1, Institution: "taishin", TransactionDate: pgtype.Date{Time: d, Valid: true}, Description: description, Kind: domain.LineKind(kind)}
 	if err := l.Amount.Scan(amount); err != nil {
 		panic(err)
 	}
@@ -172,108 +175,25 @@ func TestPointsRedemptionsGoToThatDaysPurchase(t *testing.T) {
 	assertParent(t, parents, points, tea)
 }
 
+func TestARedemptionTheParserClassesAsARebateGoesToItsPurchaseButCashbackKeepsNone(t *testing.T) {
+	tea := newLine("2026-07-05", "外送-茶飲店ABC", kindPurchase, "120", card("3333"))
+	points := newLine("2026-07-05", "點數折抵_外送-茶飲", string(domain.Rebate), "-30", card("3333"))
+	cashback := newLine("2026-07-05", "外送-茶飲店ABC 回饋", string(domain.Rebate), "-6", card("3333"))
+
+	parents := matchParents([]line{tea, points, cashback})
+	assertParent(t, parents, points, tea)
+	assertNoParent(t, parents, cashback)
+}
+
+func TestARefundAddsUpExactlyWhateverTheDecimals(t *testing.T) {
+	// Added up exactly, never through a float (ADR 0004).
+	purchase := newLine("2026-07-01", "BOOKSHOP", kindPurchase, "0.30", foreign("USD", "0.30"))
+	first := newLine("2026-07-03", "BOOKSHOP", kindRefund, "-0.10", foreign("USD", "-0.10"))
+	second := newLine("2026-07-03", "BOOKSHOP", kindRefund, "-0.20", foreign("USD", "-0.20"))
+
+	parents := matchParents([]line{purchase, first, second})
+	assertParent(t, parents, first, purchase)
+	assertParent(t, parents, second, purchase)
+}
+
 // Stored out of order and parsed again, a refund still finds its purchase on another statement.
-func TestStoringAStatementRelinksTheWholeLedger(t *testing.T) {
-	pool := testdb.Pool(t)
-	ctx := t.Context()
-
-	october := sampleStatement(true)
-	november := sampleStatement(true)
-	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
-	november.DueDate = &date.Date{Year: 2026, Month: 12, Day: 8}
-	november.Transactions = []*parserv1.Transaction{{
-		TransactionDate:  &date.Date{Year: 2026, Month: 11, Day: 2},
-		Description:      "LEATHER SHOP FIRENZE",
-		Kind:             parserv1.TransactionKind_TRANSACTION_KIND_REFUND,
-		Amount:           &decimal.Decimal{Value: "-28009"},
-		OriginalAmount:   &decimal.Decimal{Value: "-780.00"},
-		OriginalCurrency: "EUR",
-		Country:          "IT",
-	}}
-	store := func(documentID int64, statement *parserv1.Statement) {
-		t.Helper()
-		if _, err := Store(ctx, pool, documentID, &parserv1.ParseDocumentResponse{Statement: statement, Parser: "fake", ParserVersion: "1"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	refundParent := func() int64 {
-		t.Helper()
-		var parent *int64
-		if err := pool.QueryRow(ctx, `SELECT parent_id FROM transactions WHERE kind = 'refund'`).Scan(&parent); err != nil {
-			t.Fatal(err)
-		}
-		if parent == nil {
-			return 0
-		}
-		return *parent
-	}
-	purchaseID := func() int64 {
-		t.Helper()
-		var id int64
-		if err := pool.QueryRow(ctx, `SELECT id FROM transactions WHERE kind = 'purchase'`).Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-
-	store(addDocument(t, pool, "november.eml"), november)
-	if parent := refundParent(); parent != 0 {
-		t.Fatalf("refund linked to %d before its purchase was stored", parent)
-	}
-	octoberDoc := addDocument(t, pool, "october.eml")
-	store(octoberDoc, october)
-	if parent, purchase := refundParent(), purchaseID(); parent != purchase {
-		t.Fatalf("refund parent = %d, want the purchase %d", parent, purchase)
-	}
-
-	// Parsing October again replaces the purchase with a new row.
-	before := purchaseID()
-	store(octoberDoc, october)
-	if parent, purchase := refundParent(), purchaseID(); purchase == before || parent != purchase {
-		t.Fatalf("after re-parse: refund parent = %d, want the new purchase %d (was %d)", parent, purchase, before)
-	}
-}
-
-// Two statements whose lines are linked, parsed again at the same time, over and over: neither may
-// deadlock the other.
-func TestConcurrentStoresDoNotDeadlock(t *testing.T) {
-	pool := testdb.Pool(t)
-	ctx := t.Context()
-
-	october := sampleStatement(true)
-	november := sampleStatement(true)
-	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
-	november.Transactions = []*parserv1.Transaction{{
-		TransactionDate:  &date.Date{Year: 2026, Month: 11, Day: 2},
-		Description:      "LEATHER SHOP FIRENZE",
-		Kind:             parserv1.TransactionKind_TRANSACTION_KIND_REFUND,
-		Amount:           &decimal.Decimal{Value: "-28009"},
-		OriginalAmount:   &decimal.Decimal{Value: "-780.00"},
-		OriginalCurrency: "EUR",
-	}}
-	documents := map[int64]*parserv1.Statement{
-		addDocument(t, pool, "october.eml"):  october,
-		addDocument(t, pool, "november.eml"): november,
-	}
-	store := func(id int64) error {
-		_, err := Store(ctx, pool, id, &parserv1.ParseDocumentResponse{Statement: documents[id], Parser: "fake", ParserVersion: "1"})
-		return err
-	}
-	for id := range documents {
-		if err := store(id); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	for range 30 {
-		errs := make(chan error, len(documents))
-		for id := range documents {
-			go func() { errs <- store(id) }()
-		}
-		for range documents {
-			if err := <-errs; err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-}

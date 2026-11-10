@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 )
 
@@ -22,7 +23,7 @@ func convertSecurities(documentID int64, s *parserv1.SecuritiesStatement) (store
 	statement := dbq.InsertStatementParams{
 		DocumentID:  documentID,
 		Institution: s.GetInstitution(),
-		Kind:        KindSecurities,
+		Kind:        domain.Securities,
 		Balanced:    rec.GetBalanced(),
 	}
 	if statement.Institution == "" || s.GetAccountNumber() == "" {
@@ -35,7 +36,7 @@ func convertSecurities(documentID int64, s *parserv1.SecuritiesStatement) (store
 	statement.ClosingDate, errs = requiredDate(s.GetHoldingsDate(), "holdings date", errs)
 
 	reported := storedAccount{account: dbq.UpsertAccountParams{
-		Institution: statement.Institution, Kind: KindSecurities, Number: s.GetAccountNumber(),
+		Institution: statement.Institution, Kind: domain.Securities, Number: s.GetAccountNumber(),
 	}}
 	held := map[string]bool{}
 	for i, h := range s.GetHoldings() {
@@ -59,10 +60,10 @@ func convertSecurities(documentID int64, s *parserv1.SecuritiesStatement) (store
 		shares := t.GetShares()
 		switch t.GetSide() {
 		case parserv1.TradeSide_TRADE_SIDE_BUY:
-			line.Kind = "buy"
+			line.Kind = domain.Buy
 		case parserv1.TradeSide_TRADE_SIDE_SELL:
 			// Shares leave the account.
-			line.Kind = "sell"
+			line.Kind = domain.Sell
 			if shares != nil {
 				shares = &decimal.Decimal{Value: "-" + shares.GetValue()}
 			}

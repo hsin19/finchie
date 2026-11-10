@@ -63,30 +63,33 @@ func (e AccountKind) Valid() bool {
 	}
 }
 
-// Defines values for DocumentState.
+// Defines values for DocumentFailure.
 const (
-	DocumentStateDuplicate   DocumentState = "duplicate"
-	DocumentStateFailed      DocumentState = "failed"
-	DocumentStateNeedsReview DocumentState = "needs_review"
-	DocumentStateParsed      DocumentState = "parsed"
-	DocumentStatePending     DocumentState = "pending"
-	DocumentStateSkipped     DocumentState = "skipped"
+	DocumentFailureInvalidResponse DocumentFailure = "invalid_response"
+	DocumentFailureLayout          DocumentFailure = "layout"
+	DocumentFailureLocked          DocumentFailure = "locked"
+	DocumentFailureOther           DocumentFailure = "other"
+	DocumentFailureUnavailable     DocumentFailure = "unavailable"
+	DocumentFailureUnreadable      DocumentFailure = "unreadable"
+	DocumentFailureUnsupported     DocumentFailure = "unsupported"
 )
 
-// Valid indicates whether the value is a known member of the DocumentState enum.
-func (e DocumentState) Valid() bool {
+// Valid indicates whether the value is a known member of the DocumentFailure enum.
+func (e DocumentFailure) Valid() bool {
 	switch e {
-	case DocumentStateDuplicate:
+	case DocumentFailureInvalidResponse:
 		return true
-	case DocumentStateFailed:
+	case DocumentFailureLayout:
 		return true
-	case DocumentStateNeedsReview:
+	case DocumentFailureLocked:
 		return true
-	case DocumentStateParsed:
+	case DocumentFailureOther:
 		return true
-	case DocumentStatePending:
+	case DocumentFailureUnavailable:
 		return true
-	case DocumentStateSkipped:
+	case DocumentFailureUnreadable:
+		return true
+	case DocumentFailureUnsupported:
 		return true
 	default:
 		return false
@@ -95,25 +98,28 @@ func (e DocumentState) Valid() bool {
 
 // Defines values for DocumentStatus.
 const (
-	DocumentStatusDuplicate   DocumentStatus = "duplicate"
-	DocumentStatusFailed      DocumentStatus = "failed"
-	DocumentStatusNeedsReview DocumentStatus = "needs_review"
-	DocumentStatusParsed      DocumentStatus = "parsed"
-	DocumentStatusPending     DocumentStatus = "pending"
+	Duplicate   DocumentStatus = "duplicate"
+	Failed      DocumentStatus = "failed"
+	NeedsReview DocumentStatus = "needs_review"
+	Parsed      DocumentStatus = "parsed"
+	Pending     DocumentStatus = "pending"
+	Skipped     DocumentStatus = "skipped"
 )
 
 // Valid indicates whether the value is a known member of the DocumentStatus enum.
 func (e DocumentStatus) Valid() bool {
 	switch e {
-	case DocumentStatusDuplicate:
+	case Duplicate:
 		return true
-	case DocumentStatusFailed:
+	case Failed:
 		return true
-	case DocumentStatusNeedsReview:
+	case NeedsReview:
 		return true
-	case DocumentStatusParsed:
+	case Parsed:
 		return true
-	case DocumentStatusPending:
+	case Pending:
+		return true
+	case Skipped:
 		return true
 	default:
 		return false
@@ -155,52 +161,52 @@ func (e PriceSource) Valid() bool {
 
 // Defines values for TransactionKind.
 const (
-	Adjust                TransactionKind = "adjust"
-	AnnualFee             TransactionKind = "annual_fee"
-	Buy                   TransactionKind = "buy"
-	Earn                  TransactionKind = "earn"
-	Fee                   TransactionKind = "fee"
-	ForeignTransactionFee TransactionKind = "foreign_transaction_fee"
-	Interest              TransactionKind = "interest"
-	Other                 TransactionKind = "other"
-	Payment               TransactionKind = "payment"
-	Purchase              TransactionKind = "purchase"
-	Rebate                TransactionKind = "rebate"
-	Redeem                TransactionKind = "redeem"
-	Refund                TransactionKind = "refund"
-	Sell                  TransactionKind = "sell"
+	TransactionKindAdjust                TransactionKind = "adjust"
+	TransactionKindAnnualFee             TransactionKind = "annual_fee"
+	TransactionKindBuy                   TransactionKind = "buy"
+	TransactionKindEarn                  TransactionKind = "earn"
+	TransactionKindFee                   TransactionKind = "fee"
+	TransactionKindForeignTransactionFee TransactionKind = "foreign_transaction_fee"
+	TransactionKindInterest              TransactionKind = "interest"
+	TransactionKindOther                 TransactionKind = "other"
+	TransactionKindPayment               TransactionKind = "payment"
+	TransactionKindPurchase              TransactionKind = "purchase"
+	TransactionKindRebate                TransactionKind = "rebate"
+	TransactionKindRedeem                TransactionKind = "redeem"
+	TransactionKindRefund                TransactionKind = "refund"
+	TransactionKindSell                  TransactionKind = "sell"
 )
 
 // Valid indicates whether the value is a known member of the TransactionKind enum.
 func (e TransactionKind) Valid() bool {
 	switch e {
-	case Adjust:
+	case TransactionKindAdjust:
 		return true
-	case AnnualFee:
+	case TransactionKindAnnualFee:
 		return true
-	case Buy:
+	case TransactionKindBuy:
 		return true
-	case Earn:
+	case TransactionKindEarn:
 		return true
-	case Fee:
+	case TransactionKindFee:
 		return true
-	case ForeignTransactionFee:
+	case TransactionKindForeignTransactionFee:
 		return true
-	case Interest:
+	case TransactionKindInterest:
 		return true
-	case Other:
+	case TransactionKindOther:
 		return true
-	case Payment:
+	case TransactionKindPayment:
 		return true
-	case Purchase:
+	case TransactionKindPurchase:
 		return true
-	case Rebate:
+	case TransactionKindRebate:
 		return true
-	case Redeem:
+	case TransactionKindRedeem:
 		return true
-	case Refund:
+	case TransactionKindRefund:
 		return true
-	case Sell:
+	case TransactionKindSell:
 		return true
 	default:
 		return false
@@ -495,11 +501,19 @@ type Decimal = string
 // Document defines model for Document.
 type Document struct {
 	// AccountCount Accounts its statement reported, 0 without one
-	AccountCount int     `json:"accountCount"`
-	ContentType  string  `json:"contentType"`
-	Error        *string `json:"error,omitempty"`
-	Filename     string  `json:"filename"`
-	Id           int64   `json:"id"`
+	AccountCount int    `json:"accountCount"`
+	ContentType  string `json:"contentType"`
+
+	// DuplicateOf The document holding the statement this one repeats, when a duplicate
+	DuplicateOf *int64 `json:"duplicateOf,omitempty"`
+
+	// Error The details of a failure, for reading
+	Error *string `json:"error,omitempty"`
+
+	// Failure Why it failed or was skipped; absent otherwise
+	Failure  *DocumentFailure `json:"failure,omitempty"`
+	Filename string           `json:"filename"`
+	Id       int64            `json:"id"`
 
 	// LineCount Lines its statement holds, 0 without one
 	LineCount     int        `json:"lineCount"`
@@ -517,10 +531,18 @@ type Document struct {
 
 	// Status pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
 	// transactions don't add up to the statement. duplicate: the same statement came from
-	// another document. failed: the parser could not read it (see `error`).
+	// another document (`duplicateOf`). failed: it could not be parsed (`failure`, `error`).
+	// skipped: no parser handles it, so there is nothing to fix or retry.
 	Status   DocumentStatus `json:"status"`
 	Warnings []string       `json:"warnings"`
 }
+
+// DocumentFailure Why a document could not be parsed: what has to change first. unsupported: no parser
+// handles it (the document is skipped). locked: its PDF needs a password the parser lacks.
+// unreadable: it is no e-mail, or cannot be read as one. layout: its layout is not the one
+// the parser knows. unavailable: the parser could not be reached in time; the backend tries
+// again by itself. invalid_response: the parser broke its contract. other: anything else.
+type DocumentFailure string
 
 // DocumentPage defines model for DocumentPage.
 type DocumentPage struct {
@@ -537,14 +559,10 @@ type DocumentPreview struct {
 	Files []PreviewFile `json:"files"`
 }
 
-// DocumentState A document's status as the web app shows it: a failure because no parser handles the file
-// (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
-// failure.
-type DocumentState string
-
 // DocumentStatus pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
 // transactions don't add up to the statement. duplicate: the same statement came from
-// another document. failed: the parser could not read it (see `error`).
+// another document (`duplicateOf`). failed: it could not be parsed (`failure`, `error`).
+// skipped: no parser handles it, so there is nothing to fix or retry.
 type DocumentStatus string
 
 // EmailPreview defines model for EmailPreview.
@@ -607,6 +625,19 @@ type KindTotal struct {
 	Kind TransactionKind `json:"kind"`
 }
 
+// KindWorth defines model for KindWorth.
+type KindWorth struct {
+	Kind AccountKind `json:"kind"`
+
+	// Unvalued Accounts of the kind without a worth, left out of it
+	Unvalued int `json:"unvalued"`
+
+	// Worth Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Worth Decimal `json:"worth"`
+}
+
 // LineCounterpart The other line of a transfer or card payment (ADR 0016)
 type LineCounterpart struct {
 	// AccountId A deposit account; absent for a card bill
@@ -622,6 +653,35 @@ type LineCounterpart struct {
 	Id            int64              `json:"id"`
 	Institution   string             `json:"institution"`
 	StatementId   int64              `json:"statementId"`
+}
+
+// NetWorth defines model for NetWorth.
+type NetWorth struct {
+	ByKind []KindWorth `json:"byKind"`
+
+	// Holdings Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Holdings Decimal `json:"holdings"`
+
+	// Net Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Net Decimal `json:"net"`
+
+	// Owed Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Owed Decimal `json:"owed"`
+
+	// OwedElsewhere Unpaid bills in another currency than NT$, left out of owed
+	OwedElsewhere int `json:"owedElsewhere"`
+
+	// UnpaidBills The statements that make up what is owed
+	UnpaidBills []int64 `json:"unpaidBills"`
+
+	// Unvalued Accounts without a worth, left out of holdings
+	Unvalued int `json:"unvalued"`
 }
 
 // Position A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017).
@@ -709,14 +769,27 @@ type Reconciliation struct {
 	StatedLabel string  `json:"statedLabel"`
 }
 
+// Settings defines model for Settings.
+type Settings struct {
+	// BaseCurrency What every worth is in, e.g. TWD
+	BaseCurrency string `json:"baseCurrency"`
+
+	// MaxUploadBytes The largest file an upload may be (BACKEND_MAX_UPLOAD_MB)
+	MaxUploadBytes int64 `json:"maxUploadBytes"`
+
+	// SourceIntervalHours How often rates, closes, and exchanges are read
+	SourceIntervalHours int `json:"sourceIntervalHours"`
+}
+
 // StateCount defines model for StateCount.
 type StateCount struct {
 	Count int `json:"count"`
 
-	// State A document's status as the web app shows it: a failure because no parser handles the file
-	// (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
-	// failure.
-	State DocumentState `json:"state"`
+	// State pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
+	// transactions don't add up to the statement. duplicate: the same statement came from
+	// another document (`duplicateOf`). failed: it could not be parsed (`failure`, `error`).
+	// skipped: no parser handles it, so there is nothing to fix or retry.
+	State DocumentStatus `json:"state"`
 }
 
 // Statement defines model for Statement.
@@ -778,8 +851,8 @@ type Trade struct {
 // Transaction defines model for Transaction.
 type Transaction struct {
 	// AccountId A deposit account; absent for a card line
-	AccountId   *int64       `json:"accountId,omitempty"`
-	AccountKind *AccountKind `json:"accountKind,omitempty"`
+	AccountId   *int64      `json:"accountId,omitempty"`
+	AccountKind AccountKind `json:"accountKind"`
 
 	// AccountName The owner's name for a deposit account, else the bank's
 	AccountName *string `json:"accountName,omitempty"`
@@ -808,9 +881,9 @@ type Transaction struct {
 	Description  string           `json:"description"`
 
 	// Flow Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it
-	Flow        *Decimal `json:"flow,omitempty"`
-	Id          int64    `json:"id"`
-	Institution string   `json:"institution"`
+	Flow        Decimal `json:"flow"`
+	Id          int64   `json:"id"`
+	Institution string  `json:"institution"`
 
 	// Kind A card line's kind (purchase … payment), a deposit line's (interest, fee, other; ADR 0013), a trade's (buy, sell; ADR 0017), or a points line's (earn, adjust, redeem; ADR 0019)
 	Kind TransactionKind `json:"kind"`
@@ -832,7 +905,7 @@ type Transaction struct {
 	TransactionDate openapi_types.Date `json:"transactionDate"`
 
 	// Unit ISO 4217, or a points program's code
-	Unit *string `json:"unit,omitempty"`
+	Unit string `json:"unit"`
 }
 
 // TransactionFamily defines model for TransactionFamily.
@@ -964,11 +1037,14 @@ type ListDocumentsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// Before The last document of the page before; the list continues after it
-	Before *int64           `form:"before,omitempty" json:"before,omitempty"`
-	State  *[]DocumentState `form:"state,omitempty" json:"state,omitempty"`
+	Before *int64            `form:"before,omitempty" json:"before,omitempty"`
+	State  *[]DocumentStatus `form:"state,omitempty" json:"state,omitempty"`
 
 	// Q Case-insensitive substring of the filename
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Id Only these documents, wherever they fall in the list (for refreshing ones already shown)
+	Id *[]int64 `form:"id,omitempty" json:"id,omitempty"`
 }
 
 // UploadDocumentMultipartBody defines parameters for UploadDocument.
@@ -1093,6 +1169,12 @@ type ServerInterface interface {
 	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
 	// (GET /api/mail-filters.xml)
 	GetMailFilters(ctx *echo.Context) error
+	// GetNetWorth What the owner has less what they owe on cards, in NT$
+	// (GET /api/net-worth)
+	GetNetWorth(ctx *echo.Context) error
+	// GetSettings The deployment's settings the web app shows or obeys
+	// (GET /api/settings)
+	GetSettings(ctx *echo.Context) error
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx *echo.Context, params ListStatementsParams) error
@@ -1256,6 +1338,13 @@ func (w *ServerInterfaceWrapper) ListDocuments(ctx *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter q: %s", err))
 	}
 
+	// ------------- Optional query parameter "id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "id", ctx.QueryParams(), &params.Id, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ListDocuments(ctx, params)
 	return err
@@ -1396,6 +1485,24 @@ func (w *ServerInterfaceWrapper) GetMailFilters(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.GetMailFilters(ctx)
+	return err
+}
+
+// GetNetWorth converts echo context to params.
+func (w *ServerInterfaceWrapper) GetNetWorth(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetNetWorth(ctx)
+	return err
+}
+
+// GetSettings converts echo context to params.
+func (w *ServerInterfaceWrapper) GetSettings(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetSettings(ctx)
 	return err
 }
 
@@ -1696,6 +1803,8 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.DELETE(options.BaseURL+"/api/units/:id/price", wrapper.ClearUnitPrice, options.OperationMiddlewares["clearUnitPrice"]...)
 	router.PUT(options.BaseURL+"/api/units/:id/price", wrapper.SetUnitPrice, options.OperationMiddlewares["setUnitPrice"]...)
 	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
+	router.GET(options.BaseURL+"/api/net-worth", wrapper.GetNetWorth, options.OperationMiddlewares["getNetWorth"]...)
+	router.GET(options.BaseURL+"/api/settings", wrapper.GetSettings, options.OperationMiddlewares["getSettings"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
 	router.GET(options.BaseURL+"/api/statements/:id", wrapper.GetStatement, options.OperationMiddlewares["getStatement"]...)
@@ -2559,6 +2668,48 @@ func (response GetMailFilters404JSONResponse) VisitGetMailFiltersResponse(w http
 	return err
 }
 
+type GetNetWorthRequestObject struct {
+}
+
+type GetNetWorthResponseObject interface {
+	VisitGetNetWorthResponse(w http.ResponseWriter) error
+}
+
+type GetNetWorth200JSONResponse NetWorth
+
+func (response GetNetWorth200JSONResponse) VisitGetNetWorthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSettingsRequestObject struct {
+}
+
+type GetSettingsResponseObject interface {
+	VisitGetSettingsResponse(w http.ResponseWriter) error
+}
+
+type GetSettings200JSONResponse Settings
+
+func (response GetSettings200JSONResponse) VisitGetSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListStatementsRequestObject struct {
 	Params ListStatementsParams
 }
@@ -2858,6 +3009,12 @@ type StrictServerInterface interface {
 	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
 	// (GET /api/mail-filters.xml)
 	GetMailFilters(ctx context.Context, request GetMailFiltersRequestObject) (GetMailFiltersResponseObject, error)
+	// GetNetWorth What the owner has less what they owe on cards, in NT$
+	// (GET /api/net-worth)
+	GetNetWorth(ctx context.Context, request GetNetWorthRequestObject) (GetNetWorthResponseObject, error)
+	// GetSettings The deployment's settings the web app shows or obeys
+	// (GET /api/settings)
+	GetSettings(ctx context.Context, request GetSettingsRequestObject) (GetSettingsResponseObject, error)
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx context.Context, request ListStatementsRequestObject) (ListStatementsResponseObject, error)
@@ -3359,6 +3516,52 @@ func (sh *strictHandler) GetMailFilters(ctx *echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(GetMailFiltersResponseObject); ok {
 		return validResponse.VisitGetMailFiltersResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetNetWorth operation middleware
+func (sh *strictHandler) GetNetWorth(ctx *echo.Context) error {
+	var request GetNetWorthRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNetWorth(ctx.Request().Context(), request.(GetNetWorthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNetWorth")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetNetWorthResponseObject); ok {
+		return validResponse.VisitGetNetWorthResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetSettings operation middleware
+func (sh *strictHandler) GetSettings(ctx *echo.Context) error {
+	var request GetSettingsRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSettings(ctx.Request().Context(), request.(GetSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSettings")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetSettingsResponseObject); ok {
+		return validResponse.VisitGetSettingsResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 )
 
@@ -72,18 +73,24 @@ func TestConvertRejectsResponsesThatBreakTheContract(t *testing.T) {
 	}
 }
 
-func TestOnlyTransientParserErrorsAreRetried(t *testing.T) {
-	retry := []codes.Code{codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted}
-	permanent := []codes.Code{codes.Unimplemented, codes.InvalidArgument, codes.FailedPrecondition, codes.Internal, codes.Unknown}
-	for _, code := range retry {
-		if !retryable(status.Error(code, "x")) {
-			t.Errorf("%s should be retried", code)
+func TestTheParsersStatusSaysWhatHasToChangeAndOnlyAnUnreachableParserIsRetried(t *testing.T) {
+	for code, want := range map[codes.Code]domain.Failure{
+		codes.Unavailable:        domain.Unavailable,
+		codes.DeadlineExceeded:   domain.Unavailable,
+		codes.ResourceExhausted:  domain.Unavailable,
+		codes.Canceled:           domain.Unavailable,
+		codes.Unimplemented:      domain.Unsupported,
+		codes.FailedPrecondition: domain.Locked,
+		codes.InvalidArgument:    domain.Unreadable,
+		codes.Internal:           domain.Layout,
+		codes.Unknown:            domain.OtherFailure,
+	} {
+		if got, message := classify(status.Error(code, "x")); got != want || message == "" {
+			t.Errorf("%s: %s %q, want %s", code, got, message, want)
 		}
 	}
-	for _, code := range permanent {
-		if retryable(status.Error(code, "x")) {
-			t.Errorf("%s should not be retried", code)
-		}
+	if domain.Unsupported.Status() != domain.Skipped || domain.Layout.Status() != domain.Failed {
+		t.Fatal("a document no parser handles is skipped, any other failure failed")
 	}
 }
 

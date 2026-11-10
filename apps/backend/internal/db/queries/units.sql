@@ -40,8 +40,10 @@ JOIN units q ON q.kind = 'money' AND q.symbol = r.quote
 WHERE u.id <> q.id
 ON CONFLICT (unit_id, source, ((as_of AT TIME ZONE 'Asia/Taipei')::date))
 DO UPDATE SET as_of = EXCLUDED.as_of, amount = EXCLUDED.amount, quote_unit_id = EXCLUDED.quote_unit_id,
-              quote_amount = EXCLUDED.quote_amount;
+              quote_amount = EXCLUDED.quote_amount, withdrawn_at = NULL;
 
 -- name: ClearOwnerPrices :exec
--- The owner's prices of a unit, all of them: the value they gave is withdrawn.
-DELETE FROM prices WHERE unit_id = @unit_id AND source = 'owner';
+-- Withdraws the owner's prices of a unit: kept, so what it was worth on a day stays known, but none counts
+-- as its newest any more (newest_prices).
+UPDATE prices SET withdrawn_at = now()
+WHERE unit_id = @unit_id AND source = 'owner' AND withdrawn_at IS NULL;

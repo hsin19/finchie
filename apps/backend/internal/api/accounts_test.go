@@ -58,7 +58,7 @@ func storeDeposit(t *testing.T, pool *pgxpool.Pool, month int32, closing string,
 		PeriodEnd:   &gdate.Date{Year: 2026, Month: month, Day: last},
 		Accounts:    []*parserv1.DepositAccount{account},
 	}
-	if _, err := ingest.Store(t.Context(), pool, doc.ID, &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -144,7 +144,7 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ingest.Store(t.Context(), pool, doc.ID, &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: bill}); err != nil {
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: bill}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,6 +167,12 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 		if a.Kind == AccountKindCreditCard {
 			t.Fatalf("card account listed: %+v", a)
 		}
+	}
+	// What the bill owes, never shown paid, comes off what the account is worth.
+	net := decode[NetWorth](t, get(t, e, "/api/net-worth"))
+	if net.Holdings != "2500.00" || net.Owed != "300.00" || net.Net != "2200.00" || len(net.UnpaidBills) != 1 || net.Unvalued != 0 ||
+		len(net.ByKind) != 1 || net.ByKind[0].Kind != AccountKindDeposit {
+		t.Fatalf("net worth = %+v", net)
 	}
 
 	path := fmt.Sprintf("/api/accounts/%d", deposit.Id)
@@ -213,7 +219,7 @@ func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testi
 			balance("8888888***888", "JPY", "500"),
 		},
 	}
-	if _, err := ingest.Store(ctx, pool, doc.ID, &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
+	if _, err := ingest.Store(ctx, pool, doc.ID, "", &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,7 +261,7 @@ func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.Par
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ingest.Store(t.Context(), pool, doc.ID, response); err != nil {
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", response); err != nil {
 		t.Fatal(err)
 	}
 	return doc.ID
@@ -540,7 +546,7 @@ func TestACardBillsPointsAreAPointsAccountWithWhatTheNewestBillSaysWillLapse(t *
 		t.Fatalf("detail expiries %+v, history %+v", detail.Expiries, detail.History)
 	}
 	lines := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", points.Id)))
-	if len(lines) != 2 || lines[0].Kind != string(Redeem) || lines[0].Amount != "-1" || lines[1].Description != "本期新增/扣除" || lines[1].Date.String() != "2026-11-01" {
+	if len(lines) != 2 || lines[0].Kind != string(TransactionKindRedeem) || lines[0].Amount != "-1" || lines[1].Description != "本期新增/扣除" || lines[1].Date.String() != "2026-11-01" {
 		t.Fatalf("lines = %+v", lines)
 	}
 	// Listed in search, but points are not money: neither spent nor received.

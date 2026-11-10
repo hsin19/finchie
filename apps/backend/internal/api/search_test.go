@@ -11,8 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
-	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 )
 
 type line struct {
@@ -32,18 +33,18 @@ func seedStatement(t *testing.T, pool *pgxpool.Pool, institution, closing string
 		t.Fatal(err)
 	}
 	id, err := queries.InsertStatement(ctx, dbq.InsertStatementParams{
-		DocumentID: doc.ID, Institution: institution, Kind: ingest.KindCreditCard, ClosingDate: pgDate(t, closing), DueDate: pgDate(t, closing),
-		Currency: optional("TWD"), TotalDue: numeric(t, "0"), ComputedNewCharges: numeric(t, "0"), StatedNewCharges: numeric(t, "0"),
+		DocumentID: doc.ID, Institution: institution, Kind: domain.CreditCard, ClosingDate: pgDate(t, closing), DueDate: pgDate(t, closing),
+		Currency: optional("TWD"), TotalDue: num(t, "0"), ComputedNewCharges: num(t, "0"), StatedNewCharges: num(t, "0"),
 		StatedLabel: optional("total"), Balanced: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	account, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{Institution: institution, Kind: ingest.KindCreditCard})
+	account, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{Institution: institution, Kind: domain.CreditCard})
 	if err != nil {
 		t.Fatal(err)
 	}
-	units, err := ingest.Units(ctx, queries, ingest.UnitMoney, "TWD")
+	units, err := ledger.Units(ctx, queries, domain.Money, "TWD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func seedStatement(t *testing.T, pool *pgxpool.Pool, institution, closing string
 	for i, l := range lines {
 		rows = append(rows, dbq.InsertTransactionsParams{
 			StatementID: id, AccountID: account, UnitID: units["TWD"], LineNo: int32(i + 1), TransactionDate: pgDate(t, l.date), Description: l.description,
-			Kind: l.kind, Amount: numeric(t, l.amount),
+			Kind: domain.LineKind(l.kind), Amount: num(t, l.amount),
 			OriginalCurrency: optional(l.currency), Country: optional(l.country), CardLast4: optional(l.card),
 		})
 	}
@@ -70,7 +71,7 @@ func pgDate(t *testing.T, s string) pgtype.Date {
 	return pgtype.Date{Time: d, Valid: true}
 }
 
-func numeric(t *testing.T, s string) pgtype.Numeric {
+func num(t *testing.T, s string) pgtype.Numeric {
 	t.Helper()
 	var n pgtype.Numeric
 	if err := n.Scan(s); err != nil {
@@ -99,7 +100,7 @@ func seedLedger(t *testing.T, pool *pgxpool.Pool) (hsbc int64) {
 		{"2026-10-07", "U Bear cashback", "rebate", "-35.5", "", "", "3381"},
 	})
 	// The fee (1.5% of 23104) becomes the leather purchase's child; the tax-free refund fits none.
-	if _, err := ingest.Relink(t.Context(), pool); err != nil {
+	if _, err := ledger.RelinkAll(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
 	return hsbc
@@ -118,7 +119,7 @@ func TestSearchTransactionsFiltersAndTotals(t *testing.T) {
 	if leather.Description != "Leather Atelier Firenze" || leather.Institution != "hsbc" || leather.Amount != "23104" {
 		t.Fatalf("newest first, then statement line order: %+v", leather)
 	}
-	if leather.Children == nil || len(*leather.Children) != 1 || (*leather.Children)[0].Kind != ForeignTransactionFee || (*leather.Children)[0].Amount != "346.56" {
+	if leather.Children == nil || len(*leather.Children) != 1 || (*leather.Children)[0].Kind != TransactionKindForeignTransactionFee || (*leather.Children)[0].Amount != "346.56" {
 		t.Fatalf("leather children = %+v", leather.Children)
 	}
 
@@ -138,7 +139,7 @@ func TestSearchTransactionsFiltersAndTotals(t *testing.T) {
 	for _, k := range purchases.ByKind {
 		kinds[k.Kind] = k.Amount
 	}
-	if len(kinds) != 3 || kinds[ForeignTransactionFee] != "346.56" || kinds[Rebate] != "" {
+	if len(kinds) != 3 || kinds[TransactionKindForeignTransactionFee] != "346.56" || kinds[TransactionKindRebate] != "" {
 		t.Fatalf("byKind = %+v", purchases.ByKind)
 	}
 	// byCard ignores the card filter but keeps the kind filter.
@@ -273,10 +274,10 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	for _, item := range all.Items {
 		items[item.Description] = item
 	}
-	if shop := items["SHOP"]; shop.Amount != "6350" || *shop.Flow != "-6350" || *shop.AccountKind != AccountKindCreditCard || shop.AccountId != nil {
+	if shop := items["SHOP"]; shop.Amount != "6350" || shop.Flow != "-6350" || shop.AccountKind != AccountKindCreditCard || shop.AccountId != nil {
 		t.Fatalf("card purchase = %+v", shop)
 	}
-	if salary := items["薪資"]; *salary.Flow != "60000" || *salary.AccountKind != AccountKindDeposit || *salary.AccountId != esun.Id || *salary.AccountNumber != savings {
+	if salary := items["薪資"]; salary.Flow != "60000" || salary.AccountKind != AccountKindDeposit || *salary.AccountId != esun.Id || *salary.AccountNumber != savings {
 		t.Fatalf("salary = %+v", salary)
 	}
 	if out := items["行銀跨行轉優"]; out.Counterpart == nil || *out.Counterpart.AccountId != taishin.Id || *out.Memo != "房租" {
@@ -295,14 +296,14 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 		t.Fatalf("payments = %+v", payments.Items)
 	}
 	// The kind facet counts lines as printed.
-	if counts := countByKind(all.ByKind); counts[Other] != 4 || counts[Payment] != 1 {
+	if counts := countByKind(all.ByKind); counts[TransactionKindOther] != 4 || counts[TransactionKindPayment] != 1 {
 		t.Fatalf("byKind = %+v", all.ByKind)
 	}
 	kinds := map[TransactionKind]string{}
 	for _, k := range all.ByKind {
 		kinds[k.Kind] = k.Flow
 	}
-	if kinds[Fee] != "-15" || kinds[Purchase] != "-6350" {
+	if kinds[TransactionKindFee] != "-15" || kinds[TransactionKindPurchase] != "-6350" {
 		t.Fatalf("byKind = %+v", all.ByKind)
 	}
 

@@ -13,10 +13,11 @@ INSERT INTO balances (account_id, unit_id, as_of, amount, statement_id)
 VALUES (@account_id, @unit_id, @as_of, @amount, @statement_id::bigint);
 
 -- name: ListAccounts :many
--- The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013).
+-- The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013). Of one
+-- account, or with none, of all.
 SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
-WHERE kind <> 'credit_card'
+WHERE kind <> 'credit_card' AND (sqlc.narg(id)::bigint IS NULL OR id = sqlc.narg(id)::bigint)
 ORDER BY institution, kind DESC, number;
 
 -- name: GetAccount :one
@@ -35,7 +36,7 @@ RETURNING id;
 -- name: LatestBalances :many
 -- Each account's newest balance in each unit, with its unit's newest price, whatever its source, and its
 -- worth in NT$ at that price (ADR 0020). A unit without a price, or priced in a unit without one in NT$,
--- has no worth.
+-- has no worth. Of one account, or with none, of all.
 SELECT DISTINCT ON (b.account_id, b.unit_id) b.account_id, b.unit_id, u.symbol AS unit, u.code, b.as_of, b.amount,
        b.statement_id,
        round(b.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth,
@@ -45,6 +46,7 @@ SELECT DISTINCT ON (b.account_id, b.unit_id) b.account_id, b.unit_id, u.symbol A
 FROM balances b
 JOIN units u ON u.id = b.unit_id
 LEFT JOIN newest_prices p ON p.unit_id = b.unit_id
+WHERE sqlc.narg(account_id)::bigint IS NULL OR b.account_id = sqlc.narg(account_id)::bigint
 ORDER BY b.account_id, b.unit_id, b.as_of DESC, b.id DESC;
 
 -- name: LatestValuations :many
@@ -55,6 +57,7 @@ SELECT DISTINCT ON (v.account_id) v.account_id, v.as_of, u.symbol AS unit, v.amo
 FROM valuations v
 JOIN units u ON u.id = v.unit_id
 LEFT JOIN newest_prices p ON p.unit_id = v.unit_id
+WHERE sqlc.narg(account_id)::bigint IS NULL OR v.account_id = sqlc.narg(account_id)::bigint
 ORDER BY v.account_id, v.as_of DESC;
 
 -- name: AccountBalances :many
@@ -67,22 +70,24 @@ ORDER BY b.as_of DESC, u.symbol, b.id DESC;
 -- name: AccountGaps :many
 -- Where an account's balances do not join up (ADR 0013): two consecutive balances in one unit whose
 -- difference the lines dated between them do not account for, so money moved that no report shows.
--- Deposit and securities accounts (a security's shares, ADR 0017): a card bill's lines are dated by
--- purchase, which can fall before the previous bill closed, so dates cannot place them between two bills.
--- Itemized: some statement has listed a line of the account in the unit. A deposit account's unit none
+-- Accounts of the itemized kinds (domain.AccountKind.Itemized), such as deposit and securities accounts (a
+-- security's shares, ADR 0017): a card bill's lines are dated by purchase, which can fall before the
+-- previous bill closed, so dates cannot place them between two bills.
+-- Itemized: some statement has listed a line of the account in the unit, or its kind's statements list
+-- every line (domain.AccountKind.EveryLineListed). A deposit account's unit none
 -- has may be one whose statements print only its balance (CTBC's passbook savings, 活儲有摺): a move
 -- there is one no source shows, not a gap. A securities statement lists every trade, so a security
 -- never traded is itemized all the same: a stock dividend is a gap. A points account's bills list every
 -- movement but points that lapse, so a gap there is points lost (ADR 0019).
 WITH ordered AS (
     SELECT b.account_id, b.unit_id, b.as_of, b.amount,
-           (a.kind IN ('securities', 'points') OR EXISTS (
+           (a.kind = ANY (@every_line_listed::text[]) OR EXISTS (
                SELECT 1 FROM transactions t WHERE t.account_id = b.account_id AND t.unit_id = b.unit_id))::boolean AS itemized,
            lag(b.as_of) OVER w AS prev_as_of,
            lag(b.amount) OVER w AS prev_amount
     FROM balances b
     JOIN accounts a ON a.id = b.account_id
-    WHERE a.kind IN ('deposit', 'securities', 'points') AND b.statement_id IS NOT NULL
+    WHERE a.kind = ANY (@itemized::text[]) AND b.statement_id IS NOT NULL
       AND (sqlc.narg(account_id)::bigint IS NULL OR b.account_id = sqlc.narg(account_id)::bigint)
     WINDOW w AS (PARTITION BY b.account_id, b.unit_id ORDER BY b.as_of, b.id)
 )

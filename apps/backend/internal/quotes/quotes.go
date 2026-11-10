@@ -17,10 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"golang.org/x/text/unicode/norm"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/jobs"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
@@ -41,17 +42,10 @@ type FetchArgs struct{}
 
 func (FetchArgs) Kind() string { return "fetch_quotes" }
 
-func (FetchArgs) InsertOpts() river.InsertOpts {
-	// The next run is six hours away; a few retries cover an exchange's API that is briefly down.
-	return river.InsertOpts{MaxAttempts: 4}
-}
+func (FetchArgs) InsertOpts() river.InsertOpts { return jobs.SourceOpts() }
 
-// Periodic runs the job every 6 hours and when the backend starts, like the exchange rates.
-func Periodic() *river.PeriodicJob {
-	return river.NewPeriodicJob(river.PeriodicInterval(6*time.Hour),
-		func() (river.JobArgs, *river.InsertOpts) { return FetchArgs{}, nil },
-		&river.PeriodicJobOpts{RunOnStart: true, ID: "fetch_quotes"})
-}
+// Periodic reads the closes as a source (jobs.Source).
+func Periodic() *river.PeriodicJob { return jobs.Source("fetch_quotes", FetchArgs{}) }
 
 type Worker struct {
 	river.WorkerDefaults[FetchArgs]
@@ -89,13 +83,13 @@ func (w *Worker) Work(ctx context.Context, _ *river.Job[FetchArgs]) error {
 			continue
 		}
 		codes, prices := keep(feed.Market, rows, held)
-		if len(prices.Symbols) == 0 {
+		if len(prices) == 0 {
 			continue
 		}
 		if err := queries.SetSecurityCodes(ctx, codes); err != nil {
 			return fmt.Errorf("store codes: %w", err)
 		}
-		if err := queries.UpsertPrices(ctx, prices); err != nil {
+		if err := ledger.StorePrices(ctx, queries, domain.PriceSource(feed.Market), domain.Security, prices); err != nil {
 			return fmt.Errorf("store quotes: %w", err)
 		}
 	}
@@ -141,33 +135,30 @@ func (w *Worker) fetch(ctx context.Context, url string) ([]row, error) {
 
 // keep takes the rows of held names that closed at a price, as of the close at 13:30 on the day, and
 // their codes; a security that did not trade that day prints none, and its newest close stands.
-func keep(market string, rows []row, held map[string]bool) (dbq.SetSecurityCodesParams, dbq.UpsertPricesParams) {
+func keep(market string, rows []row, held map[string]bool) (dbq.SetSecurityCodesParams, []ledger.Price) {
 	var codes dbq.SetSecurityCodesParams
-	prices := dbq.UpsertPricesParams{Source: market, Kind: ingest.UnitSecurity}
-	one := pgtype.Numeric{Int: big.NewInt(1), Valid: true}
+	var prices []ledger.Price
 	for _, r := range rows {
 		code, name, closing := r.Code, r.Name, r.ClosingPrice
 		if market == "tpex" {
 			code, name, closing = r.SecuritiesCompanyCode, r.CompanyName, r.Close
 		}
-		// Statements' names are normalized the same way (the parser's clean).
-		name = strings.TrimSpace(norm.NFKC.String(name))
+		// Spelled as statements spell it, so that the close reaches the unit.
+		name = domain.Symbol(domain.Security, name)
 		day, ok := rocDay(r.Date)
 		if !held[name] || !ok {
 			continue
 		}
-		var price pgtype.Numeric
-		if err := price.Scan(strings.TrimSpace(closing)); err != nil || price.Int == nil || price.Int.Sign() <= 0 {
+		price := strings.TrimSpace(closing)
+		if r, ok := new(big.Rat).SetString(price); !ok || r.Sign() <= 0 {
 			continue
 		}
 		codes.Symbols = append(codes.Symbols, name)
 		codes.Codes = append(codes.Codes, strings.TrimSpace(code))
 		codes.Markets = append(codes.Markets, market)
-		prices.Symbols = append(prices.Symbols, name)
-		prices.AsOf = append(prices.AsOf, pgtype.Timestamptz{Time: taipei.At(day.Time, 13, 30), Valid: true})
-		prices.Amounts = append(prices.Amounts, one)
-		prices.Quotes = append(prices.Quotes, "TWD")
-		prices.QuoteAmounts = append(prices.QuoteAmounts, price)
+		prices = append(prices, ledger.Price{
+			Symbol: name, AsOf: taipei.At(day.Time, 13, 30), Amount: "1", Quote: domain.BaseCurrency, QuoteAmount: price,
+		})
 	}
 	return codes, prices
 }

@@ -3,14 +3,14 @@ package api
 import (
 	"cmp"
 	"maps"
-	"math/big"
 	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/numeric"
 )
 
 type tally struct {
@@ -20,7 +20,7 @@ type tally struct {
 
 func (t *tally) add(count int32, amount pgtype.Numeric) {
 	t.count += int(count)
-	t.amount = addNumeric(t.amount, amount)
+	t.amount = numeric.Add(t.amount, amount)
 }
 
 type summary struct {
@@ -36,7 +36,7 @@ type summary struct {
 // link's outflow or not: picking one account lists them all, since a link joins two accounts. (A bank's
 // count, the sum of its accounts', counts both lines of a link within the bank.)
 func summarize(groups []dbq.TransactionTotalsRow) summary {
-	total := tally{amount: zero()}
+	total := tally{amount: numeric.Zero()}
 	type flow struct {
 		spent, received, moved pgtype.Numeric
 		movedCount             int
@@ -51,23 +51,23 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 			total.add(g.RowCount, g.Amount)
 		}
 		// Shares or points, not money: neither spent nor received (ADR 0017, ADR 0019).
-		if g.KindMatch && g.PickMatch && !g.Folded && g.AccountKind != ingest.KindSecurities && g.AccountKind != ingest.KindPoints {
+		if g.KindMatch && g.PickMatch && !g.Folded && domain.AccountKind(g.AccountKind).MovesMoney() {
 			if flows[g.Unit] == nil {
-				flows[g.Unit] = &flow{spent: zero(), received: zero(), moved: zero()}
+				flows[g.Unit] = &flow{spent: numeric.Zero(), received: numeric.Zero(), moved: numeric.Zero()}
 			}
 			f := flows[g.Unit]
 			// A folded line is always a transfer: never spent or received, and its link is counted once,
 			// at the outflow it is listed under.
-			f.spent, f.received = addNumeric(f.spent, g.Spent), addNumeric(f.received, g.Received)
-			f.moved, f.movedCount = addNumeric(f.moved, g.Moved), f.movedCount+int(g.MovedCount)
+			f.spent, f.received = numeric.Add(f.spent, g.Spent), numeric.Add(f.received, g.Received)
+			f.moved, f.movedCount = numeric.Add(f.moved, g.Moved), f.movedCount+int(g.MovedCount)
 		}
 		if !g.KindMatch {
 			continue
 		}
-		if g.AccountKind == ingest.KindCreditCard {
+		if !domain.AccountKind(g.AccountKind).OwnersAccount() {
 			key := cardKey{institution: g.Institution, last4: deref(g.CardLast4)}
 			if cards[key] == nil {
-				cards[key] = &tally{amount: zero()}
+				cards[key] = &tally{amount: numeric.Zero()}
 			}
 			cards[key].add(g.RowCount, g.Amount)
 			continue
@@ -82,7 +82,7 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 	for _, unit := range slices.Sorted(maps.Keys(flows)) {
 		f := flows[unit]
 		result.flows = append(result.flows, UnitFlow{
-			Unit: unit, Spent: decimalString(f.spent), Received: decimalString(f.received), Moved: decimalString(f.moved), MovedCount: f.movedCount,
+			Unit: unit, Spent: numeric.String(f.spent), Received: numeric.String(f.received), Moved: numeric.String(f.moved), MovedCount: f.movedCount,
 		})
 	}
 	cardOrder := slices.SortedFunc(maps.Keys(cards), func(a, b cardKey) int {
@@ -91,7 +91,7 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 	result.byCard = make([]CardTotal, 0, len(cards))
 	for _, key := range cardOrder {
 		t := cards[key]
-		card := CardTotal{Institution: key.institution, Count: t.count, Amount: decimalString(t.amount)}
+		card := CardTotal{Institution: key.institution, Count: t.count, Amount: numeric.String(t.amount)}
 		if key.last4 != "" {
 			card.CardLast4 = &key.last4
 		}
@@ -111,30 +111,7 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 func kindTotals(rows []dbq.KindTotalsRow) []KindTotal {
 	byKind := make([]KindTotal, 0, len(rows))
 	for _, row := range rows {
-		byKind = append(byKind, KindTotal{Kind: TransactionKind(row.Kind), Count: int(row.RowCount), Amount: decimalString(row.Amount), Flow: decimalString(row.Flow)})
+		byKind = append(byKind, KindTotal{Kind: TransactionKind(row.Kind), Count: int(row.RowCount), Amount: numeric.String(row.Amount), Flow: numeric.String(row.Flow)})
 	}
 	return byKind
-}
-
-func zero() pgtype.Numeric {
-	return pgtype.Numeric{Int: big.NewInt(0), Valid: true}
-}
-
-// addNumeric adds exactly, keeping the finer of the two scales ("1.5" + "2.25" = "3.75").
-func addNumeric(a, b pgtype.Numeric) pgtype.Numeric {
-	if !b.Valid {
-		return a
-	}
-	if !a.Valid {
-		return b
-	}
-	exp := min(a.Exp, b.Exp)
-	sum := new(big.Int).Add(scaled(a, exp), scaled(b, exp))
-	return pgtype.Numeric{Int: sum, Exp: exp, Valid: true}
-}
-
-// scaled returns n's digits as an integer count of 10^exp, for exp <= n.Exp.
-func scaled(n pgtype.Numeric, exp int32) *big.Int {
-	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n.Exp-exp)), nil)
-	return new(big.Int).Mul(n.Int, factor)
 }

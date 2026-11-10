@@ -15,6 +15,8 @@ type Config struct {
 	DatabaseURL string `env:"DATABASE_URL,required"`
 	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
 	ParserAddr  string `env:"PARSER_ADDR" envDefault:"localhost:50051"`
+	// The secret the parser asks callers for (its PARSER_TOKEN), sent with every call; empty sends none.
+	ParserToken string `env:"PARSER_TOKEN"`
 	// The parser needs a few seconds per statement, longer with OCR (ADR 0005).
 	ParseTimeout time.Duration `env:"PARSE_TIMEOUT" envDefault:"120s"`
 	// How many documents are parsed at once; keep it below the parser's workers, so previews and

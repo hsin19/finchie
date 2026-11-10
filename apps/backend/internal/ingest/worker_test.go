@@ -16,16 +16,28 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
-// fakeParser answers ParseDocument; the worker never calls the embedded (nil) OpenDocument.
+// fakeParser answers ParseDocument and DescribeParsers; the worker never calls the embedded (nil)
+// OpenDocument.
 type fakeParser struct {
 	parserv1.ParserServiceClient
 	response *parserv1.ParseDocumentResponse
 	err      error
 	requests []*parserv1.ParseDocumentRequest
+	// What DescribeParsers says: the parser of response at its version, and this instance.
+	instance string
+}
+
+func (f *fakeParser) DescribeParsers(context.Context, *parserv1.DescribeParsersRequest, ...grpc.CallOption) (*parserv1.DescribeParsersResponse, error) {
+	described := &parserv1.DescribeParsersResponse{Instance: f.instance}
+	if f.response != nil {
+		described.Parsers = []*parserv1.ParserVersion{{Name: f.response.GetParser(), Version: f.response.GetParserVersion()}}
+	}
+	return described, nil
 }
 
 func (f *fakeParser) ParseDocument(_ context.Context, in *parserv1.ParseDocumentRequest, _ ...grpc.CallOption) (*parserv1.ParseDocumentResponse, error) {
@@ -34,13 +46,13 @@ func (f *fakeParser) ParseDocument(_ context.Context, in *parserv1.ParseDocument
 }
 
 func parsed(statement *parserv1.Statement, warnings ...string) *fakeParser {
-	return &fakeParser{response: &parserv1.ParseDocumentResponse{
+	return &fakeParser{instance: "a", response: &parserv1.ParseDocumentResponse{
 		Parser: "hsbc.credit_card", ParserVersion: "1", Statement: statement, Warnings: warnings,
 	}}
 }
 
 func failing(code codes.Code) *fakeParser {
-	return &fakeParser{err: status.Error(code, "parser says no")}
+	return &fakeParser{instance: "a", err: status.Error(code, "parser says no")}
 }
 
 func addDocument(t *testing.T, pool *pgxpool.Pool, name string) int64 {
@@ -94,7 +106,7 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 		t.Fatalf("request = %v", request)
 	}
 	doc := document(t, pool, id)
-	if doc.Status != StatusParsed || *doc.Parser != "hsbc.credit_card" || doc.Warnings[0] != "minor OCR doubt" || !doc.ParsedAt.Valid {
+	if doc.Status != domain.Parsed || *doc.Parser != "hsbc.credit_card" || doc.Warnings[0] != "minor OCR doubt" || !doc.ParsedAt.Valid {
 		t.Fatalf("document = %+v", doc)
 	}
 	rows, err := dbq.New(pool).ListTransactions(t.Context(), 1)
@@ -124,11 +136,11 @@ func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), "SELECT id, kind, number FROM accounts WHERE institution = 'hsbc'").Scan(&account, &kind, &number); err != nil {
 		t.Fatal(err)
 	}
-	if kind != KindCreditCard || number != "" {
+	if kind != string(domain.CreditCard) || number != "" {
 		t.Fatalf("account = %s %q", kind, number)
 	}
 	var lines int
-	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions t JOIN units u ON u.id = t.unit_id WHERE t.account_id = $1 AND u.symbol = 'TWD' AND u.kind = 'money' AND t.status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions t JOIN units u ON u.id = t.unit_id WHERE t.account_id = $1 AND u.symbol = 'TWD' AND u.kind = 'money'", account).Scan(&lines); err != nil || lines != 2 {
 		t.Fatalf("lines in the account = %d (%v)", lines, err)
 	}
 
@@ -163,7 +175,7 @@ func TestWorkerFlagsAStatementThatDoesNotReconcile(t *testing.T) {
 	if err := NewWorker(pool, parsed(sampleStatement(false)), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
-	if got := document(t, pool, id).Status; got != StatusNeedsReview {
+	if got := document(t, pool, id).Status; got != domain.NeedsReview {
 		t.Fatalf("status = %s", got)
 	}
 	if countRows(t, pool, "statements") != 1 {
@@ -182,7 +194,7 @@ func TestWorkerMarksASecondCopyOfAStatementAsDuplicate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if doc := document(t, pool, pdf); doc.Status != StatusDuplicate || doc.Error == nil {
+	if doc := document(t, pool, pdf); doc.Status != domain.Duplicate || doc.DuplicateOf == nil || *doc.DuplicateOf != email {
 		t.Fatalf("second copy = %+v", doc)
 	}
 	if countRows(t, pool, "statements") != 1 || countRows(t, pool, "transactions") != 2 {
@@ -242,7 +254,7 @@ func TestPermanentParserErrorsFailTheDocumentWithoutRetry(t *testing.T) {
 		t.Fatalf("err = %v, want a cancelled job", err)
 	}
 	doc := document(t, pool, id)
-	if doc.Status != StatusFailed || doc.Error == nil || *doc.Error != "FailedPrecondition: parser says no" {
+	if doc.Status != domain.Failed || doc.Failure == nil || *doc.Failure != domain.Locked || doc.Error == nil || *doc.Error != "parser says no" {
 		t.Fatalf("document = %+v", doc)
 	}
 }
@@ -257,15 +269,16 @@ func TestTransientParserErrorsRetryUntilAttemptsRunOut(t *testing.T) {
 	if err == nil || errors.As(err, &cancel) {
 		t.Fatalf("first attempt: err = %v, want a plain error so River retries", err)
 	}
-	if got := document(t, pool, id).Status; got != StatusPending {
+	if got := document(t, pool, id).Status; got != domain.Pending {
 		t.Fatalf("status after a retryable failure = %s", got)
 	}
 
 	if err := worker.Work(t.Context(), job(id, 6, 6)); !errors.As(err, &cancel) {
 		t.Fatalf("last attempt: err = %v, want a cancelled job", err)
 	}
-	if got := document(t, pool, id).Status; got != StatusFailed {
-		t.Fatalf("status after the last attempt = %s", got)
+	// Failed for now, for Retry to take up again: the parser being out of reach says nothing of the document.
+	if doc := document(t, pool, id); doc.Status != domain.Failed || doc.Failure == nil || *doc.Failure != domain.Unavailable {
+		t.Fatalf("after the last attempt = %+v", doc)
 	}
 }
 
@@ -282,14 +295,14 @@ func TestStoreErrorsFailTheDocumentOnTheLastAttempt(t *testing.T) {
 	if err == nil || errors.As(err, &cancel) {
 		t.Fatalf("first attempt: err = %v, want a plain error so River retries", err)
 	}
-	if got := document(t, pool, id).Status; got != StatusPending {
+	if got := document(t, pool, id).Status; got != domain.Pending {
 		t.Fatalf("status after the first attempt = %s", got)
 	}
 
 	if err := worker.Work(t.Context(), job(id, 6, 6)); !errors.As(err, &cancel) {
 		t.Fatalf("last attempt: err = %v, want a cancelled job", err)
 	}
-	if doc := document(t, pool, id); doc.Status != StatusFailed || doc.Error == nil || *doc.Error == "" {
+	if doc := document(t, pool, id); doc.Status != domain.Failed || doc.Error == nil || *doc.Error == "" {
 		t.Fatalf("document after the last attempt = %+v", doc)
 	}
 	if countRows(t, pool, "statements") != 0 {
@@ -309,7 +322,7 @@ func TestWorkerFailsAResponseWithANonFiniteAmount(t *testing.T) {
 	if !errors.As(err, &cancel) {
 		t.Fatalf("err = %v, want a cancelled job", err)
 	}
-	if doc := document(t, pool, id); doc.Status != StatusFailed || doc.Error == nil {
+	if doc := document(t, pool, id); doc.Status != domain.Failed || doc.Error == nil {
 		t.Fatalf("document = %+v", doc)
 	}
 	if countRows(t, pool, "statements") != 0 {
@@ -341,7 +354,7 @@ func TestAParseCancelledOnShutdownIsRetried(t *testing.T) {
 	if err == nil || errors.As(err, &cancel) {
 		t.Fatalf("err = %v, want a plain error so River retries", err)
 	}
-	if doc := document(t, pool, id); doc.Status != StatusPending || doc.Error != nil {
+	if doc := document(t, pool, id); doc.Status != domain.Pending || doc.Error != nil {
 		t.Fatalf("document = %+v, want it left pending for the next attempt", doc)
 	}
 }

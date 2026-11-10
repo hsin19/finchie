@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,142 +14,211 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	"github.com/hsin19/finchie/apps/backend/internal/numeric"
 )
 
-// Continuity is worked out on every read from the balances and lines (ADR 0013): cheap at a person's
-// volume, and never stale whatever order statements arrive in.
+// The accounts' standing is the domain's (domain.Assess); these handlers read what it needs and show
+// what it says.
 
 func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) (ListAccountsResponseObject, error) {
+	accounts, _, err := readAccounts(ctx, dbq.New(s.pool), nil)
+	if err != nil {
+		return nil, err
+	}
+	return ListAccounts200JSONResponse(accounts), nil
+}
+
+func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error) {
 	queries := dbq.New(s.pool)
-	rows, err := queries.ListAccounts(ctx)
+	found, _, err := readAccounts(ctx, queries, &request.Id)
 	if err != nil {
-		return nil, fmt.Errorf("list accounts: %w", err)
+		return nil, err
 	}
-	latest, err := queries.LatestBalances(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("latest balances: %w", err)
+	if len(found) == 0 {
+		return GetAccount404JSONResponse{notFound("account", request.Id)}, nil
 	}
-	gaps, err := queries.AccountGaps(ctx, nil)
+	account := found[0]
+
+	rows, err := queries.AccountBalances(ctx, request.Id)
 	if err != nil {
-		return nil, fmt.Errorf("account gaps: %w", err)
+		return nil, fmt.Errorf("account balances: %w", err)
 	}
-	valuations, err := queries.LatestValuations(ctx)
+	history := make([]Balance, 0, len(rows))
+	for _, b := range rows {
+		history = append(history, toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID))
+	}
+	detail := AccountDetail{
+		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
+		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
+		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
+		Gaps: account.Gaps, Expiries: account.Expiries, History: history,
+	}
+	if domain.AccountKind(account.Kind) == domain.Securities {
+		held, err := readPositions(ctx, queries, request.Id, rows, account.Balances)
+		if err != nil {
+			return nil, err
+		}
+		detail.Positions = &held
+	}
+	return GetAccount200JSONResponse(detail), nil
+}
+
+// readAccounts reads the owner's accounts, or the one with id, and how each stands: as shown, and what
+// each is worth to the domain.
+func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Account, []domain.Worth, error) {
+	rows, err := queries.ListAccounts(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("latest valuations: %w", err)
+		return nil, nil, fmt.Errorf("list accounts: %w", err)
+	}
+	latest, err := queries.LatestBalances(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("latest balances: %w", err)
+	}
+	gaps, err := ledger.Gaps(ctx, queries, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	valuations, err := queries.LatestValuations(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("latest valuations: %w", err)
+	}
+	expiries, err := queries.LatestExpiries(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("latest expiries: %w", err)
 	}
 
-	expiries, err := queries.LatestExpiries(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("latest expiries: %w", err)
+	balancesOf := map[int64][]dbq.LatestBalancesRow{}
+	for _, b := range latest {
+		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], b)
 	}
-
-	valuationOf := map[int64]*dbq.LatestValuationsRow{}
-	for i := range valuations {
-		valuationOf[valuations[i].AccountID] = &valuations[i]
+	valuationOf := map[int64]dbq.LatestValuationsRow{}
+	for _, v := range valuations {
+		valuationOf[v.AccountID] = v
 	}
 	expiriesOf := map[int64][]Expiry{}
 	for _, e := range expiries {
 		expiriesOf[e.AccountID] = append(expiriesOf[e.AccountID], toExpiry(e))
 	}
-	balancesOf := map[int64][]Balance{}
-	for _, b := range latest {
-		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], toLatestBalance(b))
-	}
-	gapsOf := map[int64][]BalanceGap{}
-	unshown := map[int64]bool{}
-	for _, g := range gaps {
-		if !g.Itemized {
-			unshown[g.AccountID] = true
-			continue
-		}
-		gapsOf[g.AccountID] = append(gapsOf[g.AccountID], toGap(g))
-	}
-	accounts := make(ListAccounts200JSONResponse, 0, len(rows))
+	gapsOf := domain.ReadGaps(gaps)
+
+	accounts := make([]Account, 0, len(rows))
+	worths := make([]domain.Worth, 0, len(rows))
 	for _, row := range rows {
-		account := toAccount(dbq.GetAccountRow(row), balancesOf[row.ID], gapsOf[row.ID], unshown[row.ID], valuationOf[row.ID])
+		var valuation *dbq.LatestValuationsRow
+		if v, ok := valuationOf[row.ID]; ok {
+			valuation = &v
+		}
+		account, standing := toAccount(row, balancesOf[row.ID], gapsOf[row.ID], valuation)
 		account.Expiries = append(account.Expiries, expiriesOf[row.ID]...)
 		accounts = append(accounts, account)
+		worths = append(worths, domain.Worth{Kind: row.Kind, Worth: standing.Worth})
 	}
-	return accounts, nil
+	return accounts, worths, nil
 }
 
-func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error) {
-	queries := dbq.New(s.pool)
-	row, err := queries.GetAccount(ctx, request.Id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return GetAccount404JSONResponse{notFound("account", request.Id)}, nil
+// toAccount shows an account as the domain assesses it (domain.Assess).
+func toAccount(row dbq.ListAccountsRow, latest []dbq.LatestBalancesRow, gaps domain.Gaps, valuation *dbq.LatestValuationsRow) (Account, domain.Standing) {
+	balances := make([]domain.Balance, 0, len(latest))
+	shown := make(map[string]Balance, len(latest))
+	for _, b := range latest {
+		balances = append(balances, domain.Balance{
+			Unit: b.Unit, AsOf: b.AsOf.Time, Amount: numeric.ToRat(b.Amount), Worth: numeric.ToRat(b.Worth),
+			FromStatement: b.StatementID != nil,
+		})
+		shown[b.Unit] = toLatestBalance(b)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("get account: %w", err)
+	var valued *domain.Valuation
+	if valuation != nil {
+		valued = &domain.Valuation{AsOf: valuation.AsOf.Time, Worth: numeric.ToRat(valuation.Worth)}
 	}
-	rows, err := queries.AccountBalances(ctx, request.Id)
-	if err != nil {
-		return nil, fmt.Errorf("account balances: %w", err)
+	standing := domain.Assess(row.Kind, balances, gaps, valued)
+
+	account := Account{
+		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
+		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Continuity: AccountContinuity(standing.Continuity),
+		Balances: make([]Balance, 0, len(standing.Held)), Gaps: make([]BalanceGap, 0, len(gaps.Unseen)), Expiries: []Expiry{},
 	}
-	latestRows, err := queries.LatestBalances(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("latest balances: %w", err)
+	for _, b := range standing.Held {
+		account.Balances = append(account.Balances, shown[b.Unit])
 	}
-	gapRows, err := queries.AccountGaps(ctx, &request.Id)
-	if err != nil {
-		return nil, fmt.Errorf("account gaps: %w", err)
+	for _, g := range gaps.Unseen {
+		account.Gaps = append(account.Gaps, BalanceGap{
+			Unit: g.Unit, From: openapi_types.Date{Time: g.From}, To: openapi_types.Date{Time: g.To},
+			Unseen: numeric.Exact(g.Unseen),
+		})
 	}
-	valuations, err := queries.LatestValuations(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("latest valuations: %w", err)
+	if valuation != nil {
+		v := Valuation{Unit: valuation.Unit, AsOf: openapi_types.Date{Time: valuation.AsOf.Time}, Amount: numeric.String(valuation.Amount)}
+		if valuation.Worth.Valid {
+			worth := numeric.String(valuation.Worth)
+			v.Worth = &worth
+		}
+		account.Valuation = &v
 	}
-	expiryRows, err := queries.LatestExpiries(ctx)
+	if standing.Worth != nil {
+		account.Worth, account.WorthFrom = ptr(numeric.Cents(standing.Worth)), ptr(WorthFrom(standing.WorthFrom))
+	}
+	return account, standing
+}
+
+// readPositions works out a securities account's positions (domain.Positions) from its balances' history,
+// gaps, and trades.
+func readPositions(ctx context.Context, queries *dbq.Queries, accountID int64, history []dbq.AccountBalancesRow, latest []Balance) ([]Position, error) {
+	trades, err := queries.AccountTrades(ctx, accountID)
 	if err != nil {
-		return nil, fmt.Errorf("latest expiries: %w", err)
+		return nil, fmt.Errorf("account trades: %w", err)
+	}
+	gaps, err := ledger.Gaps(ctx, queries, &accountID)
+	if err != nil {
+		return nil, err
 	}
 
-	history := make([]Balance, 0, len(rows))
-	for _, b := range rows {
-		history = append(history, toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID))
+	holdings := map[string][]domain.Holding{}
+	for _, b := range history {
+		holdings[b.Unit] = append(holdings[b.Unit], domain.Holding{Day: b.AsOf.Time, Shares: ratOrZero(b.Amount)})
 	}
-	var latest []Balance
-	for _, b := range latestRows {
-		if b.AccountID == request.Id {
-			latest = append(latest, toLatestBalance(b))
+	gapsTo := map[string][]time.Time{}
+	for _, g := range gaps {
+		gapsTo[g.Unit] = append(gapsTo[g.Unit], g.To)
+	}
+	traded := map[string][]domain.Trade{}
+	for _, t := range trades {
+		shares := ratOrZero(t.Shares)
+		traded[t.Unit] = append(traded[t.Unit], domain.Trade{
+			Day: t.TransactionDate.Time, Sell: t.Kind == domain.Sell, Shares: shares.Abs(shares),
+			Amount: ratOrZero(t.Amount), Fee: ratOrZero(t.Fee), Tax: ratOrZero(t.Tax),
+		})
+	}
+	newest := map[string]Balance{}
+	worth := map[string]*big.Rat{}
+	for _, b := range latest {
+		newest[b.Unit] = b
+		if b.Worth != nil {
+			if w, ok := new(big.Rat).SetString(*b.Worth); ok {
+				worth[b.Unit] = w
+			}
 		}
 	}
-	var valuation *dbq.LatestValuationsRow
-	for i := range valuations {
-		if valuations[i].AccountID == request.Id {
-			valuation = &valuations[i]
+
+	positions := domain.Positions(holdings, gapsTo, traded, worth)
+	result := make([]Position, 0, len(positions))
+	for _, p := range positions {
+		position := Position{Unit: p.Unit, Shares: p.Shares.FloatString(0), Worth: newest[p.Unit].Worth, Code: newest[p.Unit].Code}
+		if p.Since != nil {
+			position.Since = &openapi_types.Date{Time: *p.Since}
+			position.Cost = ptr(numeric.Cents(p.Cost))
+			if p.Realized != nil {
+				position.Realized = ptr(numeric.Cents(p.Realized))
+			}
+			if p.Gain != nil {
+				position.Gain = ptr(numeric.Cents(p.Gain))
+			}
 		}
+		result = append(result, position)
 	}
-	gaps := make([]BalanceGap, 0, len(gapRows))
-	unshown := false
-	for _, g := range gapRows {
-		if !g.Itemized {
-			unshown = true
-			continue
-		}
-		gaps = append(gaps, toGap(g))
-	}
-	var held *[]Position
-	if row.Kind == ingest.KindSecurities {
-		trades, err := queries.AccountTrades(ctx, request.Id)
-		if err != nil {
-			return nil, fmt.Errorf("account trades: %w", err)
-		}
-		list := positions(trades, rows, gapRows, latest)
-		held = &list
-	}
-	account := toAccount(row, latest, gaps, unshown, valuation)
-	for _, e := range expiryRows {
-		if e.AccountID == request.Id {
-			account.Expiries = append(account.Expiries, toExpiry(e))
-		}
-	}
-	return GetAccount200JSONResponse(AccountDetail{
-		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
-		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
-		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
-		Gaps: account.Gaps, Expiries: account.Expiries, History: history, Positions: held,
-	}), nil
+	return result, nil
 }
 
 func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesRequestObject) (ListAccountLinesResponseObject, error) {
@@ -173,12 +240,11 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 	for _, r := range rows {
 		line := AccountLine{
 			Id: r.ID, StatementId: r.StatementID, Date: openapi_types.Date{Time: r.TransactionDate.Time},
-			Description: r.Description, Memo: r.Memo, Counterparty: r.Counterparty, Kind: r.Kind, Unit: r.Unit,
-			Amount: decimalString(r.Amount),
+			Description: r.Description, Memo: r.Memo, Counterparty: r.Counterparty, Kind: string(r.Kind), Unit: r.Unit,
+			Amount: numeric.String(r.Amount),
 		}
 		if r.Balance.Valid {
-			balance := decimalString(r.Balance)
-			line.Balance = &balance
+			line.Balance = ptr(numeric.String(r.Balance))
 		}
 		line.Counterpart = lineCounterpart(r.CounterpartID, r.CounterpartStatementID, r.CounterpartDate, r.CounterpartAccountID,
 			r.CounterpartAccountKind, r.CounterpartInstitution, r.CounterpartAccountName,
@@ -189,70 +255,8 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 	return lines, nil
 }
 
-// toAccount takes the account's gaps, and whether its balance moved in a unit no statement has listed a
-// line of, as one whose statements print only its balance: nothing could show that move, so the account
-// cannot be checked (ADR 0013). An exchange reports what it holds and nothing else (ADR 0018).
-func toAccount(row dbq.GetAccountRow, balances []Balance, gaps []BalanceGap, unshown bool, valuation *dbq.LatestValuationsRow) Account {
-	// Only what statements report has lines to join balances with: snapshots alone, an exchange's or the
-	// owner's, cannot be checked (ADR 0018, ADR 0019).
-	reportedByStatements := slices.ContainsFunc(balances, func(b Balance) bool { return b.StatementId != nil })
-	continuity := Unknown
-	checkable := row.Kind == ingest.KindDeposit || row.Kind == ingest.KindSecurities || row.Kind == ingest.KindPoints
-	if checkable && reportedByStatements && !unshown {
-		continuity = Checked
-	}
-	newest := newestDay(balances)
-	reported := len(balances) > 0
-	if row.Kind == ingest.KindSecurities || row.Kind == ingest.KindExchange || row.Kind == ingest.KindPoints {
-		// A security, a coin, or a program at 0 is one the account no longer holds (ADR 0017, 0018, 0019).
-		balances = slices.DeleteFunc(balances, func(b Balance) bool { return isZero(b.Amount) })
-	}
-	if balances == nil {
-		balances = []Balance{}
-	}
-	if gaps == nil {
-		gaps = []BalanceGap{}
-	}
-	account := Account{
-		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
-		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Balances: balances, Continuity: continuity,
-		Gaps: gaps, Expiries: []Expiry{},
-	}
-	if valuation != nil {
-		v := toValuation(*valuation)
-		account.Valuation = &v
-	}
-	account.Worth, account.WorthFrom = worthOf(balances, account.Valuation, newest)
-	if reported && len(balances) == 0 {
-		// Its sources say it holds nothing at all.
-		account.Worth, account.WorthFrom = ptr("0.00"), ptr(WorthFromHoldings)
-	}
-	return account
-}
-
 func toExpiry(e dbq.LatestExpiriesRow) Expiry {
-	return Expiry{Unit: e.Unit, Amount: decimalString(e.Amount), By: openapi_types.Date{Time: e.LapsesBy.Time}}
-}
-
-// newestDay is the day of the newest of the account's balances, zero ones included: a snapshot lists a
-// unit sold out at 0 on its day (ADR 0018).
-func newestDay(balances []Balance) time.Time {
-	var newest time.Time
-	for _, b := range balances {
-		if b.AsOf.After(newest) {
-			newest = b.AsOf.Time
-		}
-	}
-	return newest
-}
-
-func toValuation(v dbq.LatestValuationsRow) Valuation {
-	valuation := Valuation{Unit: v.Unit, AsOf: openapi_types.Date{Time: v.AsOf.Time}, Amount: decimalString(v.Amount)}
-	if v.Worth.Valid {
-		worth := decimalString(v.Worth)
-		valuation.Worth = &worth
-	}
-	return valuation
+	return Expiry{Unit: e.Unit, Amount: numeric.String(e.Amount), By: openapi_types.Date{Time: e.LapsesBy.Time}}
 }
 
 // toLatestBalance adds the balance's unit, its newest price, and its worth in NT$ at that price (ADR 0020).
@@ -261,140 +265,32 @@ func toLatestBalance(b dbq.LatestBalancesRow) Balance {
 	balance.UnitId = &b.UnitID
 	balance.Code = b.Code
 	if b.Worth.Valid {
-		worth := decimalString(b.Worth)
-		balance.Worth = &worth
+		balance.Worth = ptr(numeric.String(b.Worth))
 	}
-	// NT$ is worth itself, with no price of its own.
+	// The base currency is worth itself, with no price of its own.
 	if b.PriceSource != nil && b.PriceQuote != nil {
 		price := Price{
 			AsOf: b.PricedAt.Time, Source: PriceSource(*b.PriceSource), Quote: *b.PriceQuote,
-			Quoted: decimalString(b.PriceQuoted),
+			Quoted: numeric.String(b.PriceQuoted),
 		}
 		if b.PriceTwd.Valid {
-			twd := decimalString(b.PriceTwd)
-			price.Twd = &twd
+			price.Twd = ptr(numeric.String(b.PriceTwd))
 		}
 		balance.Price = &price
 	}
 	return balance
 }
 
-func isZero(value Decimal) bool {
-	n, ok := new(big.Rat).SetString(value)
-	return ok && n.Sign() == 0
+// toBalance takes the statement that reported the balance; a snapshot has none (ADR 0018).
+func toBalance(unit string, asOf pgtype.Date, amount pgtype.Numeric, statementID *int64) Balance {
+	return Balance{Unit: unit, AsOf: openapi_types.Date{Time: asOf.Time}, Amount: numeric.String(amount), StatementId: statementID}
 }
 
-// worthOf is an account's worth (ADR 0018): its balances' worth added up exactly; else, when one of them
-// has none, its valuation on the day of its newest balance; else none.
-func worthOf(balances []Balance, valuation *Valuation, newest time.Time) (*Decimal, *WorthFrom) {
-	if worth := holdingsWorth(balances); worth != nil {
-		return worth, ptr(WorthFromHoldings)
+func ratOrZero(n pgtype.Numeric) *big.Rat {
+	if r := numeric.ToRat(n); r != nil {
+		return r
 	}
-	if valuation == nil || valuation.Worth == nil || !valuation.AsOf.Equal(newest) {
-		return nil, nil
-	}
-	worth, ok := new(big.Rat).SetString(*valuation.Worth)
-	if !ok {
-		return nil, nil
-	}
-	return ptr(worth.FloatString(2)), ptr(WorthFromValuation)
-}
-
-// holdingsWorth adds up balances' worth exactly; none when a balance has no worth, or there are none.
-func holdingsWorth(balances []Balance) *Decimal {
-	if len(balances) == 0 {
-		return nil
-	}
-	total := new(big.Rat)
-	for _, b := range balances {
-		if b.Worth == nil {
-			return nil
-		}
-		value, ok := new(big.Rat).SetString(*b.Worth)
-		if !ok {
-			return nil
-		}
-		total.Add(total, value)
-	}
-	worth := total.FloatString(2)
-	return &worth
+	return new(big.Rat)
 }
 
 func ptr[T any](v T) *T { return &v }
-
-// toBalance takes the statement that reported the balance; a snapshot has none (ADR 0018).
-func toBalance(unit string, asOf pgtype.Date, amount pgtype.Numeric, statementID *int64) Balance {
-	return Balance{Unit: unit, AsOf: openapi_types.Date{Time: asOf.Time}, Amount: decimalString(amount), StatementId: statementID}
-}
-
-func toGap(g dbq.AccountGapsRow) BalanceGap {
-	return BalanceGap{
-		Unit: g.Unit, From: openapi_types.Date{Time: g.FromDate.Time}, To: openapi_types.Date{Time: g.ToDate.Time},
-		Unseen: decimalString(g.Unseen),
-	}
-}
-
-func (s *Server) UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error) {
-	queries := dbq.New(s.pool)
-	row, err := queries.GetAccount(ctx, request.Id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return UpdateAccount404JSONResponse(notFound("account", request.Id)), nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get account: %w", err)
-	}
-
-	params := dbq.UpdateAccountDetailsParams{ID: request.Id}
-	if name := request.Body.Name; name != nil {
-		params.SetName = true
-		if trimmed := strings.TrimSpace(*name); trimmed != "" {
-			params.Name = &trimmed
-		}
-	}
-	if full := request.Body.FullNumber; full != nil {
-		params.SetFullNumber = true
-		switch digits := strings.NewReplacer(" ", "", "-", "").Replace(*full); {
-		case digits == "":
-		case row.Number == "":
-			// No source prints a number of the account to fit, such as one the owner keeps (ADR 0019).
-			trimmed := strings.TrimSpace(*full)
-			params.FullNumber = &trimmed
-		case !fitsMasked(row.Number, digits):
-			return UpdateAccount400JSONResponse{ProblemJSONResponse{Message: fmt.Sprintf(
-				"%s does not fit %s: the full number has its digits, and the same ones where the bank prints them", *full, row.Number)}}, nil
-		default:
-			params.FullNumber = &digits
-		}
-	}
-	if _, err := queries.UpdateAccountDetails(ctx, params); nameTaken(err) {
-		// Cleared, the account goes by its own name again, which another may have taken meanwhile.
-		taken := deref(row.Label)
-		if params.Name != nil {
-			taken = *params.Name
-		}
-		return UpdateAccount409JSONResponse(ProblemJSONResponse{Message: fmt.Sprintf("an account named %s exists already", taken)}), nil
-	} else if err != nil {
-		return nil, fmt.Errorf("update account: %w", err)
-	}
-	// A full number fits counterparties (ADR 0016): work the links out again with it.
-	if params.SetFullNumber {
-		if _, err := ingest.Relink(ctx, s.pool); err != nil {
-			return nil, err
-		}
-	}
-	return UpdateAccount204Response{}, nil
-}
-
-// fitsMasked reports whether a full number is the one a bank masks as `masked`: as long, all digits,
-// and the same digit wherever the bank prints one.
-func fitsMasked(masked, full string) bool {
-	if len(full) != len(masked) {
-		return false
-	}
-	for i := range len(full) {
-		if full[i] < '0' || full[i] > '9' || (masked[i] != '*' && masked[i] != full[i]) {
-			return false
-		}
-	}
-	return true
-}

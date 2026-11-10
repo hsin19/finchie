@@ -12,14 +12,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 )
 
-// ParseDocumentArgs is the job enqueued on upload and on re-parse.
+// ParseDocumentArgs is the job enqueued on upload, on re-parse, and by Retry.
 type ParseDocumentArgs struct {
 	DocumentID int64 `json:"document_id"`
 }
@@ -27,8 +30,17 @@ type ParseDocumentArgs struct {
 func (ParseDocumentArgs) Kind() string { return "parse_document" }
 
 func (ParseDocumentArgs) InsertOpts() river.InsertOpts {
-	// Retries only happen while the parser is unreachable; a few minutes of back-off covers a restart.
-	return river.InsertOpts{MaxAttempts: 6}
+	return river.InsertOpts{
+		// Retries only happen while the parser is unreachable; a few minutes of back-off covers a restart,
+		// and Retry takes over after that.
+		MaxAttempts: 6,
+		// A document has one job at a time: a second would race the first to record the outcome. One that
+		// has finished does not count, so that a document can be parsed again.
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
+			rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable,
+			rivertype.JobStateRunning, rivertype.JobStateScheduled,
+		}},
+	}
 }
 
 type Worker struct {
@@ -55,10 +67,17 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[ParseDocumentArgs]) er
 		return river.JobCancel(fmt.Errorf("document %d no longer exists", id))
 	}
 	if err != nil {
-		return w.retry(ctx, job, fmt.Errorf("load document %d: %w", id, err))
+		return w.retry(ctx, job, "", domain.OtherFailure, fmt.Errorf("load document %d: %w", id, err))
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, w.timeout)
+	// Which instance parses it, so that a failure can be tried again under a later one (Retry).
+	described, err := w.parser.DescribeParsers(callCtx, &parserv1.DescribeParsersRequest{})
+	if err != nil {
+		cancel()
+		return w.retry(ctx, job, "", domain.Unavailable, fmt.Errorf("describe parsers: %w", err))
+	}
+	instance := described.GetInstance()
 	response, err := w.parser.ParseDocument(callCtx, &parserv1.ParseDocumentRequest{
 		DocumentId:  strconv.FormatInt(id, 10),
 		Filename:    doc.Filename,
@@ -68,19 +87,20 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[ParseDocumentArgs]) er
 	cancel()
 
 	if err != nil {
+		failure, message := classify(err)
 		// A job cancelled because the backend is stopping says nothing about the document.
-		if (retryable(err) || ctx.Err() != nil) && job.Attempt < job.MaxAttempts {
-			return fmt.Errorf("parse document %d: %w", id, err)
+		if failure == domain.Unavailable || ctx.Err() != nil {
+			return w.retry(ctx, job, instance, domain.Unavailable, fmt.Errorf("parse document %d: %w", id, err))
 		}
-		return w.fail(ctx, id, describe(err))
+		return w.fail(ctx, id, instance, failure, message)
 	}
 
-	outcome, err := Store(ctx, w.pool, id, response)
+	outcome, err := Store(ctx, w.pool, id, instance, response)
 	if errors.Is(err, ErrInvalidResponse) {
-		return w.fail(ctx, id, err.Error())
+		return w.fail(ctx, id, instance, domain.InvalidResponse, err.Error())
 	}
 	if err != nil {
-		return w.retry(ctx, job, fmt.Errorf("store document %d: %w", id, err))
+		return w.retry(ctx, job, instance, domain.OtherFailure, fmt.Errorf("store document %d: %w", id, err))
 	}
 	slog.InfoContext(ctx, "document parsed", "document_id", id, "status", outcome,
 		"parser", response.GetParser(), "transactions", len(response.GetStatement().GetTransactions()))
@@ -88,45 +108,70 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[ParseDocumentArgs]) er
 }
 
 // retry returns err for River to run the job again. After the last attempt nothing would, and the
-// document would stay pending for good, so it is marked failed instead.
-func (w *Worker) retry(ctx context.Context, job *river.Job[ParseDocumentArgs], err error) error {
+// document would stay pending for good, so it is marked failed instead, for Retry to take up again when
+// the failure is the parser being out of reach.
+func (w *Worker) retry(ctx context.Context, job *river.Job[ParseDocumentArgs], instance string, failure domain.Failure, err error) error {
 	if job.Attempt < job.MaxAttempts {
 		return err
 	}
-	return w.fail(ctx, job.Args.DocumentID, err.Error())
+	return w.fail(ctx, job.Args.DocumentID, instance, failure, err.Error())
 }
 
-// fail records why a document cannot be parsed and stops River from retrying it. The write outlives
-// the job's context: a failure found as the job is cancelled (on shutdown, or at its timeout) must
-// still be recorded.
-func (w *Worker) fail(ctx context.Context, id int64, reason string) error {
+// fail records why a document cannot be parsed and stops River from retrying it. A failed document holds
+// no statement: what an earlier parse of it derived is deleted with it, so nothing a parser can no longer
+// read stays counted. The write outlives the job's context: a failure found as the job is cancelled (on
+// shutdown, or at its timeout) must still be recorded.
+func (w *Worker) fail(ctx context.Context, id int64, instance string, failure domain.Failure, detail string) error {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	err := dbq.New(w.pool).FinishDocument(writeCtx, dbq.FinishDocumentParams{
-		ID:       id,
-		Status:   StatusFailed,
-		Error:    &reason,
-		Warnings: []string{},
+	err := pgx.BeginFunc(writeCtx, w.pool, func(tx pgx.Tx) error {
+		queries := dbq.New(tx)
+		if err := queries.LockLinks(writeCtx); err != nil {
+			return fmt.Errorf("lock links: %w", err)
+		}
+		deleted, err := queries.DeleteStatementsForDocument(writeCtx, id)
+		if err != nil {
+			return fmt.Errorf("delete statements: %w", err)
+		}
+		if len(deleted) > 0 {
+			if _, err := ledger.Relink(writeCtx, queries); err != nil {
+				return err
+			}
+		}
+		return queries.FinishDocument(writeCtx, dbq.FinishDocumentParams{
+			ID:             id,
+			Status:         failure.Status(),
+			Failure:        &failure,
+			Error:          &detail,
+			ParserInstance: optionalString(instance),
+			Warnings:       []string{},
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("mark document %d failed: %w", id, err)
 	}
-	slog.WarnContext(ctx, "document failed", "document_id", id, "reason", reason)
-	return river.JobCancel(errors.New(reason))
+	// The details stay in the database, beside the statement they come from: a parser's words can quote
+	// it (an account number, a balance), and logs and job errors leave the process (ADR 0011).
+	slog.WarnContext(ctx, "document failed", "document_id", id, "failure", failure)
+	return river.JobCancel(fmt.Errorf("document %d: %s", id, failure))
 }
 
-// retryable reports whether the parser might succeed later (ADR 0005). Everything else is permanent:
-// the document, its password, or the parser has to change first.
-func retryable(err error) bool {
-	switch status.Code(err) {
-	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
-		return true
-	default:
-		return false
-	}
-}
-
-func describe(err error) string {
+// classify reads the parser's status (ADR 0005): what has to change before the document can be parsed,
+// and the parser's words for it. Unavailable is the only failure that may pass by itself.
+func classify(err error) (domain.Failure, string) {
 	s := status.Convert(err)
-	return fmt.Sprintf("%s: %s", s.Code(), s.Message())
+	switch s.Code() {
+	case codes.Unimplemented:
+		return domain.Unsupported, s.Message()
+	case codes.FailedPrecondition:
+		return domain.Locked, s.Message()
+	case codes.InvalidArgument:
+		return domain.Unreadable, s.Message()
+	case codes.Internal:
+		return domain.Layout, s.Message()
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted, codes.Canceled:
+		return domain.Unavailable, s.Message()
+	default:
+		return domain.OtherFailure, fmt.Sprintf("%s: %s", s.Code(), s.Message())
+	}
 }

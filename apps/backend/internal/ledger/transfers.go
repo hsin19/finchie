@@ -1,9 +1,10 @@
-package ingest
+package ledger
 
 import (
 	"cmp"
 	"context"
 	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 )
 
 // Money that moves between two of the owner's lines is linked (ADR 0016): a deposit account paying a
@@ -42,7 +44,7 @@ var bankCodes = map[string]string{
 type transferLine = dbq.TransferLinesRow
 
 // retransfer works out every transfer link and every bill's payment again, in the caller's
-// transaction, under the lock relink holds.
+// transaction, under the lock Relink holds.
 func retransfer(ctx context.Context, queries *dbq.Queries) error {
 	lines, err := queries.TransferLines(ctx)
 	if err != nil {
@@ -92,11 +94,11 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 	var outs, ins, payments []transferLine
 	for _, l := range lines {
 		switch {
-		case l.AccountKind == KindDeposit && cents(amount(l.Amount)) < 0:
+		case l.AccountKind == domain.Deposit && amount(l.Amount).Sign() < 0:
 			outs = append(outs, l)
-		case l.AccountKind == KindDeposit && cents(amount(l.Amount)) > 0:
+		case l.AccountKind == domain.Deposit && amount(l.Amount).Sign() > 0:
 			ins = append(ins, l)
-		case l.Kind == "payment":
+		case l.Kind == domain.Payment:
 			payments = append(payments, l)
 		}
 	}
@@ -110,7 +112,7 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 	for _, out := range outs {
 		// A card payment line is credited as the outflow is debited: both negative.
 		for _, p := range payments {
-			if d := daysApart(out.TransactionDate, p.TransactionDate); d <= transferWindowDays && out.Unit == p.Unit && cents(amount(out.Amount)) == cents(amount(p.Amount)) {
+			if d := daysApart(out.TransactionDate, p.TransactionDate); d <= transferWindowDays && out.Unit == p.Unit && amount(out.Amount).Cmp(amount(p.Amount)) == 0 {
 				candidates = append(candidates, candidate{out.ID, p.ID, d, true})
 			}
 		}
@@ -119,7 +121,7 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 				candidates = append(candidates, candidate{out.ID, in.ID, 0, false})
 				continue
 			}
-			if in.AccountID == out.AccountID || in.Unit != out.Unit || cents(amount(out.Amount)) != -cents(amount(in.Amount)) {
+			if in.AccountID == out.AccountID || in.Unit != out.Unit || new(big.Rat).Neg(amount(in.Amount)).Cmp(amount(out.Amount)) != 0 {
 				continue
 			}
 			if d := daysApart(out.TransactionDate, in.TransactionDate); d <= transferWindowDays && (fits(out.Counterparty, out.Institution, in) || fits(in.Counterparty, in.Institution, out)) {
@@ -168,8 +170,8 @@ func matchPaid(bills []dbq.CardBillsRow, lines []transferLine) map[int64]payment
 		if !bill.TotalDue.Valid || !bill.ClosingDate.Valid || !bill.DueDate.Valid {
 			continue
 		}
-		due := cents(amount(bill.TotalDue))
-		if due <= 0 {
+		due := amount(bill.TotalDue)
+		if due.Sign() <= 0 {
 			paid[bill.ID] = payment{on: bill.ClosingDate}
 			continue
 		}
@@ -177,7 +179,7 @@ func matchPaid(bills []dbq.CardBillsRow, lines []transferLine) map[int64]payment
 		within := func(l transferLine) bool {
 			at := l.TransactionDate.Time
 			return !used[l.ID] && (bill.Currency == nil || l.Unit == *bill.Currency) &&
-				at.After(bill.ClosingDate.Time) && !at.After(last) && cents(amount(l.Amount)) == -due
+				at.After(bill.ClosingDate.Time) && !at.After(last) && new(big.Rat).Neg(amount(l.Amount)).Cmp(due) == 0
 		}
 		var fromDeposit, fromBill *transferLine
 		for i := range lines {
@@ -186,9 +188,9 @@ func matchPaid(bills []dbq.CardBillsRow, lines []transferLine) map[int64]payment
 				continue
 			}
 			switch {
-			case l.AccountKind == KindDeposit && (fromDeposit == nil || l.TransactionDate.Time.Before(fromDeposit.TransactionDate.Time)):
+			case l.AccountKind == domain.Deposit && (fromDeposit == nil || l.TransactionDate.Time.Before(fromDeposit.TransactionDate.Time)):
 				fromDeposit = l
-			case l.Kind == "payment" && l.Institution == bill.Institution && l.StatementID != bill.ID &&
+			case l.Kind == domain.Payment && l.Institution == bill.Institution && l.StatementID != bill.ID &&
 				(fromBill == nil || l.TransactionDate.Time.Before(fromBill.TransactionDate.Time)):
 				fromBill = l
 			}

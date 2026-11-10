@@ -8,7 +8,7 @@ VALUES (@account_id, @unit_id, @amount, @lapses_by, @statement_id::bigint);
 -- name: LatestExpiries :many
 -- What will lapse of each account's units, by their newest report: the newest statement that reports the
 -- unit at all, so one that prints nothing lapsing says nothing will; and the owner's for an account they
--- keep (ADR 0019). Amounts of 0 and dates gone by in Taipei are left out.
+-- keep (ADR 0019). Amounts of 0 and dates gone by in Taipei are left out. Of one account, or with none, of all.
 WITH reports AS (
     SELECT DISTINCT ON (b.account_id, b.unit_id) b.account_id, b.unit_id, b.statement_id
     FROM balances b
@@ -27,6 +27,7 @@ SELECT r.account_id, u.symbol AS unit, r.amount, r.lapses_by
 FROM reported r
 JOIN units u ON u.id = r.unit_id
 WHERE r.amount > 0 AND r.lapses_by >= (now() AT TIME ZONE 'Asia/Taipei')::date
+  AND (sqlc.narg(account_id)::bigint IS NULL OR r.account_id = sqlc.narg(account_id)::bigint)
 ORDER BY r.account_id, r.lapses_by, u.symbol;
 
 -- Accounts the owner keeps (ADR 0019).

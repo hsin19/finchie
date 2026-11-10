@@ -2,6 +2,22 @@
 
 The only public service (ADR 0002). It stores uploaded documents, parses them in background jobs through the parser service, keeps the results in Postgres, and serves them over HTTP together with the web app (ADR 0007).
 
+## Code layout
+
+Dependencies point inward, toward `domain`; nothing in it knows the database, HTTP, the parser, or jobs.
+
+| Package | |
+|---|---|
+| `internal/domain` | The model: kinds of accounts, units, lines, documents, and statements, and the rules that read them, such as an account's continuity and worth (`Assess`), positions' cost (`Positions`), how each kind of unit is spelled (`Symbol`), and what makes two statements one (`AccountNumbers`). Pure, unit-tested |
+| `internal/ledger` | Writes that keep the domain's invariants, in the caller's transaction, whatever the source: units, whole-account snapshots, prices, links (`Relink`), and the owner's accounts, details, and holdings. Every source and the API write through it, so each rule has one implementation |
+| `internal/ingest` | The parse pipeline: the `parse_document` job, converting the parser's response, storing a statement, and `retry_documents` |
+| `internal/exchanges`, `internal/rates`, `internal/quotes` | Sources that keep arriving by themselves: each reads its API and hands the ledger what it read |
+| `internal/api` | HTTP: reads requests, calls the ledger or reads the database, and shows what the domain says. No rules of its own |
+| `internal/jobs` | Queues and the schedule sources are read on |
+| `internal/telemetry` | Telemetry, and gauges that report what the domain says (documents by status, gapped accounts) |
+| `internal/numeric`, `internal/taipei` | Exact decimals to and from NUMERIC (ADR 0004); Taipei's dates |
+| `internal/db` | Migrations, and sqlc's queries in `dbq`, whose kind columns carry the domain's types |
+
 ## API
 
 Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` generates the Echo v5 handlers and types into `internal/api/openapi.gen.go`, and `internal/api/server.go` implements them.
@@ -9,8 +25,8 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 | Method | Path | |
 |---|---|---|
 | `POST` | `/api/documents` | Multipart field `file`: a statement e-mail (`.eml`), as the bank sent it or forwarded. `201` when new, `200` when the same bytes were uploaded before, `415` for anything that is not an e-mail, a bare PDF included ([ADR 0014](../../docs/adr/0014-recognizing-statements.md)) |
-| `GET` | `/api/documents` | Newest first, a page at a time: `items`, up to `?limit=` (500), after `?before=`, the last document of the page before; `?state=` (repeatable; `skipped` is a failure no parser handles, `failed` any other) and `?q=`, text in the filename, filter. `byState` counts every match of `q` by state |
-| `GET` | `/api/documents/{id}` | Status, parser, warnings, error |
+| `GET` | `/api/documents` | Newest first, a page at a time: `items`, up to `?limit=` (500), after `?before=`, the last document of the page before; `?state=` (repeatable, a status), `?q=`, text in the filename, and `?id=` (repeatable: documents already shown, fetched again wherever they fall) filter. `byState` counts every match of `q` by state |
+| `GET` | `/api/documents/{id}` | Status, parser, warnings; a failure's `failure` (what has to change) and `error` (its details); a duplicate's `duplicateOf` |
 | `GET` | `/api/documents/{id}/content` | The original file. Only PDFs open in the browser (documents stored as bare PDFs before ADR 0014); anything else downloads as `application/octet-stream`, with `nosniff`. The stored content type comes from the bytes, never from what the browser declared, because the file is served from the web app's origin |
 | `GET` | `/api/documents/{id}/preview` | The document opened for reading by the parser: the bank's sender, recipient, subject, and date (unwrapped from a forward), and its files. Nothing decrypted is stored ([ADR 0012](../../docs/adr/0012-reading-documents.md)) |
 | `GET` | `/api/documents/{id}/preview/pdf` | The statement PDF, decrypted, in the browser: the file the parser marks primary (the PDF whose name a bank parser knows, else the first PDF). `404` without a PDF. `Cache-Control: no-store`, so the decrypted copy stays out of the browser's cache too |
@@ -21,11 +37,13 @@ Defined spec-first in [`api/openapi.yaml`](api/openapi.yaml); `oapi-codegen` gen
 | `GET` | `/api/accounts/{id}` | One account, plus `history`, every balance its sources reported (a snapshot's has no `statementId`, ADR 0018); a securities account also its `positions` (ADR 0017): every security it holds or has traded, with its `cost` by average cost and its `gain` and `realized` gains, known only from a day the account held none of it with no gap since |
 | `PATCH` | `/api/accounts/{id}` | The owner's details (ADR 0016): `name`, which no other account goes by (`409`; cleared, the account goes by its own `label` again), and `fullNumber`, which must fit the masked number digit for digit where the source prints one, else is anything. A field left out stays, an empty one clears it; links are worked out again after. `204` |
 | `POST` | `/api/accounts` | An account the owner keeps by hand (ADR 0019), of any `kind` but `credit_card`, with its `name`, which becomes its own `label`, as a bank's account has the bank's (`409` when another account goes by it). Institution `owner`; it holds nothing until its holdings are set. `201` with its `id` |
-| `PUT` | `/api/accounts/{id}/holdings` | What an account the owner opened holds today, the whole of it: `holdings`, each a `unit` of the kind the account holds (money upper-cased, securities by name, points; found or created, ADR 0020), its `amount`, and its `expiries`, what lapses by when. A snapshot (Taipei's date): a later one the same day replaces it, a unit no longer listed is at 0, and the expiries replace all the account had. `400` for an account a source reports. `204` |
+| `PUT` | `/api/accounts/{id}/holdings` | What an account the owner opened holds today, the whole of it: `holdings`, each a `unit` of the kind the account holds (money upper-cased, securities by name, points; found or created, ADR 0020), its `amount`, and its `expiries`, what lapses by when. A snapshot (Taipei's date): a later one the same day replaces it, a unit no longer listed is at 0 (as is one listed at 0, except a deposit account's, which still has its currency), and the expiries replace all the account had. `400` for an account a source reports, or a unit listed twice however spelled. `204` |
 | `GET` | `/api/units` | The units amounts are counted in (ADR 0020), `?kind=` `money`, `security`, or `points` |
-| `PUT` | `/api/units/{id}/price` | The owner's price of a unit as of now: one is worth `value` (0 or more) of `quote`, a money unit some account holds, NT$ when left out. It counts while it is the unit's newest; a later one the same day replaces it. `204` |
-| `DELETE` | `/api/units/{id}/price` | Withdraws every price the owner gave the unit. `204` |
+| `PUT` | `/api/units/{id}/price` | The owner's price of a unit as of now: one is worth `value` (0 or more) of `quote`, a money unit some account holds, NT$ when left out. It counts while it is the unit's newest; a later one the same day replaces it. NT$ is worth itself and takes none (`400`). `204` |
+| `DELETE` | `/api/units/{id}/price` | Withdraws every price the owner gave the unit: kept on record, but no longer its newest. `204` |
 | `GET` | `/api/accounts/{id}/lines` | Its lines, newest first, `?limit=` up to 500 and `offset`, each linked line with its `counterpart`: the other account, or the card bill it paid (ADR 0016). Amounts as the source reports them: money in is positive on a deposit account, a purchase on a card bill, shares bought on a securities account, whose lines carry their `trade` (price, amount, fee, tax, net paid or received, prepaid) |
+| `GET` | `/api/net-worth` | Every account's worth added up, overall and `byKind`, with how many accounts have none (`unvalued`), less what is `owed`: each bank's newest card bill that owes something and that nothing has shown paid (ADR 0016; `unpaidBills`, their statements; `owedElsewhere`, those not in NT$, left out). `net` is the difference. Worked out on every read (`domain.Owed`, `domain.Net`) |
+| `GET` | `/api/settings` | What the deployment decides that the web app shows or obeys: `maxUploadBytes`, `sourceIntervalHours` (how often rates, closes, and exchanges are read), `baseCurrency` |
 | `GET` | `/api/mail-filters.xml` | The Gmail filter that forwards statement e-mails to `BACKEND_MAILBOX_ADDRESS`, generated from the parsers' claims (ADR 0014). `404` while that is not set |
 | `GET` | `/api/statements` | Card bills, newest closing date first, with each statement's transaction count and `paidOn`, once a deposit account or a later bill shows it paid (ADR 0016). Deposit statements are stored but get views of their own later (ADR 0013); this and the two endpoints after it show card bills and their lines only |
 | `GET` | `/api/statements/{id}` | One statement |
@@ -48,14 +66,17 @@ Amounts are decimal strings; statement dates are `YYYY-MM-DD` (ADR 0004).
 | `pending` | Queued, being parsed, or waiting to retry |
 | `parsed` | Stored; transactions add up to the statement |
 | `needs_review` | Stored, but the transactions do not add up |
-| `duplicate` | Another document already holds this statement (same institution, kind, period start, and closing date) |
-| `failed` | The parser rejected it (`error` says why), or every attempt failed: the parser stayed unreachable, or the database refused the result |
+| `duplicate` | Another document, `duplicate_of`, already holds this statement: the same institution, kind, accounts, period start, and closing date |
+| `failed` | It could not be parsed; `failure` says what has to change (`locked`, `unreadable`, `layout`, `unavailable`, `invalid_response`, `other`) and `error` the details. A failed document holds no statement |
+| `skipped` | No parser handles it (`failure` `unsupported`): nothing to fix or retry |
 
 Prices go into `prices`, one per unit, source, and day in Taipei, a later one the same day replacing it; the newest counts, whatever its source (ADR 0020). `fetch_exchange_rates` runs every 6 hours and at start (ADR 0015): it reads the day's rates to NT$ from Fawaz Ahmed's currency API on jsDelivr, else its Cloudflare Pages mirror, and keeps those of the money units some account holds or held, as of the start of the feed's day, so the backend needs outbound access to `cdn.jsdelivr.net` and `currency-api.pages.dev`; without it, only NT$ balances and what the exchanges and the owner price have a worth. `fetch_quotes` runs on the same schedule (ADR 0017): it reads the day's closes from TWSE's and TPEx's open APIs (`openapi.twse.com.tw`, `www.tpex.org.tw`) and keeps those of the securities some account holds or held, by name, as of 13:30, and their codes and markets on their units.
 
 `fetch_exchange` runs on the same schedule, one job per exchange whose keys are set (ADR 0018; `internal/exchanges`): it reads what the account holds at MAX, Binance, or Bitget (`max-api.maicoin.com`, `api.binance.com`, `api.bitget.com`) and the exchange's valuation of it, and stores them in one transaction as that day's snapshot (Taipei date): balances without a statement, every coin it held before and no longer lists at 0, the valuation in `valuations`, and the price of each coin it holds at the exchange's own markets, in NT$ (MAX) or USDT, as of the fetch. A later fetch the same day replaces the day's. A wallet whose coins, at the exchange's own prices, do not come to the value the exchange gives it goes in by that value in USDT. One call failing stores nothing for that exchange, and River retries it.
 
-Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, and `RESOURCE_EXHAUSTED` from the parser are retried (6 attempts with River's back-off); everything else it returns fails at once (ADR 0005). Database errors are retried too.
+Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, and `RESOURCE_EXHAUSTED` from the parser are retried (6 attempts with River's back-off); everything else it returns fails at once (ADR 0005). Database errors are retried too. A document has one parse job at a time. `retry_documents` runs every hour and at start: it queues again every document that failed only because the parser stayed out of reach (`unavailable`), every `pending` one whose job was lost, every one a parser of another version than today's read, and every one that failed under an earlier parser instance (`DescribeParsers`; passwords, details, and OCR are read when the parser starts), so none waits for anyone to press re-parse.
+
+Parse jobs run on River's default queue, `BACKEND_PARSE_CONCURRENCY` at a time; the sources' jobs and `retry_documents` on a `sources` queue of their own, so neither holds the other up.
 
 On `SIGTERM` the backend stops taking jobs and gives a parse in progress 30 seconds to finish; one still running then is cancelled and retried after the restart. Give the container longer than that to stop (Compose `stop_grace_period`; Docker's default is 10 seconds).
 
@@ -71,8 +92,9 @@ On `SIGTERM` the backend stops taking jobs and gives a parse in progress 30 seco
 | `BACKEND_DATABASE_URL` | — | Required. Postgres connection string |
 | `BACKEND_HTTP_ADDR` | `:8080` | |
 | `BACKEND_PARSER_ADDR` | `localhost:50051` | Parser gRPC address (plaintext, internal network only) |
+| `BACKEND_PARSER_TOKEN` | — | Sent with every call to the parser; set it to the parser's `PARSER_TOKEN`, and the parser serves no one else. Set once, at deployment |
 | `BACKEND_PARSE_TIMEOUT` | `120s` | Deadline for one parse |
-| `BACKEND_PARSE_CONCURRENCY` | `2` | Documents parsed at once; keep it below the parser's workers, so previews and health checks always get a thread |
+| `BACKEND_PARSE_CONCURRENCY` | `2` | Documents parsed at once (other jobs have a queue of their own); keep it below the parser's workers, so previews and health checks always get a thread |
 | `BACKEND_MAX_UPLOAD_MB` | `32` | |
 | `BACKEND_LOG_FORMAT` | `json` | `json` or `text` |
 | `BACKEND_ACCESS_TEAM_DOMAIN` | — | Cloudflare Access team domain, `https://<team>.cloudflareaccess.com`. With `BACKEND_ACCESS_AUD`, every request but `/healthz` needs a valid Access token (ADR 0008); a service token's (no e-mail address) may only `POST /api/documents` (ADR 0010). Leave both empty locally |

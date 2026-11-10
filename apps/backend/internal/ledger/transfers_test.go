@@ -1,4 +1,4 @@
-package ingest
+package ledger
 
 import (
 	"testing"
@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 )
 
 // Synthetic accounts and amounts (ADR 0006).
@@ -45,7 +46,7 @@ var (
 func depositLine(t *testing.T, id int64, at deposit, on, amount, counterparty string) transferLine {
 	t.Helper()
 	l := transferLine{
-		ID: id, AccountID: at.account, AccountKind: KindDeposit, Institution: at.institution, Number: at.number,
+		ID: id, AccountID: at.account, AccountKind: domain.Deposit, Institution: at.institution, Number: at.number,
 		StatementID: at.statement, TransactionDate: day(t, on), Kind: "other", Amount: money(t, amount), Unit: "TWD",
 	}
 	if at.full != "" {
@@ -60,7 +61,7 @@ func depositLine(t *testing.T, id int64, at deposit, on, amount, counterparty st
 func paymentLine(t *testing.T, id int64, institution string, statement int64, on, amount string) transferLine {
 	t.Helper()
 	return transferLine{
-		ID: id, AccountID: 100, AccountKind: KindCreditCard, Institution: institution, StatementID: statement,
+		ID: id, AccountID: 100, AccountKind: domain.CreditCard, Institution: institution, StatementID: statement,
 		TransactionDate: day(t, on), Kind: "payment", Amount: money(t, amount), Unit: "TWD",
 	}
 }

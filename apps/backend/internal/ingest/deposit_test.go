@@ -11,7 +11,9 @@ import (
 	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
@@ -61,7 +63,7 @@ func storeDeposit(t *testing.T, pool *pgxpool.Pool, name string, statement *pars
 func TestADepositStatementIsStoredInTheAccountsItCovers(t *testing.T) {
 	pool := testdb.Pool(t)
 	id := storeDeposit(t, pool, "september.eml", sampleDeposit())
-	if got := document(t, pool, id).Status; got != StatusParsed {
+	if got := document(t, pool, id).Status; got != domain.Parsed {
 		t.Fatalf("status = %s", got)
 	}
 	ctx := t.Context()
@@ -71,7 +73,7 @@ func TestADepositStatementIsStoredInTheAccountsItCovers(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT kind, period_start, closing_date FROM statements").Scan(&kind, &periodStart, &closing); err != nil {
 		t.Fatal(err)
 	}
-	if kind != KindDeposit || periodStart.Format(time.DateOnly) != "2026-09-01" || closing.Format(time.DateOnly) != "2026-09-30" {
+	if kind != string(domain.Deposit) || periodStart.Format(time.DateOnly) != "2026-09-01" || closing.Format(time.DateOnly) != "2026-09-30" {
 		t.Fatalf("statement = %s %s..%s", kind, periodStart, closing)
 	}
 
@@ -133,7 +135,7 @@ func TestABanksCardBillAndDepositStatementClosingTheSameDayAreBothStored(t *test
 		t.Fatal(err)
 	}
 	id := storeDeposit(t, pool, "deposit.eml", sampleDeposit())
-	if got := document(t, pool, id).Status; got != StatusParsed {
+	if got := document(t, pool, id).Status; got != domain.Parsed {
 		t.Fatalf("deposit statement = %s, want parsed beside the bill", got)
 	}
 	if countRows(t, pool, "statements") != 2 {
@@ -221,7 +223,7 @@ func checkLedger(t *testing.T, pool *pgxpool.Pool, wantLines, wantBalances strin
 	if got := scan("SELECT as_of, amount::text FROM balances ORDER BY as_of, id"); got != wantBalances {
 		t.Fatalf("balances = %q, want %q", got, wantBalances)
 	}
-	gaps, err := dbq.New(pool).AccountGaps(ctx, nil)
+	gaps, err := ledger.Gaps(ctx, dbq.New(pool), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +243,7 @@ func TestOverlappingExportsKeepTheSharedDaysOfTheOneClosingLater(t *testing.T) {
 	pool := testdb.Pool(t)
 	older := storeDeposit(t, pool, "may-oct.eml", mayToOctober())
 	newer := storeDeposit(t, pool, "jun-nov.eml", juneToNovember())
-	if document(t, pool, older).Status != StatusParsed || document(t, pool, newer).Status != StatusParsed {
+	if document(t, pool, older).Status != domain.Parsed || document(t, pool, newer).Status != domain.Parsed {
 		t.Fatal("both overlapping exports must be parsed")
 	}
 	checkLedger(t, pool, sharedLines, sharedBalances)
@@ -261,7 +263,7 @@ func TestOverlappingExportsKeepTheSharedDaysOfTheOneClosingLater(t *testing.T) {
 		passbookLine(10, 29, "十月轉出(全)", "-200", "10300"),
 		passbookLine(11, 19, "十一月薪資", "3000", "13300"),
 	))
-	if got := document(t, pool, whole).Status; got != StatusParsed {
+	if got := document(t, pool, whole).Status; got != domain.Parsed {
 		t.Fatalf("status = %s, want parsed for a wider period ending on the same day", got)
 	}
 	checkLedger(t, pool,
@@ -310,7 +312,7 @@ func TestAnAccountWhoseLinesDoNotAddUpPutsTheStatementUpForReviewAndSaysWhich(t 
 		Balanced: false, Computed: &decimal.Decimal{Value: "51000"}, Stated: &decimal.Decimal{Value: "50000"}, StatedLabel: "存款餘額",
 	}
 	doc := document(t, pool, storeDeposit(t, pool, "off.eml", statement))
-	if doc.Status != StatusNeedsReview || len(doc.Warnings) != 1 ||
+	if doc.Status != domain.NeedsReview || len(doc.Warnings) != 1 ||
 		doc.Warnings[0] != "臺幣活存 1234567***890 TWD: the lines come to 51000, 存款餘額 is 50000" {
 		t.Fatalf("document = %s %q", doc.Status, doc.Warnings)
 	}
