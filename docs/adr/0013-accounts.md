@@ -10,7 +10,7 @@ There is no account setup. A source that reports an account Finchie has not seen
 
 | Kind | One per | Number | Notes |
 |---|---|---|---|
-| `credit_card` | Institution: one bill | Empty | Not an account the owner has: a container for the bank's card lines, which need one to belong to. It holds no balance and is not listed among the accounts. Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
+| `credit_card` | Institution: one bill | Empty | Not an account the owner has: a container for the bank's card lines, which need one to belong to. It holds no balance and is not listed among the accounts. (Since ADR 0022 it is a liability, listed, its balance on each closing date what that bill says is owed.) Its cards (last four digits) come from the lines, as today; one Richart bill lists several |
 | `deposit` | Account number | As the bank prints it, usually masked (`12345**6789*`). The parser normalizes it so one account reads the same every month | One account can hold several currencies; its balance is per currency |
 
 More kinds (securities, exchanges, points and miles programs) are added with the first source that reports one (`securities` came with ADR 0017, `exchange` with ADR 0018, `points` with ADR 0019).
