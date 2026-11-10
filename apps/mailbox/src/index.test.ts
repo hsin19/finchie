@@ -56,6 +56,9 @@ describe("mailbox", () => {
         expect(String(url)).toBe("https://finchie.example.com/api/documents");
         expect(init.method).toBe("POST");
         expect(init.headers).toMatchObject({ "CF-Access-Client-Id": "client-id.access", "CF-Access-Client-Secret": "client-secret" });
+        // Access answers a rejected service token with a redirect to its sign-in page, which a followed
+        // redirect would turn into a 200 and the mail into one taken.
+        expect(init.redirect).toBe("manual");
         const file = (init.body as FormData).get("file") as File;
         expect(file.name).toBe("Example Bank statement.eml");
         expect(await file.text()).toBe(RAW);
