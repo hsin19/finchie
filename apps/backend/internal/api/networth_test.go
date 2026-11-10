@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
@@ -78,5 +79,36 @@ func TestNetWorthOnADayIsEachAccountThenAtThatDaysPrices(t *testing.T) {
 		if got := get(t, e, "/api/net-worth/history?"+bad).Code; got != http.StatusBadRequest {
 			t.Errorf("%s: status = %d", bad, got)
 		}
+	}
+}
+
+func TestTheOwnerRecordsWhatIsHeldOrOwedAsAPositiveNumber(t *testing.T) {
+	e, _ := newAPI(t, 1<<20)
+	loan := open(t, e, AccountKindLoan, "房貸")
+	points := open(t, e, AccountKindPoints, "航空")
+	refused := func(id int64, holdings, says string) {
+		t.Helper()
+		got := send(t, e, http.MethodPut, fmt.Sprintf("/api/accounts/%d/holdings", id), `{"holdings": `+holdings+`}`)
+		if got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), says) {
+			t.Fatalf("%s: %d %s, want 400 saying %q", holdings, got.Code, got.Body, says)
+		}
+	}
+	// A negative principal would count the loan as an asset.
+	refused(loan, `[{"unit": "TWD", "amount": "-800000", "expiries": []}]`, "what is owed as a positive number")
+	refused(points, `[{"unit": "哩程", "amount": "-1", "expiries": []}]`, "what is held as a positive number")
+	refused(points, `[{"unit": "哩程", "amount": "1000", "expiries": [{"amount": "-100", "by": "2027-01-31"}]}]`, "what lapses")
+	if net := decode[NetWorth](t, get(t, e, "/api/net-worth")); net.Net != "0.00" {
+		t.Fatalf("net worth after refusals = %+v", net)
+	}
+}
+
+func TestAPositionKeepsTheFractionOfAShare(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	store(t, pool, "fractional.eml", pt.Response("skis.securities", pt.Securities("skis", "12**345", pt.Day(7, 1), pt.Day(8, 4),
+		[]*parserv2.Balance{pt.Balance("範例基金", pt.Day(8, 4), "10.5")})))
+	account := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), "12**345")
+	detail := accountOf(t, e, account.Id)
+	if detail.Positions == nil || len(*detail.Positions) != 1 || (*detail.Positions)[0].Shares != "10.5" {
+		t.Fatalf("positions = %+v", detail.Positions)
 	}
 }

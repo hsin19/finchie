@@ -59,7 +59,7 @@ func (s *Server) UpdateHoldings(ctx context.Context, request UpdateHoldingsReque
 	switch {
 	case errors.Is(err, ledger.ErrNoAccount):
 		return UpdateHoldings404JSONResponse(notFound("account", request.Id)), nil
-	case errors.Is(err, ledger.ErrNotKeptByHand), errors.Is(err, ledger.ErrListedTwice):
+	case errors.Is(err, ledger.ErrNotKeptByHand), errors.Is(err, ledger.ErrListedTwice), errors.Is(err, ledger.ErrNegative):
 		return UpdateHoldings400JSONResponse{ProblemJSONResponse{Message: explain(err)}}, nil
 	case err != nil:
 		return nil, fmt.Errorf("update holdings: %w", err)

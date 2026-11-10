@@ -209,7 +209,7 @@ func readPositions(ctx context.Context, queries *dbq.Queries, accountID int64, h
 	positions := domain.Positions(holdings, gapsTo, traded, worth)
 	result := make([]Position, 0, len(positions))
 	for _, p := range positions {
-		position := Position{Unit: p.Unit, Shares: p.Shares.FloatString(0), Worth: newest[p.Unit].Worth, Code: newest[p.Unit].Code}
+		position := Position{Unit: p.Unit, Shares: numeric.Exact(p.Shares), Worth: newest[p.Unit].Worth, Code: newest[p.Unit].Code}
 		if p.Since != nil {
 			position.Since = &openapi_types.Date{Time: *p.Since}
 			position.Cost = ptr(numeric.Cents(p.Cost))

@@ -27,6 +27,10 @@ var (
 	ErrNumberMismatch = errors.New("the full number does not fit the one the bank prints")
 	// ErrListedTwice means a unit is in a snapshot twice, however it is spelled.
 	ErrListedTwice = errors.New("listed twice")
+	// ErrNegative means the owner gave an amount below 0: what an account holds, or owes, is recorded as a
+	// positive number, and the account's side gives the sign (ADR 0022). A negative principal would count
+	// a loan as an asset.
+	ErrNegative = errors.New("negative amount")
 	// ErrNotKeptByHand means the account has a source other than the owner.
 	ErrNotKeptByHand = errors.New("only an account the owner opened is kept by hand")
 )
@@ -172,6 +176,18 @@ func KeepHoldings(ctx context.Context, pool *pgxpool.Pool, accountID int64, day 
 			symbol := domain.Symbol(source.Kind.UnitKind(), h.Symbol)
 			if _, twice := held[symbol]; twice {
 				return refuse(ErrListedTwice, "%s is listed twice", symbol)
+			}
+			if h.Amount.Sign() < 0 {
+				what := "held"
+				if source.Kind.Liability() {
+					what = "owed"
+				}
+				return refuse(ErrNegative, "%s: record what is %s as a positive number", symbol, what)
+			}
+			for _, e := range h.Expiries {
+				if e.Amount.Sign() <= 0 {
+					return refuse(ErrNegative, "%s: what lapses is a positive number", symbol)
+				}
 			}
 			held[symbol] = h.Amount
 		}
