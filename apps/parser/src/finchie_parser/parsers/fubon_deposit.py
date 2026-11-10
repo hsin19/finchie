@@ -7,44 +7,31 @@ Headings are centred over their columns, so a word belongs to the heading whose 
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from decimal import Decimal
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositAccount, DepositLine, DepositStatement
+from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, reconcile_account, rows_of
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.deposit import Account, Accounts, amounts_by_column, moved_in
+from finchie_parser.parsers.kinds import deposit_kind
+from finchie_parser.parsers.layout import nearest_centre, rows_of
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
-from finchie_parser.text import amount, clean, iso_date
+from finchie_parser.text import CENTS, CURRENCY, ISO_DATE, MASKED_ACCOUNT, amount, clean, find, iso_date, token
 
-_PERIOD = re.compile(r"對帳單期間：(\d{4}/\d\d/\d\d)~(\d{4}/\d\d/\d\d)", re.ASCII)
-_NUMBER = re.compile(r"\d+\*+\d+", re.ASCII)
-_DATE = re.compile(r"\d{4}/\d\d/\d\d", re.ASCII)
-_AMOUNT = re.compile(r"-?[\d,]+\.\d\d", re.ASCII)
-_CURRENCY = re.compile(r"[A-Z]{3}", re.ASCII)
+_PERIOD = re.compile(rf"對帳單期間：({ISO_DATE})~({ISO_DATE})", re.ASCII)
+_ACCOUNT = token(MASKED_ACCOUNT)
+_DATE = token(ISO_DATE)
+# Two decimals: other numbers on a row are not amounts.
+_AMOUNT = token(CENTS)
+_CURRENCY = token(CURRENCY)
 _BROUGHT_FORWARD = "承轉結餘"
-
-
-def _centre(word: Word) -> float:
-    return (word.x0 + word.x1) / 2
-
-
-def _column(word: Word, headings: dict[str, Word]) -> str:
-    return min(headings, key=lambda name: abs(_centre(headings[name]) - _centre(word)))
-
-
-@dataclass
-class _Account:
-    name: str
-    closing: Decimal
-    opening: Decimal | None = None
-    lines: list[DepositLine] = field(default_factory=list)
+_AMOUNT_COLUMNS = ("支出", "收入", "餘額")
 
 
 class FubonDepositParser(StatementParser):
     name = "fubon.deposit"
-    version = "1"
+    version = "2"
     institution = "fubon"
     # 台北富邦銀行2026年10月 銀行對帳單
     sender_domains = ("taipeifubon.com.tw",)
@@ -58,30 +45,20 @@ class FubonDepositParser(StatementParser):
         return [identity.require_national_id().upper()]
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
-        texts = document.page_texts()
-        period = find(_PERIOD, texts[:1], "statement period")
+        period = find(_PERIOD, document.page_texts(1), "statement period")
         reader = _Reader()
-        for page in range(1, len(texts)):
+        for page in range(1, document.page_count()):
             reader.read_page(document.page_words(page))
-        if not reader.accounts:
-            raise LayoutError("no deposit account listed")
-
-        accounts = []
-        for (number, currency), found in reader.accounts.items():
-            reconciliation = reconcile_account(found.opening, found.closing, found.lines, "餘額")
-            accounts.append(
-                DepositAccount(number, found.name, currency, found.closing, found.lines, reconciliation, found.opening)
-            )
         start, end = iso_date(period.group(1)), iso_date(period.group(2))
-        return Parsed(DepositStatement(self.institution, start, end, accounts))
+        return Parsed(reader.accounts.statement(self.institution, start, end, "餘額"))
 
 
 class _Reader:
     def __init__(self) -> None:
-        self.accounts: dict[tuple[str, str], _Account] = {}
+        self.accounts = Accounts()
         self.section = ""
         self.headings: dict[str, Word] = {}
-        self.current: _Account | None = None
+        self.current: Account | None = None
 
     def read_page(self, words: Sequence[Word]) -> None:
         for row in rows_of(words):
@@ -97,55 +74,54 @@ class _Reader:
                 self.headings = {
                     word.text: word for word in row if word.text in ("日期", "摘要", "支出", "收入", "餘額")
                 }
-            elif self.section == "資產持有明細" and self.headings and any(_NUMBER.fullmatch(t) for t in texts):
+            elif self.section == "資產持有明細" and self.headings and any(_ACCOUNT.fullmatch(t) for t in texts):
                 self._holding(row)
             elif self.section == "當月交易明細" and self.headings and any(_DATE.fullmatch(t) for t in texts[:2]):
                 self._line(row)
 
     def _holding(self, row: list[Word]) -> None:
-        number = next(w.text for w in row if _NUMBER.fullmatch(w.text))
+        number = next(w.text for w in row if _ACCOUNT.fullmatch(w.text))
         currencies = [w.text for w in row if _CURRENCY.fullmatch(w.text)]
-        balances = [w for w in row if _AMOUNT.fullmatch(w.text) and _column(w, self.headings) == "餘額"]
+        balances = [w for w in row if _AMOUNT.fullmatch(w.text) and self._column(w) == "餘額"]
         if len(currencies) != 1 or len(balances) != 1:
             raise LayoutError(f"{number}: expected one currency and one balance")
-        if (number, currencies[0]) in self.accounts:
-            raise LayoutError(f"{number} {currencies[0]} listed twice")
-        self.accounts[(number, currencies[0])] = _Account(row[0].text, amount(balances[0].text))
+        self.accounts.add(number, currencies[0], row[0].text, amount(balances[0].text))
 
     def _line(self, row: list[Word]) -> None:
-        if _NUMBER.fullmatch(row[0].text):
+        if _ACCOUNT.fullmatch(row[0].text):
             # The balance brought forward opens an account's lines, its number on that row only.
-            found = self.accounts.get((row[0].text, "TWD"))
+            found = self.accounts.get(row[0].text, "TWD")
             if found is None:
                 raise LayoutError(f"lines for {row[0].text}, which the holdings do not list")
             self.current, row = found, row[1:]
         if self.current is None:
             raise LayoutError(f"{row[0].text}: a line before its account")
         when, rest = row[0], row[1:]
-        by_column: dict[str, Decimal] = {}
-        notes: list[Word] = []
-        for word in rest:
-            column = _column(word, self.headings)
-            if _AMOUNT.fullmatch(word.text) and column in ("支出", "收入", "餘額"):
-                if column in by_column:
-                    raise LayoutError(f"{when.text}: two amounts under {column}")
-                by_column[column] = amount(word.text)
-            else:
-                notes.append(word)
+        by_column, notes = amounts_by_column(rest, self._amount_column, when.text)
         if "餘額" not in by_column:
             raise LayoutError(f"{when.text}: no balance")
-        description = [w.text for w in notes if _column(w, self.headings) in ("日期", "摘要")]
+        description = [w.text for w in notes if self._column(w) in ("日期", "摘要")]
         if description == [_BROUGHT_FORWARD]:
             self.current.opening = by_column["餘額"]
             return
         # An account number printed past the amounts: the other side of a transfer.
-        counterparty = [w.text for w in notes if _column(w, self.headings) not in ("日期", "摘要")]
+        counterparty = [w.text for w in notes if self._column(w) not in ("日期", "摘要")]
+        text = clean(" ".join(description))
         self.current.lines.append(
             DepositLine(
                 date=iso_date(when.text),
-                description=clean(" ".join(description)),
-                amount=by_column.get("收入", Decimal(0)) - by_column.get("支出", Decimal(0)),
+                description=text,
+                amount=moved_in(by_column, "收入", "支出"),
+                kind=deposit_kind(text),
                 counterparty=" ".join(counterparty),
                 balance=by_column["餘額"],
             )
         )
+
+    def _column(self, word: Word) -> str:
+        # Headings are centred over their columns.
+        return nearest_centre(word, self.headings)
+
+    def _amount_column(self, word: Word) -> str | None:
+        column = self._column(word)
+        return column if _AMOUNT.fullmatch(word.text) and column in _AMOUNT_COLUMNS else None

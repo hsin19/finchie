@@ -1,22 +1,14 @@
 import re
-from datetime import date
-from decimal import Decimal
 
 from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import (
-    Parsed,
-    StatementParser,
-    adjusted,
-    earned,
-    find,
-    points_program,
-    sum_new_charges,
-    used,
-)
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.kinds import card_kind
+from finchie_parser.parsers.points import adjusted, earned, points_program, used
+from finchie_parser.parsers.reconcile import sum_new_charges
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, clean, iso_date, month_day, month_end, roc_date
+from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, amount, clean, either_date, find, month_day, month_end
 
 # Minguo dates ("115/09/07") up to the September 2026 bill, Gregorian ones ("2026/11/07") from October.
 _DUE = re.compile(r"^(\d{3,4}/\d\d/\d\d) \d+(?:\.\d+)?%", re.ASCII)
@@ -24,24 +16,25 @@ _DUE = re.compile(r"^(\d{3,4}/\d\d/\d\d) \d+(?:\.\d+)?%", re.ASCII)
 _CLOSING = re.compile(r"^(\d{3,4}/\d\d/\d\d) [\d,]+ / [\d,]+ 元", re.ASCII)
 # 本期回饋／費用明細 from the October 2026 bill.
 _FEES = re.compile(r"^本期(?:回饋／)?費用明細")
-_SUBTOTAL = re.compile(r"^本期合計： TWD (-?[\d,]+)$", re.ASCII)
-_TOTAL_DUE = re.compile(r"^本期應繳總金額： TWD (-?[\d,]+)$", re.ASCII)
+_SUBTOTAL = re.compile(rf"^本期合計： TWD ({INTEGER})$", re.ASCII)
+_TOTAL_DUE = re.compile(rf"^本期應繳總金額： TWD ({INTEGER})$", re.ASCII)
 _CARD = re.compile(r"^卡號：\d{4}-X{4}-X{4}-(\d{4})", re.ASCII)
 # Foreign lines add "<conversion date> <currency> <amount>" before the billed TWD amount.
 # A trailing letter marks the mobile wallet (A = Apple Pay, G = Google Pay, ...).
 _ROW = re.compile(
     r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?)"
-    r"(?: \d\d/\d\d (?P<cur>[A-Z]{3}) (?P<orig>-?[\d,]+(?:\.\d+)?))?"
-    r" TWD (?P<amt>-?[\d,]+)(?: [AGQS])?$",
+    rf"(?: \d\d/\d\d (?P<cur>{CURRENCY}) (?P<orig>{AMOUNT}))?"
+    rf" TWD (?P<amt>{INTEGER})(?: [AGQS])?$",
     re.ASCII,
 )
-_PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<desc>\D.*) TWD (?P<amt>-[\d,]+)$", re.ASCII)
+# A payment: no posting date.
+_PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<desc>\D.*) TWD (?P<amt>-\d[\d,]*)$", re.ASCII)
 # 點數明細, its headings an image (ADR 0019): "<上期累積點數> 點 <本期加點> 點 <本期調整點數> 點 <本期扣點> 點
 # <本期結餘點數> 點". The table names no program; its notes call the points e point. From the October 2026
 # bill it is 玉山e point明細, without 本期調整點數.
 _POINTS = re.compile(
-    r"^(?P<opening>-?[\d,]+) 點 (?P<added>-?[\d,]+) 點(?: (?P<adjusted>-?[\d,]+) 點)? (?P<used>-?[\d,]+) 點"
-    r" (?P<closing>-?[\d,]+) 點$"
+    rf"^(?P<opening>{INTEGER}) 點 (?P<added>{INTEGER}) 點(?: (?P<adjusted>{INTEGER}) 點)? (?P<used>{INTEGER}) 點"
+    rf" (?P<closing>{INTEGER}) 點$"
 )
 _POINTS_NAME = "e point"
 # "※您有e point點數即將到期：2026/10共0點、2026/11共0點，…": each month's, by its last day.
@@ -50,7 +43,7 @@ _POINTS_EXPIRING = re.compile(r"(?P<y>\d{4})/(?P<m>\d{1,2})共(?P<n>[\d,]+)點")
 
 class EsunParser(StatementParser):
     name = "esun.credit_card"
-    version = "3"
+    version = "4"
     institution = "esun"
     # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
     # comes from the same address.
@@ -66,8 +59,8 @@ class EsunParser(StatementParser):
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         texts = document.page_texts()
-        closing = _date(find(_CLOSING, texts, "closing date").group(1))
-        due = _date(find(_DUE, texts, "due date").group(1))
+        closing = either_date(find(_CLOSING, texts, "closing date").group(1))
+        due = either_date(find(_DUE, texts, "due date").group(1))
         subtotal = amount(find(_SUBTOTAL, texts, "本期合計").group(1))
         total_due = amount(find(_TOTAL_DUE, texts, "本期應繳總金額").group(1))
 
@@ -111,7 +104,7 @@ class EsunParser(StatementParser):
                         transaction_date=month_day(match["date"], closing),
                         posting_date=month_day(match["posted"], closing),
                         description=description,
-                        kind=_kind(description, value),
+                        kind=card_kind(description, value),
                         amount=value,
                         original_amount=amount(match["orig"]) if foreign else None,
                         original_currency=match["cur"] if foreign else "",
@@ -148,19 +141,3 @@ class EsunParser(StatementParser):
             points=points,
         )
         return Parsed(statement, warnings)
-
-
-def _date(text: str) -> date:
-    return iso_date(text) if len(text.split("/")[0]) == 4 else roc_date(text)
-
-
-def _kind(description: str, value: Decimal) -> Kind:
-    if "國外交易服務費" in description:
-        return Kind.FOREIGN_TRANSACTION_FEE
-    if "年費" in description:
-        return Kind.ANNUAL_FEE
-    if "回饋" in description:
-        return Kind.REBATE
-    if value < 0:
-        return Kind.REFUND
-    return Kind.PURCHASE

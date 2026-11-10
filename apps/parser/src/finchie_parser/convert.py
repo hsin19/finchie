@@ -1,7 +1,9 @@
-"""Internal model -> generated proto messages."""
+"""Internal model -> generated proto messages. Every enum value has its proto value (tests check the maps
+are complete), and every kind of statement its message."""
 
 from datetime import date
 from decimal import Decimal
+from typing import assert_never
 
 from google.protobuf import timestamp_pb2
 from google.type import date_pb2, decimal_pb2
@@ -34,7 +36,6 @@ _KINDS = {
     Kind.PAYMENT: pb.TRANSACTION_KIND_PAYMENT,
 }
 
-
 _DEPOSIT_KINDS = {
     DepositKind.OTHER: pb.DEPOSIT_LINE_KIND_OTHER,
     DepositKind.INTEREST: pb.DEPOSIT_LINE_KIND_INTEREST,
@@ -42,16 +43,31 @@ _DEPOSIT_KINDS = {
 }
 
 
+_POINTS_KINDS = {
+    PointsKind.EARN: pb.POINTS_LINE_KIND_EARN,
+    PointsKind.ADJUST: pb.POINTS_LINE_KIND_ADJUST,
+    PointsKind.REDEEM: pb.POINTS_LINE_KIND_REDEEM,
+}
+
+_TRADE_SIDES = {
+    TradeSide.BUY: pb.TRADE_SIDE_BUY,
+    TradeSide.SELL: pb.TRADE_SIDE_SELL,
+}
+
+
 def to_response(result: ParseResult) -> pb.ParseDocumentResponse:
     response = pb.ParseDocumentResponse(
         parser=result.parser, parser_version=result.parser_version, warnings=result.warnings
     )
-    if isinstance(result.statement, DepositStatement):
-        response.deposit_statement.CopyFrom(_deposit_statement(result.statement))
-    elif isinstance(result.statement, SecuritiesStatement):
-        response.securities_statement.CopyFrom(_securities_statement(result.statement))
-    else:
-        response.statement.CopyFrom(_statement(result.statement))
+    match result.statement:
+        case Statement() as statement:
+            response.statement.CopyFrom(_statement(statement))
+        case DepositStatement() as statement:
+            response.deposit_statement.CopyFrom(_deposit_statement(statement))
+        case SecuritiesStatement() as statement:
+            response.securities_statement.CopyFrom(_securities_statement(statement))
+        case unknown:
+            assert_never(unknown)
     return response
 
 
@@ -64,14 +80,14 @@ def to_open_response(opened: OpenedDocument) -> pb.OpenDocumentResponse:
             for f in opened.files
         ]
     )
-    if (mail := opened.email) is not None:
-        response.email.CopyFrom(
-            pb.Email(sender=mail.sender, recipient=mail.recipient, subject=mail.subject, html=mail.html, text=mail.text)
-        )
-        if mail.date is not None:
-            stamp = timestamp_pb2.Timestamp()
-            stamp.FromDatetime(mail.date)
-            response.email.date.CopyFrom(stamp)
+    mail = opened.email
+    response.email.CopyFrom(
+        pb.Email(sender=mail.sender, recipient=mail.recipient, subject=mail.subject, html=mail.html, text=mail.text)
+    )
+    if mail.date is not None:
+        stamp = timestamp_pb2.Timestamp()
+        stamp.FromDatetime(mail.date)
+        response.email.date.CopyFrom(stamp)
     return response
 
 
@@ -87,13 +103,6 @@ def _statement(statement: Statement) -> pb.Statement:
         reconciliation=_reconciliation(reconciliation),
         points=[_points_program(program) for program in statement.points],
     )
-
-
-_POINTS_KINDS = {
-    PointsKind.EARN: pb.POINTS_LINE_KIND_EARN,
-    PointsKind.ADJUST: pb.POINTS_LINE_KIND_ADJUST,
-    PointsKind.REDEEM: pb.POINTS_LINE_KIND_REDEEM,
-}
 
 
 def _points_program(program: PointsProgram) -> pb.PointsProgram:
@@ -143,7 +152,7 @@ def _securities_trade(trade: SecuritiesTrade) -> pb.SecuritiesTrade:
     message = pb.SecuritiesTrade(
         date=_date(trade.date),
         name=trade.name,
-        side=pb.TRADE_SIDE_BUY if trade.side is TradeSide.BUY else pb.TRADE_SIDE_SELL,
+        side=_TRADE_SIDES[trade.side],
         shares=_decimal(trade.shares),
         price=_decimal(trade.price),
         category=trade.category,

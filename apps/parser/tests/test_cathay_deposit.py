@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, row
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositKind, DepositStatement
@@ -20,10 +20,6 @@ COVER = f"""開戶日期：2020年01月01日
 銀行代號 | 013"""
 
 PAGE_2_TEXT = f"帳號：{ACCOUNT}"
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 HEADINGS = [
@@ -62,8 +58,7 @@ LINES = [
 
 def parse(pages: dict[int, list[Word]], texts: list[str] | None = None) -> DepositStatement:
     document = FakeDocument(texts or [COVER, PAGE_2_TEXT], words=pages)
-    statement = CathayDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+    statement = deposit(CathayDepositParser().parse(document, ocr=None))
     return statement
 
 

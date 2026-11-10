@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
+from typing import Protocol
+
+from finchie_parser.errors import LayoutError
 
 
 class Kind(StrEnum):
@@ -11,6 +14,18 @@ class Kind(StrEnum):
     REFUND = "refund"
     REBATE = "rebate"
     PAYMENT = "payment"
+
+
+class StatementSummary(Protocol):
+    """What every kind of statement says about itself, for logs and traces."""
+
+    @property
+    def balanced(self) -> bool:
+        """Whether every reconciliation it carries adds up."""
+        ...
+
+    @property
+    def line_count(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -24,6 +39,14 @@ class Transaction:
     original_currency: str = ""
     country: str = ""
     card_last4: str = ""
+
+    def __post_init__(self) -> None:
+        # A foreign amount means nothing without its currency, nor a currency without the amount: the
+        # backend matches refunds in either both or neither (ADR 0009).
+        if (self.original_amount is None) != (self.original_currency == ""):
+            raise LayoutError(
+                f"{self.transaction_date} {self.description!r}: a foreign amount and its currency come together"
+            )
 
 
 @dataclass(frozen=True)
@@ -82,6 +105,14 @@ class Statement:
     reconciliation: Reconciliation
     points: list[PointsProgram] = field(default_factory=list)
 
+    @property
+    def balanced(self) -> bool:
+        return self.reconciliation.balanced
+
+    @property
+    def line_count(self) -> int:
+        return len(self.transactions)
+
 
 class DepositKind(StrEnum):
     """Only what the bank's own wording says (ADR 0013)."""
@@ -129,6 +160,10 @@ class DepositStatement:
     def balanced(self) -> bool:
         return all(a.reconciliation is None or a.reconciliation.balanced for a in self.accounts)
 
+    @property
+    def line_count(self) -> int:
+        return sum(len(a.lines) for a in self.accounts)
+
 
 class TradeSide(StrEnum):
     BUY = "buy"
@@ -175,7 +210,13 @@ class SecuritiesStatement:
     def balanced(self) -> bool:
         return self.reconciliation.balanced
 
+    @property
+    def line_count(self) -> int:
+        return len(self.trades)
 
+
+# Every kind of statement, each also a StatementSummary. Code that needs the kind matches on it, with
+# `assert_never` for the case it does not handle, so that a fourth kind fails the type check, not at run time.
 AnyStatement = Statement | DepositStatement | SecuritiesStatement
 
 

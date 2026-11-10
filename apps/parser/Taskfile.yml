@@ -10,10 +10,11 @@ tasks:
       - uv sync
 
   lint:
-    desc: Lint and check formatting
+    desc: Lint, check formatting, and type-check (mypy, strict)
     cmds:
       - uv run ruff check .
       - uv run ruff format --check .
+      - uv run mypy
 
   fmt:
     desc: Fix lint and format
@@ -32,7 +33,7 @@ tasks:
       - uv run python -m finchie_parser.mail_filter ../backend/internal/mailfilter/gmail-filters.xml
 
   test-real:
-    desc: Parse every statement in .local/statements and assert it reconciles (ADR 0006)
+    desc: Parse every statement in .local/statements and assert it reconciles (ADR 0006); reads ../../.local/parser.env
     env:
       FINCHIE_REAL_STATEMENTS_DIR: '{{.FINCHIE_REAL_STATEMENTS_DIR | default "../../.local/statements"}}'
     cmds:
@@ -46,6 +47,7 @@ tasks:
 
   run:
     desc: Start the gRPC server on :50051 (reads ../../.local/parser.env)
+    dotenv: ['../../.local/parser.env']
     cmds:
       - uv run python -m finchie_parser
 

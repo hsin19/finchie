@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, row, securities
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import SecuritiesStatement, TradeSide
@@ -18,10 +18,6 @@ PAGE_1 = """新光證券⽉對帳單
 www.sk88.com.tw
 親愛的 王 O 明 (12**345) 先⽣/⼩姐，您好！
 以下是 115 年 07 ⽉的綜合證券⽉對帳單"""
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 HEADINGS = [
@@ -56,7 +52,9 @@ HEADINGS = [
 ]
 
 
-def trade(top: float, when: str, name: str, shares: str, price: str, category: str, *amounts: tuple[str, float, float]):
+def trade(
+    top: float, when: str, name: str, shares: str, price: str, category: str, *amounts: tuple[str, float, float]
+) -> list[Word]:
     return row(
         top, (when, 25, 44), (name, 51, 90), (shares, 96, 113), (price, 120, 137), (category, 152, 166), *amounts
     )
@@ -143,8 +141,7 @@ WORDS = [*HEADINGS, *TRADES, *TOTALS, *HOLDINGS]
 
 
 def parse(words: list[Word] = WORDS) -> SecuritiesStatement:
-    statement = SkisSecuritiesParser().parse(FakeDocument([PAGE_1], words={0: words}), ocr=None).statement
-    assert isinstance(statement, SecuritiesStatement)
+    statement = securities(SkisSecuritiesParser().parse(FakeDocument([PAGE_1], words={0: words}), ocr=None))
     return statement
 
 
@@ -229,7 +226,7 @@ def test_skis_reconciles_the_trades_against_the_totals_column_by_column() -> Non
         # A trade dated outside the month.
         (
             [Word("08/01", w.x0, w.x1, w.top) if w.text == "07/03" else w for w in WORDS],
-            "outside the statement's month",
+            "outside the statement period",
         ),
     ],
 )

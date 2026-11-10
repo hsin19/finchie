@@ -5,24 +5,29 @@ from decimal import Decimal
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import Kind, PointsExpiry, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import (
-    Parsed,
-    StatementParser,
-    earned,
-    find,
-    points_program,
-    sum_new_charges,
-    used,
-)
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.kinds import card_kind
+from finchie_parser.parsers.points import earned, points_program, used
+from finchie_parser.parsers.reconcile import sum_new_charges
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, clean, month_day, month_end, roc_date
+from finchie_parser.text import (
+    AMOUNT,
+    INTEGER,
+    ROC_DATE,
+    amount,
+    clean,
+    find,
+    month_day,
+    month_end,
+    roc_date,
+)
 
 # 信用卡回饋總覽, its headings unmapped glyphs (ADR 0019): "<program> <上期累計> <本期新增/扣除> <本期贈送>
 # <本期兌/轉換> <本期結餘>", e.g. "小樹點(信用卡) 3,190 64 0 1 3,253".
 _POINTS = re.compile(
-    r"^(?P<name>\S*(?:點|里數)\S*) (?P<opening>-?[\d,]+) (?P<added>-?[\d,]+) (?P<gift>-?[\d,]+)"
-    r" (?P<used>-?[\d,]+) (?P<closing>-?[\d,]+)$"
+    rf"^(?P<name>\S*(?:點|里數)\S*) (?P<opening>{INTEGER}) (?P<added>{INTEGER}) (?P<gift>{INTEGER})"
+    rf" (?P<used>{INTEGER}) (?P<closing>{INTEGER})$"
 )
 # "您有88點小樹點(信用卡)於本月到期；共計有669點小樹點(信用卡)將於116年3月31日前陸續到期": the closing month's, and
 # the next twelve months' together, the closing month's included.
@@ -31,31 +36,31 @@ _POINTS_EXPIRING = re.compile(
     r"將於(?P<y>\d{3})年(?P<m>\d{1,2})月(?P<d>\d{1,2})日前陸續到期"
 )
 # Page 1 prints the closing date next to the credit limit: "115/10/01 140,000".
-_CLOSING = re.compile(r"^(\d{3}/\d\d/\d\d) [\d,]+$", re.ASCII)
+_CLOSING = re.compile(rf"^({ROC_DATE}) [\d,]+$", re.ASCII)
 # The auto-debit notice carries the due date, already moved past holidays.
-_DUE = re.compile(r"將於\s*(\d{3}/\d\d/\d\d)", re.ASCII)
-_NEW_CHARGES = re.compile(r"^(?:正卡|附卡)本期消費 (-?[\d,]+)$", re.ASCII)
-_TOTAL_DUE = re.compile(r"^本期應繳總額 (-?[\d,]+)$", re.ASCII)
-_PAYMENTS = re.compile(r"^繳款小計 (-?[\d,]+)$", re.ASCII)
+_DUE = re.compile(rf"將於\s*({ROC_DATE})", re.ASCII)
+_NEW_CHARGES = re.compile(rf"^(?:正卡|附卡)本期消費 ({INTEGER})$", re.ASCII)
+_TOTAL_DUE = re.compile(rf"^本期應繳總額 ({INTEGER})$", re.ASCII)
+_PAYMENTS = re.compile(rf"^繳款小計 ({INTEGER})$", re.ASCII)
 # "<date> <posted> <description> <amount> <card last 4> [<wallet card last 4>] <country> <currency>
 #  [<foreign amount> [<conversion date>]]"; a refund's foreign amount is negative too.
 _ROW = re.compile(
-    r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?) (?P<amt>-?[\d,]+) (?P<card>\d{4})(?: \d{4})?"
-    r" (?P<country>[A-Z]{2}) (?P<cur>[A-Z]{3})(?: (?P<orig>-?[\d,]+(?:\.\d+)?)(?: \d\d/\d\d)?)?$",
+    rf"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?) (?P<amt>{INTEGER}) (?P<card>\d{{4}})(?: \d{{4}})?"
+    rf" (?P<country>[A-Z]{{2}}) (?P<cur>[A-Z]{{3}})(?: (?P<orig>{AMOUNT})(?: \d\d/\d\d)?)?$",
     re.ASCII,
 )
 # Fees and the annual fee name no country or currency:
 # "<date> <posted> <description> <amount> <card last 4>", e.g. "12/21 01/01 國外交易手續費 -AUSTRA 6 7218".
 _PLAIN_ROW = re.compile(
-    r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?) (?P<amt>-?[\d,]+) (?P<card>\d{4})$", re.ASCII
+    rf"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?) (?P<amt>{INTEGER}) (?P<card>\d{{4}})$", re.ASCII
 )
 # "<date> <posted> <description> <negative amount>": no card. The description can hold digits ("ATM轉帳 822").
-_PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?) (?P<amt>-[\d,]+)$", re.ASCII)
+_PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?) (?P<amt>-\d[\d,]*)$", re.ASCII)
 
 
 class CathayParser(StatementParser):
     name = "cathay.credit_card"
-    version = "5"
+    version = "6"
     institution = "cathay"
     sender_domains = ("cathaybk.com.tw",)
     subject_terms = ("信用卡", "電子帳單")
@@ -89,15 +94,11 @@ class CathayParser(StatementParser):
             elif match := _PAYMENTS.match(line):
                 payments = (payments or Decimal(0)) + amount(match.group(1))
             elif match := _ROW.match(line):
-                value = amount(match["amt"])
                 foreign = match["cur"] != "TWD"
                 transactions.append(
-                    Transaction(
-                        transaction_date=month_day(match["date"], closing),
-                        posting_date=month_day(match["posted"], closing),
-                        description=clean(match["desc"]),
-                        kind=Kind.REFUND if value < 0 else Kind.PURCHASE,
-                        amount=value,
+                    _transaction(
+                        match,
+                        closing,
                         original_amount=amount(match["orig"]) if foreign and match["orig"] else None,
                         original_currency=match["cur"] if foreign else "",
                         country=match["country"],
@@ -105,32 +106,14 @@ class CathayParser(StatementParser):
                     )
                 )
             elif match := _PLAIN_ROW.match(line):
-                value = amount(match["amt"])
-                description = clean(match["desc"])
-                transactions.append(
-                    Transaction(
-                        transaction_date=month_day(match["date"], closing),
-                        posting_date=month_day(match["posted"], closing),
-                        description=description,
-                        kind=_plain_kind(description, value),
-                        amount=value,
-                        card_last4=match["card"],
-                    )
-                )
+                transactions.append(_transaction(match, closing, card_last4=match["card"]))
             elif match := _PAYMENT.match(line):
-                transactions.append(
-                    Transaction(
-                        transaction_date=month_day(match["date"], closing),
-                        posting_date=month_day(match["posted"], closing),
-                        description=clean(match["desc"]),
-                        kind=Kind.PAYMENT,
-                        amount=amount(match["amt"]),
-                    )
-                )
+                # No card: a payment, whatever its words.
+                transactions.append(_transaction(match, closing, kind=Kind.PAYMENT))
             elif match := _POINTS.match(line):
                 programs.append(match)
             elif match := _POINTS_EXPIRING.search(line):
-                by = date(int(match["y"]) + 1911, int(match["m"]), int(match["d"]))
+                by = roc_date(f"{match['y']}/{match['m']}/{match['d']}")
                 expiring[match["name"]] = [
                     PointsExpiry(amount(match["month"]), month_end(closing.year, closing.month)),
                     PointsExpiry(amount(match["total"]), by),
@@ -173,10 +156,26 @@ class CathayParser(StatementParser):
         return Parsed(statement, warnings)
 
 
-def _plain_kind(description: str, value: Decimal) -> Kind:
-    # "國外退貨手續費": the fee on a refunded purchase, given back.
-    if "國外交易手續費" in description or "國外退貨手續費" in description:
-        return Kind.FOREIGN_TRANSACTION_FEE
-    if "年費" in description:
-        return Kind.ANNUAL_FEE
-    return Kind.REFUND if value < 0 else Kind.PURCHASE
+def _transaction(
+    match: re.Match[str],
+    closing: date,
+    *,
+    kind: Kind | None = None,
+    original_amount: Decimal | None = None,
+    original_currency: str = "",
+    country: str = "",
+    card_last4: str = "",
+) -> Transaction:
+    value = amount(match["amt"])
+    description = clean(match["desc"])
+    return Transaction(
+        transaction_date=month_day(match["date"], closing),
+        posting_date=month_day(match["posted"], closing),
+        description=description,
+        kind=kind or card_kind(description, value),
+        amount=value,
+        original_amount=original_amount,
+        original_currency=original_currency,
+        country=country,
+        card_last4=card_last4,
+    )

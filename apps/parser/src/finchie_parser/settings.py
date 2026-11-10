@@ -1,9 +1,33 @@
+"""The deployment's settings, from `PARSER_*` environment variables. The names of those variables are
+known here only: other modules ask `variable` for the one to name in a message."""
+
+from collections.abc import Collection
 from datetime import date
+from pathlib import Path
 
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from finchie_parser.passwords import Identity, Passwords
+
+_PREFIX = "PARSER_"
+_DELIMITER = "__"
+
+
+def variable(*path: str) -> str:
+    """The environment variable of a setting, by its path: ("identity", "national_id") ->
+    PARSER_IDENTITY__NATIONAL_ID."""
+    return _PREFIX + _DELIMITER.join(part.upper() for part in path)
+
+
+def identity_variable(detail: str) -> str:
+    """The variable that holds one of the owner's details (an Identity field)."""
+    return variable("identity", detail)
+
+
+def chosen_password_variable(institution: str) -> str:
+    """The variable for a password the owner chose at a bank, in place of its rule."""
+    return variable("pdf_passwords", institution)
 
 
 class IdentitySettings(BaseModel):
@@ -17,14 +41,14 @@ class IdentitySettings(BaseModel):
 class Settings(BaseSettings):
     """Read from `PARSER_*` environment variables, nested keys split by `__`.
 
-    For local runs, `.local/parser.env` at the repository root is read too
-    (gitignored, ADR 0006).
+    Only the environment: an env file is read only when its path is given (`Settings.load`), so that
+    tests and the image never pick up a developer's `.local/parser.env` (ADR 0006).
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="PARSER_",
-        env_nested_delimiter="__",
-        env_file="../../.local/parser.env",
+        env_prefix=_PREFIX,
+        env_nested_delimiter=_DELIMITER,
+        env_file=None,
         extra="ignore",
     )
 
@@ -41,13 +65,28 @@ class Settings(BaseSettings):
     # The release, reported with every trace, metric, and log; the image sets it (release.yml passes the
     # tag's version). Not to be confused with a bank parser's version.
     version: str = "dev"
+    # A secret the caller sends with every call (`authorization: Bearer ...`); unset, any caller that reaches
+    # the port is served. The backend's BACKEND_PARSER_TOKEN, the same value.
+    token: SecretStr | None = None
     # PARSER_IDENTITY__NATIONAL_ID=... ; see IdentitySettings.
     identity: IdentitySettings = Field(default_factory=IdentitySettings)
     # PARSER_PDF_PASSWORDS__TAISHIN=... ; keys are institution IDs. Only for a bank whose password the
     # owner changed: the bank's rule covers the rest.
     pdf_passwords: dict[str, SecretStr] = Field(default_factory=dict)
 
-    def passwords(self) -> Passwords:
+    @classmethod
+    def load(cls, env_file: Path | None = None) -> "Settings":
+        """From the environment, and from `env_file` too when given and present."""
+        if env_file is not None and env_file.is_file():
+            return cls(_env_file=env_file)
+        return cls()
+
+    def passwords(self, institutions: Collection[str]) -> Passwords:
+        """The owner's details and chosen passwords. A chosen password for an institution no parser has
+        is a typo that would otherwise go unnoticed, so it fails."""
+        if unknown := sorted(set(self.pdf_passwords) - set(institutions)):
+            names = ", ".join(chosen_password_variable(institution) for institution in unknown)
+            raise ValueError(f"{names}: no parser has that institution; known are {sorted(institutions)}")
         national_id = self.identity.national_id
         return Passwords(
             Identity(
@@ -65,4 +104,4 @@ def _birth_date(secret: SecretStr | None) -> date | None:
         return date.fromisoformat(secret.get_secret_value())
     except ValueError:
         # Without the value: the message would print it.
-        raise ValueError("PARSER_IDENTITY__BIRTH_DATE must be YYYY-MM-DD") from None
+        raise ValueError(f"{identity_variable('birth_date')} must be YYYY-MM-DD") from None

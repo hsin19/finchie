@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, row
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositKind, DepositStatement
@@ -25,10 +25,6 @@ HEADINGS = (
     ("餘額", 305, 322),
     ("備註", 434, 451),
 )
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 def heading(top: float, number: str, currency: str, balance: str) -> list[Word]:
@@ -84,9 +80,8 @@ PAGE_3 = [
 
 
 def parse(page_3: list[Word] = PAGE_3, page_1: str = PAGE_1) -> DepositStatement:
-    document = FakeDocument([page_1, "", ""], words={1: PAGE_2, 2: page_3})
-    statement = NextBankDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+    document = FakeDocument([page_1], words={1: PAGE_2, 2: page_3})
+    statement = deposit(NextBankDepositParser().parse(document, ocr=None))
     return statement
 
 
@@ -124,9 +119,8 @@ def test_nextbank_deposit_reads_the_other_side_of_a_transfer_from_its_memo() -> 
 
 def test_nextbank_deposit_keeps_a_bank_it_has_no_code_for_by_name() -> None:
     page_2 = [Word("某某銀行-123456;FT0002", w.x0, w.x1, w.top) if w.text.startswith("玉山銀行") else w for w in PAGE_2]
-    document = FakeDocument([PAGE_1, "", ""], words={1: page_2, 2: PAGE_3})
-    statement = NextBankDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+    document = FakeDocument([PAGE_1], words={1: page_2, 2: PAGE_3})
+    statement = deposit(NextBankDepositParser().parse(document, ocr=None))
     assert statement.accounts[0].lines[1].counterparty == "某某銀行 123456"
 
 

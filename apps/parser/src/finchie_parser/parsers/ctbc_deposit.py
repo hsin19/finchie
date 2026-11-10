@@ -13,43 +13,34 @@ the lines, a count of them, and the closing balance with the period's totals.
 import itertools
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from decimal import Decimal
 
-from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositAccount, DepositKind, DepositLine, DepositStatement
+from finchie_parser.errors import ConfigurationError, LayoutError
+from finchie_parser.model import DepositLine
 from finchie_parser.ocr import Ocr, OcrLine
-from finchie_parser.parsers.base import Parsed, StatementParser, reconcile_account, rows_of
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.deposit import Account, Accounts, amounts_by_column, moved_in
+from finchie_parser.parsers.kinds import deposit_kind
+from finchie_parser.parsers.layout import rows_of
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
-from finchie_parser.text import amount, iso_date
+from finchie_parser.text import AMOUNT, ISO_DATE, MASKED_ACCOUNT, amount, iso_date, token
 
-_PERIOD = re.compile(r"^(\d{4}/\d\d/\d\d) (\d{4}/\d\d/\d\d)$", re.ASCII | re.MULTILINE)
-_NUMBER = re.compile(r"\d+\*\*\d+\*", re.ASCII)
-_DATE = re.compile(r"\d{4}/\d\d/\d\d", re.ASCII)
-_AMOUNT = re.compile(r"-?[\d,]+(?:\.\d+)?", re.ASCII)
+_PERIOD = re.compile(rf"^({ISO_DATE}) ({ISO_DATE})$", re.ASCII | re.MULTILINE)
+# CTBC masks the last digit too: 11111**2222*.
+_ACCOUNT = token(rf"{MASKED_ACCOUNT}\*")
+_DATE = token(ISO_DATE)
+_AMOUNT = token(AMOUNT)
 # A text-layer word's top sits about this far below the middle of the OCR box of the same row.
 _ROW_OFFSET = 3.0
 _ROW_TOLERANCE = 5.0
 # The currencies CTBC names in Chinese, as far as its statements have shown them; another one fails
 # by name rather than be guessed.
 _CURRENCIES = {"美元": "USD", "日圓": "JPY", "日幣": "JPY", "歐元": "EUR", "人民幣": "CNY", "港幣": "HKD"}
-# The bank's own words for interest.
-_INTEREST = frozenset({"利息"})
-
-
-@dataclass
-class _Account:
-    name: str
-    closing: Decimal
-    opening: Decimal | None = None
-    stated_closing: Decimal | None = None
-    lines: list[DepositLine] = field(default_factory=list)
 
 
 class CtbcDepositParser(StatementParser):
     name = "ctbc.deposit"
-    version = "2"
+    version = "3"
     institution = "ctbc"
     # 中國信託銀行電子對帳單 11510, from ebill@estats.ctbcbank.com.
     sender_domains = ("ctbcbank.com",)
@@ -57,6 +48,7 @@ class CtbcDepositParser(StatementParser):
     filename_pattern = re.compile(r"^CTBC_Bank_Estatement_\d+\.pdf$", re.IGNORECASE)
     # The only words of page 1 the text layer can spell: the bank's address.
     text_marker = "ctbcbank.com"
+    needs_ocr = True
 
     def passwords(self, identity: Identity) -> list[str]:
         # The e-mail: 本國籍自然人客戶，請輸入【身分證字號(英文字母大寫)】. It can be changed or turned off in
@@ -65,7 +57,9 @@ class CtbcDepositParser(StatementParser):
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         if ocr is None:
-            raise LayoutError("CTBC's statements need OCR: their Chinese text cannot be read otherwise")
+            raise ConfigurationError(
+                "CTBC's statements need OCR (PARSER_OCR): their Chinese text cannot be read otherwise"
+            )
         texts = document.page_texts()
         period = _PERIOD.search(texts[0])
         if period is None:
@@ -73,26 +67,15 @@ class CtbcDepositParser(StatementParser):
         reader = _Reader()
         for page in range(1, len(texts)):
             reader.read_page(document.page_words(page), ocr.read_column(document, page, 0, 10_000))
-        if not reader.accounts:
-            raise LayoutError("no deposit account listed")
-
-        accounts = []
-        for (number, currency), found in reader.accounts.items():
-            if found.stated_closing is not None and found.stated_closing != found.closing:
-                raise LayoutError(f"{number}: 本期結餘 {found.stated_closing} differs from its holding {found.closing}")
-            reconciliation = reconcile_account(found.opening, found.closing, found.lines, "本期結餘")
-            accounts.append(
-                DepositAccount(number, found.name, currency, found.closing, found.lines, reconciliation, found.opening)
-            )
         start, end = iso_date(period.group(1)), iso_date(period.group(2))
-        return Parsed(DepositStatement(self.institution, start, end, accounts))
+        return Parsed(reader.accounts.statement(self.institution, start, end, "本期結餘"))
 
 
 class _Reader:
     def __init__(self) -> None:
-        self.accounts: dict[tuple[str, str], _Account] = {}
+        self.accounts = Accounts()
         self.section = ""
-        self.current: _Account | None = None
+        self.current: Account | None = None
 
     def read_page(self, words: Sequence[Word], ocr: Sequence[OcrLine]) -> None:
         labels = sorted(ocr, key=lambda line: line.top)
@@ -112,13 +95,13 @@ class _Reader:
                     headings[text] = event
                 continue
             row, beside = event, _beside(event, labels)
-            if self.section.endswith("存款帳戶") and any(_NUMBER.fullmatch(w.text) for w in row):
+            if self.section.endswith("存款帳戶") and any(_ACCOUNT.fullmatch(w.text) for w in row):
                 self._holding(row, beside, headings)
             elif self.section.endswith("交易明細") and row:
                 self._lines_row(row, beside, headings)
 
     def _holding(self, row: list[Word], beside: list[OcrLine], headings: dict[str, OcrLine]) -> None:
-        at = next(w for w in row if _NUMBER.fullmatch(w.text))
+        at = next(w for w in row if _ACCOUNT.fullmatch(w.text))
         number = at.text
         # Right of the number: an account kind's name left of it may carry digits of its own (MyWay數2,
         # whose 2 the text layer holds).
@@ -133,17 +116,15 @@ class _Reader:
             if len(names) != 1:
                 raise LayoutError(f"{number}: no known currency beside it in {[line.text for line in beside]}")
             currency = _CURRENCIES[names[0]]
-        if (number, currency) in self.accounts:
-            raise LayoutError(f"{number} {currency} listed twice")
-        self.accounts[(number, currency)] = _Account(name, amount(amounts[0].text))
+        self.accounts.add(number, currency, name, amount(amounts[0].text))
 
     def _lines_row(self, row: list[Word], beside: list[OcrLine], headings: dict[str, OcrLine]) -> None:
         if not self.section.startswith("台幣"):
             raise LayoutError(f"{self.section}: foreign currency lines, a layout not seen yet")
         said = " ".join(line.text for line in beside)
-        if _NUMBER.fullmatch(row[0].text):
+        if _ACCOUNT.fullmatch(row[0].text):
             # The balance brought forward opens an account's lines, its number on that row only.
-            found = self.accounts.get((row[0].text, "TWD"))
+            found = self.accounts.get(row[0].text, "TWD")
             if found is None or "上期結餘" not in said:
                 raise LayoutError(f"{row[0].text}: lines for an account the holdings do not list")
             self.current = found
@@ -151,19 +132,23 @@ class _Reader:
             return
         if self.current is None or "本次合計" in said:
             return
-        columns = {name: headings[name] for name in ("支出", "存入", "帳戶餘額") if name in headings}
+        columns: dict[str, OcrLine] = {
+            name: headings[name] for name in ("支出", "存入", "帳戶餘額") if name in headings
+        }
         if len(columns) != 3:
             raise LayoutError("a line before its table's headings")
-        by_column: dict[str, Decimal] = {}
-        for word in row:
-            if _AMOUNT.fullmatch(word.text) and not _DATE.fullmatch(word.text):
-                # Right-aligned under headings OCR places by their left edge: the column whose span holds it.
-                name = _column(word, columns)
-                if name in by_column:
-                    raise LayoutError(f"{said}: two amounts under {name}")
-                by_column[name] = amount(word.text)
+        by_column, _ = amounts_by_column(
+            row,
+            # Right-aligned under headings OCR places by their left edge: the column whose span holds it.
+            lambda word: (
+                _column(word, columns) if _AMOUNT.fullmatch(word.text) and not _DATE.fullmatch(word.text) else None
+            ),
+            said,
+        )
         if "本期結餘" in said:
-            self.current.stated_closing = by_column.get("帳戶餘額")
+            stated = by_column.get("帳戶餘額")
+            if stated is not None and stated != self.current.closing:
+                raise LayoutError(f"{self.current.number}: 本期結餘 {stated} differs from its holding")
             self.current = None
             return
         if not _DATE.fullmatch(row[0].text) or "帳戶餘額" not in by_column:
@@ -176,8 +161,8 @@ class _Reader:
             DepositLine(
                 date=iso_date(row[0].text),
                 description=description,
-                amount=by_column.get("存入", Decimal(0)) - by_column.get("支出", Decimal(0)),
-                kind=DepositKind.INTEREST if description in _INTEREST else DepositKind.OTHER,
+                amount=moved_in(by_column, "存入", "支出"),
+                kind=deposit_kind(description),
                 balance=by_column["帳戶餘額"],
             )
         )

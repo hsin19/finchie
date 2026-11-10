@@ -2,10 +2,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, card
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import Kind, PointsKind
+from finchie_parser.model import Kind, PointsKind, Statement
 from finchie_parser.parsers.cathay import CathayParser
 
 PAGE_1 = """信用卡帳單 115年04月
@@ -25,8 +25,8 @@ PAGE_2 = """您本月消費明細如下：
 國泰世華CUBE App"""
 
 
-def parse():
-    return CathayParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None).statement
+def parse() -> Statement:
+    return card(CathayParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None))
 
 
 def test_cathay_reads_statement_fields() -> None:
@@ -77,7 +77,7 @@ FEES_PAGE = """您本月消費明細如下：
 
 
 def test_cathay_reads_fees_without_country_or_currency() -> None:
-    statement = CathayParser().parse(FakeDocument([PAGE_1, FEES_PAGE]), ocr=None).statement
+    statement = card(CathayParser().parse(FakeDocument([PAGE_1, FEES_PAGE]), ocr=None))
     rows = [(tx.description, tx.kind, tx.amount, tx.card_last4) for tx in statement.transactions]
     assert rows[1:] == [
         ("國外交易手續費 -CAFEPA", Kind.FOREIGN_TRANSACTION_FEE, Decimal(9), "4321"),
@@ -100,7 +100,7 @@ REFUND_PAGE = """您本月消費明細如下：
 
 
 def test_cathay_reads_foreign_refunds_and_fee_refunds() -> None:
-    statement = CathayParser().parse(FakeDocument([PAGE_1, REFUND_PAGE]), ocr=None).statement
+    statement = card(CathayParser().parse(FakeDocument([PAGE_1, REFUND_PAGE]), ocr=None))
     rows = [(t.description, t.kind, t.amount, t.original_amount, t.original_currency) for t in statement.transactions]
     assert rows[2:] == [
         ("國外退貨手續費 -TAXFRE", Kind.FOREIGN_TRANSACTION_FEE, Decimal(-1), None, ""),
@@ -123,7 +123,7 @@ PAYMENTS_PAGE = """您本月消費明細如下：
 
 def test_cathay_reads_payments_whose_description_has_digits() -> None:
     parsed = CathayParser().parse(FakeDocument([PAGE_1, PAYMENTS_PAGE]), ocr=None)
-    payments = [(tx.description, tx.amount) for tx in parsed.statement.transactions if tx.kind is Kind.PAYMENT]
+    payments = [(tx.description, tx.amount) for tx in card(parsed).transactions if tx.kind is Kind.PAYMENT]
     assert payments == [("本行自動扣繳", Decimal(-500)), ("ATM轉帳 822", Decimal(-1000))]
     assert parsed.warnings == []
 
@@ -134,7 +134,7 @@ def test_cathay_warns_when_payments_do_not_add_up_to_the_printed_subtotal() -> N
     assert len(parsed.warnings) == 1
     assert "繳款小計" in parsed.warnings[0]
     # The new charges still reconcile: payments are not part of them.
-    assert parsed.statement.reconciliation.balanced
+    assert card(parsed).reconciliation.balanced
 
 
 # 信用卡回饋總覽 on page 1; its headings are unmapped glyphs, so only the row and the note are text.
@@ -144,7 +144,7 @@ POINTS = """小樹點(信用卡) 3,177 29 0 0 3,206
 
 def test_cathay_reads_its_points_and_what_lapses_by_when() -> None:
     parsed = CathayParser().parse(FakeDocument([PAGE_1 + "\n" + POINTS, PAGE_2]), ocr=None)
-    [program] = parsed.statement.points
+    [program] = card(parsed).points
     assert (program.name, program.closing) == ("小樹點(信用卡)", Decimal(3206))
     # The closing month's by its last day; the next twelve months' together, that month's included.
     assert [(e.amount, e.by) for e in program.expiries] == [
@@ -156,7 +156,7 @@ def test_cathay_reads_its_points_and_what_lapses_by_when() -> None:
 
 def test_cathay_takes_redeemed_points_off_and_warns_when_they_do_not_add_up() -> None:
     parsed = CathayParser().parse(FakeDocument([PAGE_1 + "\n小樹點(信用卡) 3,161 107 0 100 3,170", PAGE_2]), ocr=None)
-    [program] = parsed.statement.points
+    [program] = card(parsed).points
     assert program.closing == Decimal(3170)
     # Only columns with a figure are lines, under the bill's labels; points used are negative.
     assert [(line.label, line.kind, line.amount) for line in program.lines] == [
@@ -168,3 +168,12 @@ def test_cathay_takes_redeemed_points_off_and_warns_when_they_do_not_add_up() ->
 
 def test_cathay_bill_without_a_points_table_has_no_points() -> None:
     assert parse().points == []
+
+
+def test_cathay_takes_points_redeemed_against_the_bill_as_a_rebate() -> None:
+    page = PAGE_2.replace("正卡本期消費 1,030", "03/20 03/21 小樹點折抵 -30 4321 TW TWD\n正卡本期消費 1,000")
+    statement = card(CathayParser().parse(FakeDocument([PAGE_1, page]), ocr=None))
+    assert [(tx.description, tx.kind) for tx in statement.transactions if tx.amount == -30] == [
+        ("小樹點折抵", Kind.REBATE)
+    ]
+    assert statement.reconciliation.balanced

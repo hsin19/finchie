@@ -17,11 +17,9 @@ from pdfs import email_with, text_pdf
 
 from finchie.parser.v1 import parser_pb2 as pb
 from finchie.parser.v1 import parser_pb2_grpc
-from finchie_parser import pipeline, telemetry
 from finchie_parser import server as server_module
+from finchie_parser import telemetry
 from finchie_parser.model import ParseResult
-from finchie_parser.ocr import Ocr
-from finchie_parser.passwords import Passwords
 from finchie_parser.settings import Settings
 
 # What the backend's otelgrpc client sends: the trace and the span of its call to the parser.
@@ -51,7 +49,8 @@ def spans(exporter: InMemorySpanExporter) -> Iterator[InMemorySpanExporter]:
 
 @pytest.fixture
 def channel() -> Iterator[grpc.Channel]:
-    server, port = server_module.build_server(Settings(_env_file=None, ocr=False, workers=2), None, "127.0.0.1:0")
+    settings = Settings(ocr=False, workers=2)
+    server, port = server_module.build_server(settings, None, "127.0.0.1:0", parsers=[FakeParser()])
     server.start()
     with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
         yield channel
@@ -64,7 +63,8 @@ def parse(channel: grpc.Channel, content: bytes) -> pb.ParseDocumentResponse:
         document_id="d1", filename="mail.eml", content_type="message/rfc822", content=content
     )
     # SimpleSpanProcessor exports a span as it ends, which is before the server answers.
-    return stub.ParseDocument(request, metadata=TRACEPARENT, timeout=10)
+    response: pb.ParseDocumentResponse = stub.ParseDocument(request, metadata=TRACEPARENT, timeout=10)
+    return response
 
 
 def by_name(spans: InMemorySpanExporter) -> dict[str, ReadableSpan]:
@@ -72,13 +72,8 @@ def by_name(spans: InMemorySpanExporter) -> dict[str, ReadableSpan]:
 
 
 def test_a_parse_joins_the_backends_trace_with_its_steps_and_result(
-    channel: grpc.Channel, spans: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
+    channel: grpc.Channel, spans: InMemorySpanExporter
 ) -> None:
-    def parse_fake(content: bytes, *, passwords: Passwords, ocr: Ocr | None) -> ParseResult:
-        return pipeline.parse_document(content, passwords=passwords, ocr=ocr, parsers=[FakeParser()])
-
-    monkeypatch.setattr(server_module, "parse_document", parse_fake)
-
     parse(channel, email_with(("FAKE_1.pdf", "application/pdf", text_pdf("FAKE BANK credit card statement"))))
 
     named = by_name(spans)

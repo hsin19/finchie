@@ -9,7 +9,7 @@ from decimal import Decimal
 from finchie.parser.v1 import parser_pb2 as pb
 from finchie_parser.convert import to_response
 from finchie_parser.model import DepositAccount, DepositKind, DepositLine, DepositStatement, ParseResult
-from finchie_parser.parsers.base import reconcile_account
+from finchie_parser.parsers.reconcile import reconcile_account
 
 D = Decimal
 

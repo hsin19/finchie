@@ -2,13 +2,21 @@ import re
 from collections.abc import Callable
 
 import pytest
-from fakes import FAKE_STATEMENT, FakeParser
+from fakes import FAKE_STATEMENT, FakeOcr, FakeParser
 from pdfs import attached_forward, blank_pdf, email_with, gmail_forward, text_pdf
 
-from finchie_parser.errors import InvalidDocumentError, PasswordRequiredError, UnsupportedDocumentError
+from finchie_parser.errors import (
+    AbandonedError,
+    ConfigurationError,
+    InvalidDocumentError,
+    PasswordRequiredError,
+    UnsupportedDocumentError,
+)
 from finchie_parser.model import ParseResult
-from finchie_parser.parsers import StatementParser
+from finchie_parser.ocr import Ocr
+from finchie_parser.parsers import Parsed, StatementParser
 from finchie_parser.passwords import Identity, Passwords
+from finchie_parser.pdf import Document
 from finchie_parser.pipeline import parse_document
 
 STATEMENT_PDF = text_pdf("FAKE BANK credit card statement")
@@ -146,3 +154,38 @@ def test_a_forwarded_statement_is_parsed_as_the_banks_email(forward: Callable[[b
     original = email_with(pdf("FAKE_1.pdf", text_pdf("FAKE BANK", user_password="secret")))
     _, parser = run(forward(original))
     assert parser.parsed == ["FAKE_1.pdf"]
+
+
+def test_a_statement_whose_parser_needs_ocr_fails_as_configuration_while_ocr_is_off() -> None:
+    class OcrParser(FakeParser):
+        needs_ocr = True
+
+    parser = OcrParser()
+    with pytest.raises(ConfigurationError, match="PARSER_OCR"):
+        run(email_with(pdf("FAKE_1.pdf", STATEMENT_PDF)), parser=parser)
+    assert parser.parsed == []
+
+
+def test_a_parse_the_caller_no_longer_waits_for_stops_before_parsing() -> None:
+    parser = FakeParser()
+    content = email_with(pdf("FAKE_1.pdf", STATEMENT_PDF))
+    with pytest.raises(AbandonedError):
+        parse_document(content, passwords=Passwords(), ocr=None, parsers=[parser], wanted=lambda: False)
+    assert parser.parsed == []
+
+
+def test_a_parse_the_caller_stops_waiting_for_stops_before_its_next_ocr_call() -> None:
+    waiting = [True]
+
+    class OcrParser(FakeParser):
+        def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
+            assert ocr is not None
+            ocr.read_column(document, 0, 0, 100)
+            waiting[0] = False
+            ocr.read_column(document, 1, 0, 100)
+            raise AssertionError("read past the caller's deadline")
+
+    ocr = FakeOcr()
+    content = email_with(pdf("FAKE_1.pdf", STATEMENT_PDF))
+    with pytest.raises(AbandonedError):
+        parse_document(content, passwords=Passwords(), ocr=ocr, parsers=[OcrParser()], wanted=lambda: waiting[0])

@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, row
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositStatement
@@ -16,10 +16,6 @@ from finchie_parser.pdf import Word
 PAGE_1 = """對帳單期間：2026/10/01~2026/10/31
 帳 戶 總 覽"""
 NUMBER = "12345678****90"
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 def spaced(top: float, text: str) -> list[Word]:
@@ -71,8 +67,7 @@ LINES = [
 
 
 def parse(words: list[Word]) -> DepositStatement:
-    statement = FubonDepositParser().parse(FakeDocument([PAGE_1, ""], words={1: words}), ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+    statement = deposit(FubonDepositParser().parse(FakeDocument([PAGE_1], words={1: words}), ocr=None))
     return statement
 
 

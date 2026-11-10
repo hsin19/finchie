@@ -1,23 +1,28 @@
-"""Decrypt a PDF and expose what the bank parsers read: text, positioned lines, page images."""
+"""Decrypt a PDF and expose what the bank parsers read: text, positioned lines and words, page images.
+
+Every PDF here came from an upload, so what the libraries raise on a malformed one is turned into
+InvalidDocumentError, and a PDF longer than MAX_PAGES is refused before anything reads its pages.
+"""
 
 import io
 import threading
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from types import TracebackType
-from typing import TYPE_CHECKING, Protocol, Self
+from typing import Any, Protocol, Self
 
 import pdfplumber
 import pikepdf
 import pypdfium2
+from pdfplumber.utils.exceptions import MalformedPDFException, PdfminerException
 from PIL.Image import Image
 
 from finchie_parser.documents import Attachment
-from finchie_parser.errors import InvalidDocumentError, PasswordRequiredError
-from finchie_parser.passwords import MissingDetailError, Passwords
+from finchie_parser.errors import InvalidDocumentError
 
-if TYPE_CHECKING:
-    from finchie_parser.parsers.base import StatementParser
+# Far more than any statement prints; past it a PDF is refused, not read.
+MAX_PAGES = 200
 
 # PDFium is not thread-safe, not even for separate documents, and the server parses on several
 # threads at once. Every call into it (open, render, close) holds this lock.
@@ -46,6 +51,8 @@ class Document(Protocol):
 
     filename: str
 
+    def page_count(self) -> int: ...
+
     def page_texts(self, limit: int | None = None) -> list[str]:
         """The text of every page, or of the first `limit` pages."""
         ...
@@ -61,23 +68,28 @@ class PdfDocument:
     def __init__(self, filename: str, data: bytes) -> None:
         self.filename = filename
         self._data = data
-        self._plumber = pdfplumber.open(io.BytesIO(data))
+        self._plumber = _reading(filename, lambda: pdfplumber.open(io.BytesIO(data)))
         self._pdfium: pypdfium2.PdfDocument | None = None
         # Extracted on demand, in page order: recognizing a statement reads only its first pages.
         self._texts: list[str] = []
 
+    def page_count(self) -> int:
+        return len(self._plumber.pages)
+
     def page_texts(self, limit: int | None = None) -> list[str]:
         pages = self._plumber.pages[:limit]
         for page in pages[len(self._texts) :]:
-            self._texts.append(page.extract_text() or "")
+            self._texts.append(_reading(self.filename, partial(_text, page)))
         return self._texts[: len(pages)]
 
     def page_lines(self, page_index: int) -> list[TextLine]:
-        lines = self._plumber.pages[page_index].extract_text_lines(return_chars=False)
+        page = self._plumber.pages[page_index]
+        lines = _reading(self.filename, lambda: page.extract_text_lines(return_chars=False))
         return [TextLine(line["text"], line["top"], line["bottom"]) for line in lines]
 
     def page_words(self, page_index: int) -> list[Word]:
-        words = self._plumber.pages[page_index].extract_words()
+        page = self._plumber.pages[page_index]
+        words = _reading(self.filename, lambda: page.extract_words())
         return [Word(w["text"], w["x0"], w["x1"], w["top"]) for w in words]
 
     def render(self, page_index: int, scale: float) -> Image:
@@ -88,7 +100,8 @@ class PdfDocument:
             bitmap = page.render(scale=scale)
             try:
                 # A copy: the PIL image would otherwise share the bitmap's memory, freed below.
-                return bitmap.to_pil().copy()
+                image: Image = bitmap.to_pil().copy()
+                return image
             finally:
                 bitmap.close()
                 page.close()
@@ -106,73 +119,29 @@ class PdfDocument:
         self.close()
 
 
-class PdfSet:
-    """One e-mail's PDFs, each decrypted at most once per parser and opened at most once, closed together."""
-
-    def __init__(self, attachments: Sequence[Attachment], passwords: Passwords) -> None:
-        self.attachments = list(attachments)
-        self._passwords = passwords
-        self._decrypted: dict[tuple[int, str], bytes | PasswordRequiredError | InvalidDocumentError] = {}
-        self._opened: dict[int, PdfDocument] = {}
-
-    def __len__(self) -> int:
-        return len(self.attachments)
-
-    def decrypted(self, index: int, parser: "StatementParser | None") -> bytes:
-        """As `decrypt`, with the passwords of the parser that claims the e-mail (ADR 0014); with none but
-        the empty one if no parser does. A PDF that fails raises its error again on every later call."""
-        key = (index, parser.name if parser else "")
-        if key not in self._decrypted:
-            attachment = self.attachments[index]
-            try:
-                if parser is None:
-                    self._decrypted[key] = decrypt(attachment, [""], "an e-mail no parser claims")
-                else:
-                    candidates = self._passwords.candidates(parser.institution, parser.passwords)
-                    self._decrypted[key] = decrypt(
-                        attachment, candidates, parser.name, f"PARSER_PDF_PASSWORDS__{parser.institution.upper()}"
-                    )
-            except (PasswordRequiredError, InvalidDocumentError) as error:
-                self._decrypted[key] = error
-        result = self._decrypted[key]
-        if isinstance(result, bytes):
-            return result
-        raise result
-
-    def open(self, index: int, parser: "StatementParser | None") -> PdfDocument:
-        data = self.decrypted(index, parser)
-        if index not in self._opened:
-            self._opened[index] = PdfDocument(self.attachments[index].filename, data)
-        return self._opened[index]
-
-    def close(self) -> None:
-        for document in self._opened.values():
-            document.close()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_: type[BaseException] | BaseException | TracebackType | None) -> None:
-        self.close()
+def _text(page: Any) -> str:  # a pdfplumber page; pdfplumber ships no type information
+    text = page.extract_text()
+    return str(text) if text else ""
 
 
-def decrypt(attachment: Attachment, passwords: Iterable[str], who: str, chosen_variable: str = "") -> bytes:
-    """A copy without encryption, opened with the first of `passwords` that does.
+def _reading[T](filename: str, read: Callable[[], T]) -> T:
+    try:
+        return read()
+    except (PdfminerException, MalformedPDFException) as error:
+        raise InvalidDocumentError(f"{filename}: unreadable PDF ({error})") from error
 
-    `passwords` may raise MissingDetailError when it gets to a rule whose detail is not set: that is
-    the error to report, since setting the detail is what would open the PDF.
+
+def decrypt(attachment: Attachment, passwords: Iterable[str]) -> bytes | None:
+    """A copy without encryption, opened with the first of `passwords` that does, or None if none does.
+
+    InvalidDocumentError for bytes that are not a PDF, or a PDF past MAX_PAGES. `passwords` is consumed
+    lazily, and whatever it raises (MissingDetailError) passes through.
     """
-    tried = iter(passwords)
-    while True:
-        try:
-            password = next(tried)
-        except StopIteration:
-            hint = f"; a password chosen at the bank goes in {chosen_variable}" if chosen_variable else ""
-            raise PasswordRequiredError(f"{attachment.filename}: none of {who}'s passwords opens it{hint}") from None
-        except MissingDetailError as error:
-            raise PasswordRequiredError(f"{attachment.filename}: {who} {error}") from None
+    for password in passwords:
         try:
             with pikepdf.open(io.BytesIO(attachment.data), password=password) as pdf:
+                if len(pdf.pages) > MAX_PAGES:
+                    raise InvalidDocumentError(f"{attachment.filename}: more than {MAX_PAGES} pages")
                 decrypted = io.BytesIO()
                 pdf.save(decrypted)
         except pikepdf.PasswordError:
@@ -180,3 +149,4 @@ def decrypt(attachment: Attachment, passwords: Iterable[str], who: str, chosen_v
         except pikepdf.PdfError as error:
             raise InvalidDocumentError(f"{attachment.filename}: unreadable PDF ({error})") from error
         return decrypted.getvalue()
+    return None

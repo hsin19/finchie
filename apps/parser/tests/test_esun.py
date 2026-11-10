@@ -1,9 +1,9 @@
 from datetime import date
 from decimal import Decimal
 
-from fakes import FakeDocument
+from fakes import FakeDocument, card
 
-from finchie_parser.model import Kind, PointsKind
+from finchie_parser.model import Kind, PointsKind, Statement
 from finchie_parser.parsers.esun import EsunParser
 
 PAGE_1 = """親愛的 王＊明 您好：
@@ -31,8 +31,8 @@ TWD 0 1,226 1,226 1,000
 本期應繳總金額： TWD 1,226"""
 
 
-def parse():
-    return EsunParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None).statement
+def parse() -> Statement:
+    return card(EsunParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None))
 
 
 def test_esun_reads_statement_fields() -> None:
@@ -71,7 +71,7 @@ def test_esun_tracks_cards_and_foreign_amounts() -> None:
 
 def test_esun_flags_a_statement_that_does_not_add_up() -> None:
     tampered = PAGE_2.replace("本期合計： TWD 1,226", "本期合計： TWD 1,300")
-    statement = EsunParser().parse(FakeDocument([PAGE_1, tampered]), ocr=None).statement
+    statement = card(EsunParser().parse(FakeDocument([PAGE_1, tampered]), ocr=None))
     assert not statement.reconciliation.balanced
     assert statement.reconciliation.computed == Decimal(1226)
 
@@ -84,7 +84,7 @@ POINTS = """28 點 122 點 0 點 0 點 150 點
 
 def test_esun_reads_its_e_points_and_each_months_expiring_ones() -> None:
     parsed = EsunParser().parse(FakeDocument([PAGE_1 + "\n" + POINTS, PAGE_2]), ocr=None)
-    [program] = parsed.statement.points
+    [program] = card(parsed).points
     assert (program.name, program.closing) == ("e point", Decimal(150))
     lines = [(line.label, line.kind, line.amount) for line in program.lines]
     assert lines == [("本期加點", PointsKind.EARN, Decimal(122))]
@@ -116,7 +116,7 @@ PAGE_2_GREGORIAN = (
 
 def test_esun_reads_the_gregorian_layout_from_october_2026() -> None:
     parsed = EsunParser().parse(FakeDocument([PAGE_1_GREGORIAN, PAGE_2_GREGORIAN]), ocr=None)
-    statement = parsed.statement
+    statement = card(parsed)
     assert statement.closing_date == date(2026, 11, 7)
     assert statement.due_date == date(2026, 11, 23)
     assert statement.reconciliation.balanced
@@ -131,3 +131,12 @@ def test_esun_reads_the_gregorian_layout_from_october_2026() -> None:
         (Decimal(10), date(2026, 12, 31)),
     ]
     assert parsed.warnings == []
+
+
+def test_esun_takes_points_redeemed_against_the_bill_as_a_rebate() -> None:
+    page = PAGE_2.replace("04/07 04/07 ＵＢｅａｒ卡一般消費１％現金回饋 TWD -12", "04/07 04/07 e point點數折抵 TWD -12")
+    assert page != PAGE_2
+    statement = card(EsunParser().parse(FakeDocument([PAGE_1, page]), ocr=None))
+    assert [(tx.description, tx.kind) for tx in statement.transactions if tx.amount == -12] == [
+        ("e point點數折抵", Kind.REBATE)
+    ]

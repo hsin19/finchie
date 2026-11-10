@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, row
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositKind, DepositStatement
@@ -17,10 +17,6 @@ PAGE_1 = """台 新 銀 行 綜 合 對 帳 單 2026年09月
 資料期間：2026/09/01~2026/09/30"""
 
 SAVINGS, RICHART, DOLLARS = "123456****7890", "654321****0987", "11111****222"
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 SUMMARIES = [
@@ -91,9 +87,8 @@ FX_PAGE = [
 
 
 def parse(pages: dict[int, list[Word]]) -> DepositStatement:
-    document = FakeDocument([PAGE_1, "", ""], words=pages)
-    statement = TaishinDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+    document = FakeDocument([PAGE_1], words=pages)
+    statement = deposit(TaishinDepositParser().parse(document, ocr=None))
     return statement
 
 

@@ -6,11 +6,12 @@ from datetime import date
 
 
 class MissingDetailError(Exception):
-    """A bank's password rule needs a detail the deployment has not set."""
+    """A bank's password rule needs a detail the deployment has not set: `detail` names the Identity field.
+    Which setting holds it is for the settings to say (`settings.identity_variable`)."""
 
-    def __init__(self, variable: str) -> None:
-        super().__init__(f"needs {variable}")
-        self.variable = variable
+    def __init__(self, detail: str) -> None:
+        super().__init__(f"needs the owner's {detail}")
+        self.detail = detail
 
 
 @dataclass(frozen=True, repr=False)
@@ -22,12 +23,12 @@ class Identity:
 
     def require_national_id(self) -> str:
         if not self.national_id:
-            raise MissingDetailError("PARSER_IDENTITY__NATIONAL_ID")
+            raise MissingDetailError("national_id")
         return self.national_id
 
     def require_birth_date(self) -> date:
         if self.birth_date is None:
-            raise MissingDetailError("PARSER_IDENTITY__BIRTH_DATE")
+            raise MissingDetailError("birth_date")
         return self.birth_date
 
     def __repr__(self) -> str:

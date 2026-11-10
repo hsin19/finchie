@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pdfs import OWNER, PNG, attached_forward, blank_pdf, email_with, gmail_forward, statement_email
 
+from finchie_parser import documents
 from finchie_parser.documents import read_mail
 from finchie_parser.errors import InvalidDocumentError
 
@@ -71,3 +72,28 @@ def test_a_body_that_only_mentions_forwarding_is_not_a_forward() -> None:
     content = content.replace(b"See attachment.", b"---------- Forwarded message ---------\nno headers here")
     mail = read_mail(content)
     assert (mail.sender, mail.subject) == (OWNER, "Notes")
+
+
+def test_an_email_of_more_parts_than_any_bank_sends_is_refused_unread() -> None:
+    attachments = [(f"{n}.txt", "text/plain", b"x") for n in range(documents.MAX_PARTS)]
+    with pytest.raises(InvalidDocumentError, match="parts"):
+        read_mail(email_with(*attachments))
+
+
+def test_forwards_nested_deeper_than_any_owner_forwards_are_refused_unread() -> None:
+    content = email_with(("FAKE_1.pdf", "application/pdf", blank_pdf()))
+    for _ in range(documents.MAX_NESTING):
+        content = attached_forward(content)
+    read_mail(content)
+    with pytest.raises(InvalidDocumentError, match="nested"):
+        read_mail(attached_forward(content))
+
+
+def test_a_pdf_is_known_by_its_bytes_whatever_its_type_or_name_says() -> None:
+    mail = read_mail(
+        email_with(
+            ("statement", "application/octet-stream", blank_pdf()),
+            ("fake.pdf", "application/pdf", b"<html>not a pdf</html>"),
+        )
+    )
+    assert [attachment.filename for attachment in mail.pdfs()] == ["statement"]

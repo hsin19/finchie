@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, row
 
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import DepositStatement
@@ -33,10 +33,6 @@ HEADER = [
     ("對方帳號", 406, 438),
     ("餘額", 558, 574),
 ]
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 def table(*rows: list[Word]) -> list[Word]:
@@ -70,8 +66,7 @@ CARD_OUT = row(
 
 def parse(*rows: list[Word]) -> DepositStatement:
     document = FakeDocument([PAGE_1, PAGE_2], words={1: table(*rows)})
-    statement = EsunDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+    statement = deposit(EsunDepositParser().parse(document, ocr=None))
     return statement
 
 

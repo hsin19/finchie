@@ -8,24 +8,25 @@ import pycountry
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import Kind, PointsExpiry, PointsProgram, Reconciliation, Statement, Transaction
 from finchie_parser.ocr import Ocr, OcrLine
-from finchie_parser.parsers.base import Parsed, StatementParser, earned, points_program, used
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.kinds import by_sign, card_kind, card_kind_by_words, is_charge
+from finchie_parser.parsers.points import earned, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, iso_date, month_day, month_end
+from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ISO_DATE, amount, iso_date, month_day, next_month_end, token
 
 # HSBC renders every label and every transaction description as an image; the text layer only
 # carries dates and numbers. Page 1 lists the due date first, then the closing date.
-_P1_DATE = re.compile(r"^(\d{4}/\d\d/\d\d) ", re.ASCII)
+_P1_DATE = re.compile(rf"^({ISO_DATE}) ", re.ASCII)
 _FX_ROW = re.compile(
-    r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<country>[A-Z]{3}) (?P<cur>[A-Z]{3})"
-    r" (?P<orig>-?[\d,]+(?:\.\d+)?) \d\d/\d\d (?P<amt>-?[\d,]+)$",
+    rf"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<country>{CURRENCY}) (?P<cur>{CURRENCY})"
+    rf" (?P<orig>{AMOUNT}) \d\d/\d\d (?P<amt>{INTEGER})$",
     re.ASCII,
 )
 # Fees, payments, and the annual fee: no country or currency.
-_PLAIN_ROW = re.compile(r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<amt>-?[\d,]+)$", re.ASCII)
-_NUMBER = re.compile(r"^-?[\d,]+$", re.ASCII)
-_FOREIGN_FEE = re.compile(r"國外交易(?:服務|手續)費")
-_INTEREST_AND_CHARGES = ("利息", "循環", "違約金", "其他費用")
+_PLAIN_ROW = re.compile(rf"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<amt>{INTEGER})$", re.ASCII)
+# An amount alone on a line or in a box: the statement's unlabelled figures.
+_FIGURE = token(INTEGER)
 
 # Unlabelled amounts on the transaction pages, in order:
 #   1 previous balance, [payment and adjustment rows], 2 payments subtotal, 3 carried balance,
@@ -54,7 +55,7 @@ class _Row:
 
 class HsbcParser(StatementParser):
     name = "hsbc.credit_card"
-    version = "3"
+    version = "4"
     institution = "hsbc"
     # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
     sender_domains = ("hsbc.com.tw",)
@@ -73,7 +74,7 @@ class HsbcParser(StatementParser):
             raise LayoutError("due and closing dates not found on page 1")
         due, closing = iso_date(page1_dates[0]), iso_date(page1_dates[1])
 
-        rows, numbers = self._scan(document, len(texts))
+        rows, numbers = self._scan(document, document.page_count())
         if len(numbers) < _TOTAL_DUE:
             raise LayoutError("new charges subtotal and total due not found")
 
@@ -105,7 +106,7 @@ class HsbcParser(StatementParser):
             for line in document.page_lines(page_index):
                 if len(numbers) >= _TOTAL_DUE:
                     return rows, numbers
-                if _NUMBER.match(line.text):
+                if _FIGURE.fullmatch(line.text):
                     numbers.append(amount(line.text))
                 elif match := _FX_ROW.match(line.text) or _PLAIN_ROW.match(line.text):
                     new_charge = len(numbers) >= _CARRIED_BALANCE
@@ -118,10 +119,7 @@ class HsbcParser(StatementParser):
         value = amount(match["amt"])
         foreign = "cur" in match.re.groupindex
         description = row.description
-        if foreign:
-            kind = Kind.REFUND if value < 0 else Kind.PURCHASE
-        else:
-            kind = _plain_kind(description, value, row.new_charge)
+        kind = card_kind(description, value) if foreign else _plain_kind(description, value, row.new_charge)
         currency = match["cur"] if foreign else ""
         return Transaction(
             transaction_date=month_day(match["date"], closing),
@@ -138,15 +136,10 @@ class HsbcParser(StatementParser):
 def _plain_kind(description: str, value: Decimal, new_charge: bool) -> Kind:
     # Words before sections: the payments section also lists credits that are not payments, such as the
     # annual fee's waiver.
-    if "年費" in description:
-        return Kind.ANNUAL_FEE
-    if "回饋" in description or "折抵" in description:
-        return Kind.REBATE
-    if _FOREIGN_FEE.search(description):
-        return Kind.FOREIGN_TRANSACTION_FEE
-    # No kind fits interest or the bank's other charges; every other parser counts them as purchases.
-    if any(word in description for word in _INTEREST_AND_CHARGES):
-        return Kind.REFUND if value < 0 else Kind.PURCHASE
+    if kind := card_kind_by_words(description, value):
+        return kind
+    if is_charge(description):
+        return by_sign(value)
     # No such word (OCR off or too noisy): what nearly every plain row is, a payment or a foreign transaction fee.
     if not new_charge and value < 0:
         return Kind.PAYMENT
@@ -181,7 +174,7 @@ def _points(document: Document, closing: date, warnings: list[str]) -> list[Poin
     figures = [
         word
         for word in sorted(document.page_words(0), key=lambda w: w.top)
-        if word.x0 >= _POINTS_LEFT and word.top < _POINTS_BOTTOM and _NUMBER.match(word.text)
+        if word.x0 >= _POINTS_LEFT and word.top < _POINTS_BOTTOM and _FIGURE.fullmatch(word.text)
     ]
     if not figures:
         return []
@@ -189,14 +182,13 @@ def _points(document: Document, closing: date, warnings: list[str]) -> list[Poin
         warnings.append(f"{_POINTS_NAME}: {len(figures)} figures in its box, not 5; points not read")
         return []
     opening, added, spent, balance, lapsing = (amount(word.text) for word in figures)
-    year, month = (closing.year + 1, 1) if closing.month == 12 else (closing.year, closing.month + 1)
     return [
         points_program(
             _POINTS_NAME,
             opening=opening,
             lines=(earned("本期新增積分", added), used("本期使用積分(含調整)", spent)),
             closing=balance,
-            expiries=[PointsExpiry(lapsing, month_end(year, month))],
+            expiries=[PointsExpiry(lapsing, next_month_end(closing))],
             warnings=warnings,
         )
     ]

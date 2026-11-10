@@ -2,18 +2,17 @@
 fixtures are two layers, as the bank's PDF reads: positioned digits, and the Chinese an OCR reads beside
 them, its boxes about 3 points above the text-layer row they share."""
 
-from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, FakeOcr, deposit, row
 
-from finchie_parser.errors import LayoutError
+from finchie_parser.errors import ConfigurationError, LayoutError
 from finchie_parser.model import DepositKind, DepositStatement
 from finchie_parser.ocr import OcrLine
 from finchie_parser.parsers.ctbc_deposit import CtbcDepositParser
-from finchie_parser.pdf import Document, Word
+from finchie_parser.pdf import Word
 
 PAGE_1 = """P 1 2
 2026/09/13 2026/10/12
@@ -21,33 +20,19 @@ https://www.ctbcbank.com/twrbo/zh_tw/index.html"""
 SAVINGS, DIGITAL, DOLLARS = "11111**2222*", "33333**4444*", "55555**6666*"
 
 
-@dataclass
-class PageOcr:
-    """Returns the given lines for a page, whatever strip is asked for."""
-
-    pages: dict[int, list[OcrLine]] = field(default_factory=dict)
-
-    def read_column(self, document: Document, page_index: int, left: float, right: float) -> list[OcrLine]:
-        return self.pages.get(page_index, [])
-
-
 def said(top: float, *labels: tuple[str, float]) -> list[OcrLine]:
     """OCR boxes of a row whose text-layer words have this top."""
     return [OcrLine(text, top - 9, top + 3, left) for text, left in labels]
 
 
-def words(top: float, *items: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in items]
-
-
 TEXT = [
-    *words(199, (SAVINGS, 133, 181), ("26", 283, 292)),
-    *words(210, (DIGITAL, 133, 181), ("15,124", 268, 292)),
-    *words(298, (DOLLARS, 133, 181), ("0.00", 277, 292)),
-    *words(429, (DIGITAL, 40, 88), ("15,115", 512, 536)),
-    *words(440, ("2026/09/21", 107, 146), ("9", 438, 442), ("15,124", 512, 536)),
-    *words(450, ("0", 354, 359), ("1", 426, 430)),
-    *words(464, ("0", 367, 371), ("9", 438, 442), ("15,124", 512, 536)),
+    *row(199, (SAVINGS, 133, 181), ("26", 283, 292)),
+    *row(210, (DIGITAL, 133, 181), ("15,124", 268, 292)),
+    *row(298, (DOLLARS, 133, 181), ("0.00", 277, 292)),
+    *row(429, (DIGITAL, 40, 88), ("15,115", 512, 536)),
+    *row(440, ("2026/09/21", 107, 146), ("9", 438, 442), ("15,124", 512, 536)),
+    *row(450, ("0", 354, 359), ("1", 426, 430)),
+    *row(464, ("0", 367, 371), ("9", 438, 442), ("15,124", 512, 536)),
 ]
 OCR = [
     *said(170, ("台幣存款帳戶", 32)),
@@ -69,9 +54,8 @@ OCR = [
 
 
 def parse(text: list[Word] = TEXT, ocr: list[OcrLine] = OCR) -> DepositStatement:
-    document = FakeDocument([PAGE_1, ""], words={1: text})
-    statement = CtbcDepositParser().parse(document, ocr=PageOcr({1: ocr})).statement
-    assert isinstance(statement, DepositStatement)
+    document = FakeDocument([PAGE_1], words={1: text})
+    statement = deposit(CtbcDepositParser().parse(document, ocr=FakeOcr({1: ocr})))
     return statement
 
 
@@ -97,15 +81,16 @@ def test_ctbc_deposit_reads_a_block_of_lines_from_the_balance_brought_forward_to
 
 def test_ctbc_deposit_reads_a_balance_right_of_the_number_whatever_digits_the_account_kind_has() -> None:
     # Until mid-2026 台幣數二 was MyWay數2, whose MyWay and 2 the text layer holds.
-    text = [*words(210, ("MyWay", 37, 63), ("2", 71, 75)), *TEXT]
+    text = [*row(210, ("MyWay", 37, 63), ("2", 71, 75)), *TEXT]
     ocr = [OcrLine("MyWay數2", 201, 213, 35) if line.text == "台幣數二" else line for line in OCR]
     digital = parse(text, ocr).accounts[1]
     assert (digital.name, digital.number, digital.closing_balance) == ("MyWay數2", DIGITAL, Decimal(15124))
 
 
-def test_ctbc_deposit_needs_ocr() -> None:
-    with pytest.raises(LayoutError, match="need OCR"):
-        CtbcDepositParser().parse(FakeDocument([PAGE_1, ""], words={1: TEXT}), ocr=None)
+def test_ctbc_deposit_without_ocr_is_a_configuration_error_not_a_layout_change() -> None:
+    assert CtbcDepositParser.needs_ocr
+    with pytest.raises(ConfigurationError, match="need OCR"):
+        CtbcDepositParser().parse(FakeDocument([PAGE_1], words={1: TEXT}), ocr=None)
 
 
 def test_ctbc_deposit_refuses_a_currency_it_does_not_know() -> None:

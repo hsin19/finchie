@@ -2,9 +2,9 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, card
 
-from finchie_parser.model import Kind, PointsKind
+from finchie_parser.model import Kind, PointsKind, Statement
 from finchie_parser.parsers.taishin import TaishinParser
 
 PAGE_1 = """115年 03月 信用卡電子帳單
@@ -40,8 +40,8 @@ Richart卡(原測試商務 (卡號末四碼:2222)
 自民國115年06月結帳日之次日起，您適用之循環信用利率為5.00%"""
 
 
-def parse():
-    return TaishinParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None).statement
+def parse() -> Statement:
+    return card(TaishinParser().parse(FakeDocument([PAGE_1, PAGE_2]), ocr=None))
 
 
 def test_taishin_reads_statement_fields() -> None:
@@ -66,7 +66,7 @@ def test_taishin_reads_older_bills_wordings_of_a_payment(wording: str) -> None:
     older = PAGE_2.replace(
         "台新銀行帳戶自動轉帳扣繳台新信用\n115/03/24 115/03/24 -2,000\n卡款", f"115/03/24 115/03/24 {wording} -2,000"
     )
-    statement = TaishinParser().parse(FakeDocument([PAGE_1, older]), ocr=None).statement
+    statement = card(TaishinParser().parse(FakeDocument([PAGE_1, older]), ocr=None))
     assert {tx.description: tx.kind for tx in statement.transactions}[wording] is Kind.PAYMENT
     assert statement.reconciliation.balanced
 
@@ -99,7 +99,7 @@ Richart卡(原測試御璽) (卡號末四碼:1111)
 
 def test_taishin_reads_refunds_of_foreign_purchases() -> None:
     page_1 = PAGE_1.replace("3,170", "155")
-    statement = TaishinParser().parse(FakeDocument([page_1, FOREIGN_REFUND]), ocr=None).statement
+    statement = card(TaishinParser().parse(FakeDocument([page_1, FOREIGN_REFUND]), ocr=None))
     refund = statement.transactions[-1]
     # Not 3 read out of "-27.03": the foreign amount is negative too.
     assert (refund.kind, refund.amount) == (Kind.REFUND, Decimal(-125))
@@ -122,7 +122,7 @@ PAGE_BREAK_3 = """繳款截止日 115/04/22
 
 def test_taishin_never_joins_a_description_across_a_page_break() -> None:
     page_1 = PAGE_1.replace("3,170", "1,825")
-    statement = TaishinParser().parse(FakeDocument([page_1, PAGE_BREAK_2, PAGE_BREAK_3]), ocr=None).statement
+    statement = card(TaishinParser().parse(FakeDocument([page_1, PAGE_BREAK_2, PAGE_BREAK_3]), ocr=None))
     rows = [(tx.description, tx.kind, tx.amount, tx.card_last4) for tx in statement.transactions]
     assert rows == [
         ("統一超商-測試店A9999 TAIPEI", Kind.PURCHASE, Decimal(65), "1111"),
@@ -146,7 +146,7 @@ POINTS = """台新Point
 
 def test_taishin_reads_its_points_with_used_points_printed_negative() -> None:
     parsed = TaishinParser().parse(FakeDocument([PAGE_1 + "\n" + POINTS, PAGE_2]), ocr=None)
-    [program] = parsed.statement.points
+    [program] = card(parsed).points
     assert (program.name, program.closing) == ("台新Point(信用卡)", Decimal(129))
     assert [(line.label, line.kind, line.amount) for line in program.lines] == [
         ("新增回饋", PointsKind.EARN, Decimal(129)),
@@ -159,7 +159,7 @@ def test_taishin_reads_its_points_with_used_points_printed_negative() -> None:
 def test_taishin_takes_the_expiry_only_from_its_reminder() -> None:
     promotion = "活動期間您有500點將於117/12/31到期前加碼回饋。\n"
     parsed = TaishinParser().parse(FakeDocument([PAGE_1 + "\n" + promotion + POINTS, PAGE_2]), ocr=None)
-    [program] = parsed.statement.points
+    [program] = card(parsed).points
     assert [(e.amount, e.by) for e in program.expiries] == [(Decimal(129), date(2028, 1, 31))]
 
 
@@ -174,7 +174,7 @@ def test_taishin_reads_each_column_with_figures_as_a_program_under_its_name_of_t
 本期結餘回饋 0 900
 ■【大集大利點數到期提醒】 您有0點將於110/01/31到期,請至下述網址查詢/兌換。"""
     parsed = TaishinParser().parse(FakeDocument([PAGE_1 + "\n" + old, PAGE_2]), ocr=None)
-    programs = [(p.name, p.closing, [(e.amount, e.by) for e in p.expiries]) for p in parsed.statement.points]
+    programs = [(p.name, p.closing, [(e.amount, e.by) for e in p.expiries]) for p in card(parsed).points]
     assert programs == [
         ("大集大利點數", Decimal(0), [(Decimal(0), date(2021, 1, 31))]),
         ("亞洲萬里通里數", Decimal(900), []),
@@ -184,3 +184,11 @@ def test_taishin_reads_each_column_with_figures_as_a_program_under_its_name_of_t
 
 def test_taishin_bill_without_a_points_table_has_no_points() -> None:
     assert parse().points == []
+
+
+def test_taishin_takes_cash_back_as_a_rebate() -> None:
+    page = PAGE_2.replace("115/03/16 115/03/18 -45", "115/03/16 115/03/18 Richart現金回饋 -45")
+    statement = card(TaishinParser().parse(FakeDocument([PAGE_1, page]), ocr=None))
+    assert [(tx.description, tx.kind) for tx in statement.transactions if tx.amount == -45] == [
+        ("Richart現金回饋", Kind.REBATE)
+    ]

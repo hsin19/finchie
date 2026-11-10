@@ -14,7 +14,6 @@ normalized before it is read; securities' names then read as the exchanges spell
 """
 
 import re
-from calendar import monthrange
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -23,17 +22,31 @@ from decimal import Decimal
 from finchie_parser.errors import LayoutError
 from finchie_parser.model import Reconciliation, SecuritiesHolding, SecuritiesStatement, SecuritiesTrade, TradeSide
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, nearest_column, rows_of
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.layout import nearest_column, rows_of
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
-from finchie_parser.text import amount, clean, roc_date
+from finchie_parser.text import (
+    MASKED_ACCOUNT,
+    MONTH_DAY,
+    ROC_DATE,
+    amount,
+    clean,
+    day_in_period,
+    find,
+    month_end,
+    roc_date,
+    roc_year,
+    token,
+)
 
 _MONTH = re.compile(r"以下是 ?(\d{3}) ?年 ?(\d{1,2}) ?月的綜合證券月對帳單")
-_ACCOUNT = re.compile(r"\( ?(\d+\*+\d+) ?\)", re.ASCII)
-_MONTH_DAY = re.compile(r"(\d{1,2})/(\d{1,2})", re.ASCII)
-_ROC_DATE = re.compile(r"\d{3}/\d\d/\d\d", re.ASCII)
-_AMOUNT = re.compile(r"[\d,]+(?:\.\d+)?", re.ASCII)
-_NET = re.compile(r"([\d,]+)\((付|收)\)")
+_ACCOUNT = re.compile(rf"\( ?({MASKED_ACCOUNT}) ?\)", re.ASCII)
+_MONTH_DAY = token(MONTH_DAY)
+_ROC_DATE = token(ROC_DATE)
+# Never negative: 應收付金額 says which way with (收) or (付).
+_AMOUNT = token(r"\d[\d,]*(?:\.\d+)?")
+_NET = re.compile(r"(\d[\d,]*)\((付|收)\)")
 _TRADE_COLUMNS = ("成交股數", "單價", "價金", "手續費", "交易稅")
 _HOLDING_COLUMNS = ("普通", "融資", "融券", "借貸擔保品")
 # 預繳金 = 12,345 抵繳金額 = 0 留置款 = 0 借貸還款 = 0
@@ -137,7 +150,7 @@ class _Reader:
         if missing or net is None:
             raise LayoutError(f"{when} {name}: no {', '.join(missing) or '應收付金額'}")
         return SecuritiesTrade(
-            date=self._date(when),
+            date=day_in_period(when, self.start, self.end),
             name=name,
             side=TradeSide.BUY if category.endswith("買") else TradeSide.SELL,
             shares=found["成交股數"],
@@ -170,13 +183,6 @@ class _Reader:
             half = [w for w in row if start <= w.x0 < stop]
             if half:
                 self.holdings.append(_holding(half, columns))
-
-    def _date(self, month_day: str) -> date:
-        month, day = (int(part) for part in month_day.split("/"))
-        when = date(self.start.year, month, day)
-        if not self.start <= when <= self.end:
-            raise LayoutError(f"{month_day} is outside the statement's month")
-        return when
 
 
 def _holding(words: list[Word], columns: dict[str, Word]) -> SecuritiesHolding:
@@ -211,14 +217,14 @@ class SkisSecuritiesParser(StatementParser):
         return [identity.require_national_id().upper()]
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
-        first = [clean(text) for text in document.page_texts()[:1]]
+        first = [clean(text) for text in document.page_texts(1)]
         month = find(_MONTH, first, "statement month")
-        year, number = int(month.group(1)) + 1911, int(month.group(2))
-        start, end = date(year, number, 1), date(year, number, monthrange(year, number)[1])
+        year, number = roc_year(int(month.group(1))), int(month.group(2))
+        start, end = date(year, number, 1), month_end(year, number)
         account = find(_ACCOUNT, first, "account number").group(1)
 
         reader = _Reader(start, end)
-        for page in range(len(document.page_texts())):
+        for page in range(document.page_count()):
             reader.read_page(document.page_words(page))
         if reader.holdings_date is None:
             raise LayoutError("no holdings section found")

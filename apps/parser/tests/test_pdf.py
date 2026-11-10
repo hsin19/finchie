@@ -3,14 +3,16 @@ import time
 
 import pypdfium2
 import pytest
-from fakes import FakeParser
+from fakes import FakeDocument, FakeParser
 from pdfs import blank_pdf, text_pdf
 from PIL import Image
 
+from finchie_parser import pdf
 from finchie_parser.documents import Attachment
 from finchie_parser.errors import InvalidDocumentError, PasswordRequiredError
 from finchie_parser.passwords import Passwords
-from finchie_parser.pdf import PdfSet
+from finchie_parser.pdf import Document
+from finchie_parser.selection import PdfSet
 
 
 def one_pdf(data: bytes) -> PdfSet:
@@ -121,3 +123,27 @@ def test_pdfium_is_never_called_from_two_threads_at_once(monkeypatch: pytest.Mon
     for thread in threads:
         thread.join()
     assert calls.peak == 1
+
+
+def test_a_pdf_longer_than_any_statement_is_refused_unread(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pdf, "MAX_PAGES", 2)
+    with one_pdf(text_pdf("one", "two", "three")) as pdfs, pytest.raises(InvalidDocumentError, match="pages"):
+        pdfs.open(0, None)
+
+
+@pytest.mark.parametrize("kind", ["pdf", "fake"])
+def test_a_fake_document_reads_like_a_pdf_of_the_same_text(kind: str) -> None:
+    texts = ["FAKE BANK statement", "page two"]
+    with one_pdf(text_pdf(*texts)) as pdfs:
+        document: Document = pdfs.open(0, None) if kind == "pdf" else FakeDocument(texts)
+        assert document.page_count() == 2
+        assert document.page_texts(1) == texts[:1]
+        assert document.page_texts() == texts
+        (line,) = document.page_lines(0)
+        assert line.text == texts[0]
+        assert line.top < line.bottom
+        if kind == "pdf":
+            words = document.page_words(0)
+            assert [word.text for word in words] == texts[0].split()
+            assert all(word.x0 < word.x1 for word in words)
+            assert [word.x0 for word in words] == sorted(word.x0 for word in words)
