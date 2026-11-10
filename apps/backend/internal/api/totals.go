@@ -64,7 +64,8 @@ func summarize(groups []dbq.TransactionTotalsRow) summary {
 		if !g.KindMatch {
 			continue
 		}
-		if !domain.AccountKind(g.AccountKind).OwnersAccount() {
+		// Cards are picked by card, the rest by account.
+		if domain.AccountKind(g.AccountKind) == domain.CreditCard {
 			key := cardKey{institution: g.Institution, last4: deref(g.CardLast4)}
 			if cards[key] == nil {
 				cards[key] = &tally{amount: numeric.Zero()}

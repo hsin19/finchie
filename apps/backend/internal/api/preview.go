@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 )
 
 // openTimeout bounds a call that reads an e-mail and decrypts its PDFs: no OCR, unlike a parse.
@@ -78,7 +78,7 @@ func (f *openFailure) VisitGetDocumentPreviewFileResponse(w http.ResponseWriter)
 }
 
 // open has the parser open the stored original; nothing it returns is stored (ADR 0012).
-func (s *Server) open(ctx context.Context, id int64) (*parserv1.OpenDocumentResponse, *openFailure, error) {
+func (s *Server) open(ctx context.Context, id int64) (*parserv2.OpenDocumentResponse, *openFailure, error) {
 	row, err := dbq.New(s.pool).GetDocumentContent(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, &openFailure{http.StatusNotFound, notFound("document", id).Message}, nil
@@ -88,11 +88,9 @@ func (s *Server) open(ctx context.Context, id int64) (*parserv1.OpenDocumentResp
 	}
 	ctx, cancel := context.WithTimeout(ctx, openTimeout)
 	defer cancel()
-	opened, err := s.parser.OpenDocument(ctx, &parserv1.OpenDocumentRequest{
-		DocumentId:  strconv.FormatInt(id, 10),
-		Filename:    row.Filename,
-		ContentType: row.ContentType,
-		Content:     row.Content,
+	opened, err := s.parser.OpenDocument(ctx, &parserv2.OpenDocumentRequest{
+		DocumentId: strconv.FormatInt(id, 10),
+		Content:    row.Content,
 	})
 	switch status.Code(err) {
 	case codes.OK:

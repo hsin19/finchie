@@ -5,6 +5,7 @@ package domain
 
 import (
 	"fmt"
+	"math/big"
 	"regexp"
 	"strings"
 
@@ -14,7 +15,8 @@ import (
 // AccountKind is what an account is (ADR 0013), as stored in accounts.kind and statements.kind: a card
 // bill reports a credit card account, a deposit statement deposit accounts, a securities statement a
 // brokerage account (ADR 0017), and a card bill the bank's points too (ADR 0019). An exchange account has
-// no statements: its API reports snapshots (ADR 0018).
+// no statements: its API reports snapshots (ADR 0018). A loan the owner keeps by hand, until its
+// statements are parsed (ADR 0022).
 type AccountKind string
 
 const (
@@ -23,6 +25,7 @@ const (
 	Securities AccountKind = "securities"
 	Exchange   AccountKind = "exchange"
 	Points     AccountKind = "points"
+	Loan       AccountKind = "loan"
 )
 
 // Scan reads a kind from the database, where an account a query outer-joins may be missing: NULL is no
@@ -41,8 +44,24 @@ func (k *AccountKind) Scan(src any) error {
 	return nil
 }
 
-// AccountKinds are every kind, in the order accounts are listed.
-var AccountKinds = []AccountKind{Deposit, Securities, Exchange, Points, CreditCard}
+// AccountKinds are every kind, in the order accounts are listed: assets, then liabilities.
+var AccountKinds = []AccountKind{Deposit, Securities, Exchange, Points, CreditCard, Loan}
+
+// Liability reports whether what the account holds is owed (ADR 0022): its balances are as their source
+// prints them, positive, and count against the owner.
+func (k AccountKind) Liability() bool { return k == CreditCard || k == Loan }
+
+// Signed is a worth as the owner has it: negative for a liability's.
+func (k AccountKind) Signed(worth *big.Rat) *big.Rat {
+	if worth == nil || !k.Liability() {
+		return worth
+	}
+	return new(big.Rat).Neg(worth)
+}
+
+// KeptByHand reports whether the owner may keep an account of the kind by hand (ADR 0019): any but a
+// card's, whose bank's bills report it.
+func (k AccountKind) KeptByHand() bool { return k != CreditCard }
 
 // UnitKind is the kind of the units an account of this kind holds: a securities account securities, a
 // points account points, every other money.
@@ -56,10 +75,6 @@ func (k AccountKind) UnitKind() UnitKind {
 		return Money
 	}
 }
-
-// OwnersAccount reports whether the owner has the account. A credit_card account is the container for a
-// bank's card lines, which owe rather than hold: what a bill says is owed stays on the bill (ADR 0013).
-func (k AccountKind) OwnersAccount() bool { return k != CreditCard }
 
 // Itemized reports whether the account's statements list the lines that move its balances, so that two
 // balances can be joined by the lines between them (ADR 0013). A card bill dates its lines by purchase,
@@ -147,6 +162,29 @@ const (
 	Adjust LineKind = "adjust"
 	Redeem LineKind = "redeem"
 )
+
+// Numbered reports whether its source tells accounts of this kind apart by number: a bank has many deposit
+// accounts, but one card account and one points account (ADR 0013).
+func (k AccountKind) Numbered() bool { return k != CreditCard && k != Points && k != Exchange }
+
+// LineKinds are the kinds of line an account of this kind has: a deposit account never has a purchase,
+// a card a trade.
+func (k AccountKind) LineKinds() []LineKind {
+	switch k {
+	case CreditCard:
+		return []LineKind{Purchase, ForeignTransactionFee, AnnualFee, Refund, Rebate, Payment}
+	case Deposit:
+		return []LineKind{Interest, Fee, Other}
+	case Securities:
+		return []LineKind{Buy, Sell}
+	case Points:
+		return []LineKind{Earn, Adjust, Redeem}
+	case Loan:
+		return []LineKind{Payment, Interest, Fee, Other}
+	default:
+		return nil
+	}
+}
 
 // PriceSource is where a price came from (ADR 0020), as stored in prices.source: for showing it and for
 // clearing the owner's, never for picking which one counts.

@@ -9,54 +9,43 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	gdate "google.golang.org/genproto/googleapis/type/date"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	"github.com/hsin19/finchie/apps/backend/internal/domain"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
-	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
+	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 )
 
 type line struct {
 	date, description, kind, amount string
 	currency, country, card         string
+	// In currency, when it is set.
+	foreign string
 }
 
-// seedStatement stores a statement with its lines the way the ingest worker would.
+// seedStatement stores a card bill with its lines through ingest, as the worker would, and returns the
+// statement's ID. A line's currency comes with an amount in it (ADR 0021).
 func seedStatement(t *testing.T, pool *pgxpool.Pool, institution, closing string, lines []line) int64 {
 	t.Helper()
-	ctx := t.Context()
-	queries := dbq.New(pool)
-	doc, err := queries.UpsertDocument(ctx, dbq.UpsertDocumentParams{
-		Sha256: []byte(institution + closing), Filename: institution + ".pdf", ContentType: "application/pdf", Content: []byte("%PDF"),
-	})
-	if err != nil {
-		t.Fatal(err)
+	day := func(s string) *gdate.Date {
+		d := pgDate(t, s).Time
+		return &gdate.Date{Year: int32(d.Year()), Month: int32(d.Month()), Day: int32(d.Day())} //nolint:gosec // a date
 	}
-	id, err := queries.InsertStatement(ctx, dbq.InsertStatementParams{
-		DocumentID: doc.ID, Institution: institution, Kind: domain.CreditCard, ClosingDate: pgDate(t, closing), DueDate: pgDate(t, closing),
-		Currency: optional("TWD"), TotalDue: num(t, "0"), ComputedNewCharges: num(t, "0"), StatedNewCharges: num(t, "0"),
-		StatedLabel: optional("total"), Balanced: true,
-	})
-	if err != nil {
-		t.Fatal(err)
+	kinds := map[string]parserv2.LineKind{
+		"purchase": parserv2.LineKind_LINE_KIND_PURCHASE, "foreign_transaction_fee": parserv2.LineKind_LINE_KIND_FOREIGN_TRANSACTION_FEE,
+		"refund": parserv2.LineKind_LINE_KIND_REFUND, "payment": parserv2.LineKind_LINE_KIND_PAYMENT, "rebate": parserv2.LineKind_LINE_KIND_REBATE,
 	}
-	account, err := queries.UpsertAccount(ctx, dbq.UpsertAccountParams{Institution: institution, Kind: domain.CreditCard})
-	if err != nil {
-		t.Fatal(err)
+	printed := make([]*parserv2.Line, 0, len(lines))
+	for _, l := range lines {
+		options := []pt.CardOption{pt.Country(l.country), pt.OnCard(l.card)}
+		if l.currency != "" {
+			options = append(options, pt.Foreign(l.currency, l.foreign))
+		}
+		printed = append(printed, pt.CardLine(day(l.date), l.description, kinds[l.kind], l.amount, options...))
 	}
-	units, err := ledger.Units(ctx, queries, domain.Money, "TWD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows := make([]dbq.InsertTransactionsParams, 0, len(lines))
-	for i, l := range lines {
-		rows = append(rows, dbq.InsertTransactionsParams{
-			StatementID: id, AccountID: account, UnitID: units["TWD"], LineNo: int32(i + 1), TransactionDate: pgDate(t, l.date), Description: l.description,
-			Kind: domain.LineKind(l.kind), Amount: num(t, l.amount),
-			OriginalCurrency: optional(l.currency), Country: optional(l.country), CardLast4: optional(l.card),
-		})
-	}
-	if _, err := queries.InsertTransactions(ctx, rows); err != nil {
+	documentID := store(t, pool, institution+closing, pt.Response(institution+".credit_card", pt.Bill(institution, day(closing), day(closing), "0", printed...)))
+	var id int64
+	if err := pool.QueryRow(t.Context(), "SELECT id FROM statements WHERE document_id = $1", documentID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -71,38 +60,20 @@ func pgDate(t *testing.T, s string) pgtype.Date {
 	return pgtype.Date{Time: d, Valid: true}
 }
 
-func num(t *testing.T, s string) pgtype.Numeric {
-	t.Helper()
-	var n pgtype.Numeric
-	if err := n.Scan(s); err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
-func optional(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 func seedLedger(t *testing.T, pool *pgxpool.Pool) (hsbc int64) {
 	t.Helper()
 	hsbc = seedStatement(t, pool, "hsbc", "2026-10-20", []line{
-		{"2026-10-08", "Leather Atelier Firenze", "purchase", "23104", "EUR", "IT", "4417"},
-		{"2026-10-08", "Foreign transaction fee", "foreign_transaction_fee", "346.56", "", "", "4417"},
-		{"2026-10-07", "Tax Free Refund", "refund", "-2180", "", "SE", "4417"},
-		{"2026-09-30", "Payment, thank you", "payment", "-41280", "", "", ""},
+		{"2026-10-08", "Leather Atelier Firenze", "purchase", "23104", "EUR", "IT", "4417", "650.00"},
+		{"2026-10-08", "Foreign transaction fee", "foreign_transaction_fee", "346.56", "", "", "4417", ""},
+		{"2026-10-07", "Tax Free Refund", "refund", "-2180", "", "SE", "4417", ""},
+		{"2026-09-30", "Payment, thank you", "payment", "-41280", "", "", "", ""},
 	})
 	seedStatement(t, pool, "esun", "2026-10-07", []line{
-		{"2026-10-02", "Uber Eats", "purchase", "289", "", "TW", "3381"},
-		{"2026-10-07", "U Bear cashback", "rebate", "-35.5", "", "", "3381"},
+		{"2026-10-02", "Uber Eats", "purchase", "289", "", "TW", "3381", ""},
+		{"2026-10-07", "U Bear cashback", "rebate", "-35.5", "", "", "3381", ""},
 	})
-	// The fee (1.5% of 23104) becomes the leather purchase's child; the tax-free refund fits none.
-	if _, err := ledger.RelinkAll(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	// The fee (1.5% of 23104) became the leather purchase's child as it was stored; the tax-free refund
+	// fits none.
 	return hsbc
 }
 
@@ -223,7 +194,14 @@ func TestStatementAndDocumentContent(t *testing.T) {
 		t.Fatalf("lines = %+v", lines)
 	}
 
-	content := get(t, e, "/api/documents/"+itoa(statement.DocumentId)+"/content")
+	// A document stored as a bare PDF before ADR 0014 opens in place.
+	legacy, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
+		Sha256: []byte("legacy"), Filename: "hsbc.pdf", ContentType: "application/pdf", Content: []byte("%PDF"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := get(t, e, "/api/documents/"+itoa(legacy.ID)+"/content")
 	if content.Code != http.StatusOK || content.Body.String() != "%PDF" ||
 		content.Header().Get("Content-Type") != "application/pdf" ||
 		content.Header().Get("Content-Disposition") != `inline; filename=hsbc.pdf` {
@@ -243,9 +221,9 @@ func itoa(n int64) string {
 func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	fee := septemberLine(26, "-15", "跨行手續費", "")
-	fee.Kind = parserv1.DepositLineKind_DEPOSIT_LINE_KIND_FEE
+	fee.Kind = parserv2.LineKind_LINE_KIND_FEE
 	transfer := septemberLine(25, "-5000", "行銀跨行轉優", "812 0087654321***234")
-	transfer.Memo = "房租"
+	transfer.GetDeposit().Memo = "房租"
 	deposit := store(t, pool, "esun.eml", septemberDeposit("esun", savings, "47165",
 		septemberLine(5, "60000", "薪資", ""),
 		septemberLine(22, "-6350", "玉山卡款扣繳", ""),
@@ -254,8 +232,8 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	))
 	store(t, pool, "taishin.eml", septemberDeposit("taishin", "876543****9234", "5000", septemberLine(25, "5000", "CD轉入", "")))
 	store(t, pool, "bill.eml", septemberBill("6350",
-		cardLine(1, parserv1.TransactionKind_TRANSACTION_KIND_PURCHASE, "6350", "SHOP", "3381"),
-		cardLine(22, parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT, "-6350", "感謝您辦理本行自動轉帳繳款", "")))
+		cardLine(1, parserv2.LineKind_LINE_KIND_PURCHASE, "6350", "SHOP", "3381"),
+		cardLine(22, parserv2.LineKind_LINE_KIND_PAYMENT, "-6350", "感謝您辦理本行自動轉帳繳款", "")))
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
 	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")
 
@@ -274,7 +252,7 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	for _, item := range all.Items {
 		items[item.Description] = item
 	}
-	if shop := items["SHOP"]; shop.Amount != "6350" || shop.Flow != "-6350" || shop.AccountKind != AccountKindCreditCard || shop.AccountId != nil {
+	if shop := items["SHOP"]; shop.Amount != "6350" || shop.Flow != "-6350" || shop.AccountKind != AccountKindCreditCard || shop.AccountId == nil {
 		t.Fatalf("card purchase = %+v", shop)
 	}
 	if salary := items["薪資"]; salary.Flow != "60000" || salary.AccountKind != AccountKindDeposit || *salary.AccountId != esun.Id || *salary.AccountNumber != savings {

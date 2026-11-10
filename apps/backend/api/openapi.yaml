@@ -443,17 +443,52 @@ paths:
   /api/net-worth:
     get:
       operationId: getNetWorth
-      summary: What the owner has less what they owe on cards, in NT$
+      summary: What the owner has less what they owe, in NT$, on a day
       description: |
-        Every account's worth added up, overall and by kind (accounts without a worth are counted, not
-        guessed), less what is owed: each bank's newest card bill that owes something and that no deposit
-        account or later bill has shown paid (ADR 0016). Worked out on every read, like the accounts.
+        Every account's worth on the day added up, assets and liabilities (ADR 0022), overall and by kind;
+        accounts without a worth are counted, not guessed. Each account's newest balance on or before the
+        day, at each unit's newest price at the end of that day in Taipei (ADR 0023). `completeAsOf` is the
+        newest day every account had reported by; after it the figure is an estimate, and `behind` names
+        the accounts that have not reported since.
+      parameters:
+        - name: "on"
+          in: query
+          description: The day, Taipei's today when left out
+          schema: { type: string, format: date }
       responses:
         "200":
           description: The net worth
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NetWorth" }
+
+  /api/net-worth/history:
+    get:
+      operationId: getNetWorthHistory
+      summary: Net worth over time, by day or by month end
+      description: |
+        As /api/net-worth for each day from `from` to `to` (Taipei's today when left out), every day or
+        the last day of each month and `to` itself; at most 1000 points.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: step
+          in: query
+          schema: { $ref: "#/components/schemas/HistoryStep" }
+      responses:
+        "200":
+          description: The series, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NetWorthPoint" }
+        "400": { $ref: "#/components/responses/Problem" }
 
   /api/settings:
     get:
@@ -759,7 +794,7 @@ components:
 
     Statement:
       type: object
-      required: [id, documentId, institution, closingDate, dueDate, currency, totalDue, reconciliation, transactionCount]
+      required: [id, documentId, institution, closingDate, dueDate, currency, totalDue, balanced, checks, transactionCount]
       properties:
         id: { type: integer, format: int64 }
         documentId: { type: integer, format: int64 }
@@ -768,13 +803,22 @@ components:
         dueDate: { type: string, format: date }
         currency: { type: string, example: TWD }
         totalDue: { $ref: "#/components/schemas/Decimal" }
-        reconciliation: { $ref: "#/components/schemas/Reconciliation" }
+        balanced: { type: boolean, description: "Every check balances" }
+        checks:
+          type: array
+          description: Every figure the bill prints that its lines are checked against, in its order (ADR 0021)
+          items: { $ref: "#/components/schemas/Check" }
         transactionCount: { type: integer }
         paidOn: { type: string, format: date, description: "When a deposit account or a later bill showed it paid (ADR 0016); absent while that is not known" }
 
     AccountKind:
       type: string
-      enum: [credit_card, deposit, securities, exchange, points]
+      enum: [credit_card, deposit, securities, exchange, points, loan]
+
+    AccountSide:
+      type: string
+      enum: [asset, liability]
+      description: "A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)"
 
     AccountContinuity:
       type: string
@@ -783,12 +827,13 @@ components:
 
     Account:
       type: object
-      required: [id, institution, kind, number, balances, continuity, gaps, expiries]
+      required: [id, institution, kind, side, number, balances, continuity, gaps, expiries]
       properties:
         id: { type: integer, format: int64 }
         institution: { type: string, example: esun }
         kind: { $ref: "#/components/schemas/AccountKind" }
-        number: { type: string, description: "As printed, usually masked; empty for a card bill", example: "1234567***890" }
+        side: { $ref: "#/components/schemas/AccountSide" }
+        number: { type: string, description: "As printed, usually masked; empty for a bank's card or points account", example: "1234567***890" }
         label: { type: string, nullable: true, description: The source's name for it, example: 臺幣活存 }
         name: { type: string, nullable: true, description: The owner's name for it }
         fullNumber: { type: string, description: "Its full number, where the owner gave one (ADR 0016)" }
@@ -1029,14 +1074,15 @@ components:
           description: "應收付: received positive, paid negative; zero for a buy paid in advance"
         prepaid: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "預繳金, for a buy paid in advance" }
 
-    Reconciliation:
+    Check:
       type: object
-      required: [balanced, computed, stated, statedLabel]
+      required: [name, unit, computed, stated, balanced]
       properties:
-        balanced: { type: boolean }
+        name: { type: string, description: "The statement's own label for the figure, e.g. 本期新增款項" }
+        unit: { type: string, description: "What both are in, as printed; empty when the statement prints none" }
         computed: { $ref: "#/components/schemas/Decimal" }
         stated: { $ref: "#/components/schemas/Decimal" }
-        statedLabel: { type: string }
+        balanced: { type: boolean }
 
     TransactionSort:
       type: string
@@ -1176,20 +1222,38 @@ components:
 
     NetWorth:
       type: object
-      required: [holdings, byKind, unvalued, owed, owedElsewhere, unpaidBills, net]
+      required: ["on", assets, liabilities, net, byKind, unvalued, behind]
       properties:
-        holdings: { $ref: "#/components/schemas/Decimal" }
+        "on": { type: string, format: date }
+        assets: { $ref: "#/components/schemas/Decimal" }
+        liabilities: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "Negative" }
+        net: { $ref: "#/components/schemas/Decimal" }
         byKind:
           type: array
           items: { $ref: "#/components/schemas/KindWorth" }
-        unvalued: { type: integer, description: "Accounts without a worth, left out of holdings" }
-        owed: { $ref: "#/components/schemas/Decimal" }
-        owedElsewhere: { type: integer, description: "Unpaid bills in another currency than NT$, left out of owed" }
-        unpaidBills:
+        unvalued: { type: integer, description: "Accounts without a worth on the day, left out" }
+        completeAsOf: { type: string, format: date, description: "The newest day every account had reported by; absent when none has" }
+        behind:
           type: array
-          description: The statements that make up what is owed
+          description: Accounts whose newest report is older than the day
           items: { type: integer, format: int64 }
+
+    HistoryStep:
+      type: string
+      enum: [day, month]
+      default: month
+      description: Every day, or the last day of each month
+
+    NetWorthPoint:
+      type: object
+      required: ["on", assets, liabilities, net, unvalued, complete]
+      properties:
+        "on": { type: string, format: date }
+        assets: { $ref: "#/components/schemas/Decimal" }
+        liabilities: { $ref: "#/components/schemas/Decimal" }
         net: { $ref: "#/components/schemas/Decimal" }
+        unvalued: { type: integer }
+        complete: { type: boolean, description: "Every account had reported by the day: the figure is exact" }
 
     KindWorth:
       type: object

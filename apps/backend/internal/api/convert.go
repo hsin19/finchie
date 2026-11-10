@@ -46,21 +46,20 @@ func toDocument(row dbq.GetDocumentRow) Document {
 
 // toStatement takes a card bill: the statement endpoints list no other kind yet, and a bill's columns
 // are never null (statements_card_bill_check).
-func toStatement(row dbq.ListStatementsRow) Statement {
+func toStatement(row dbq.ListStatementsRow, checks []Check) Statement {
+	if checks == nil {
+		checks = []Check{}
+	}
 	return Statement{
-		Id:          row.ID,
-		DocumentId:  row.DocumentID,
-		Institution: row.Institution,
-		ClosingDate: openapi_types.Date{Time: row.ClosingDate.Time},
-		DueDate:     openapi_types.Date{Time: row.DueDate.Time},
-		Currency:    deref(row.Currency),
-		TotalDue:    numeric.String(row.TotalDue),
-		Reconciliation: Reconciliation{
-			Balanced:    row.Balanced,
-			Computed:    numeric.String(row.ComputedNewCharges),
-			Stated:      numeric.String(row.StatedNewCharges),
-			StatedLabel: deref(row.StatedLabel),
-		},
+		Id:               row.ID,
+		DocumentId:       row.DocumentID,
+		Institution:      row.Institution,
+		ClosingDate:      openapi_types.Date{Time: row.ClosingDate.Time},
+		DueDate:          openapi_types.Date{Time: row.DueDate.Time},
+		Currency:         deref(row.Currency),
+		TotalDue:         numeric.String(row.TotalDue),
+		Balanced:         row.Balanced,
+		Checks:           checks,
 		TransactionCount: int(row.TransactionCount),
 		PaidOn:           optionalDate(row.PaidOn),
 	}
@@ -94,11 +93,9 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		Counterpart: lineCounterpart(row.CounterpartID, row.CounterpartStatementID, row.CounterpartDate, row.CounterpartAccountID,
 			row.CounterpartAccountKind, row.CounterpartInstitution, row.CounterpartAccountName,
 			cmp.Or(row.CounterpartFullNumber, row.CounterpartAccountNumber)),
-		Trade: tradeOf(row.TradeCategory, row.TradePrice, row.TradeAmount, row.TradeFee, row.TradeTax, row.TradeNet, row.TradePrepaid),
-	}
-	// A card bill's container is no account the owner has (ADR 0013): a card line names its card instead.
-	if row.AccountKind.OwnersAccount() {
-		tx.AccountId, tx.AccountNumber = &row.AccountID, &row.AccountNumber
+		Trade:         tradeOf(row.TradeCategory, row.TradePrice, row.TradeAmount, row.TradeFee, row.TradeTax, row.TradeNet, row.TradePrepaid),
+		AccountId:     &row.AccountID,
+		AccountNumber: &row.AccountNumber,
 	}
 	if row.Balance.Valid {
 		balance := numeric.String(row.Balance)
@@ -153,10 +150,7 @@ func lineCounterpart(id, statementID *int64, date pgtype.Date, accountID *int64,
 	counterpart := LineCounterpart{
 		Id: *id, StatementId: *statementID, Date: openapi_types.Date{Time: date.Time},
 		AccountKind: AccountKind(kind), Institution: *institution, AccountName: name,
-	}
-	// A card bill's container is no account to point at (ADR 0013).
-	if kind.OwnersAccount() {
-		counterpart.AccountId, counterpart.AccountNumber = accountID, number
+		AccountId: accountID, AccountNumber: number,
 	}
 	return &counterpart
 }

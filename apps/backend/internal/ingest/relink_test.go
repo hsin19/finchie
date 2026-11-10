@@ -3,10 +3,8 @@ package ingest
 import (
 	"testing"
 
-	"google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
-
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
+	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
@@ -16,20 +14,13 @@ func TestStoringAStatementRelinksTheWholeLedger(t *testing.T) {
 
 	october := sampleStatement(true)
 	november := sampleStatement(true)
-	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
-	november.DueDate = &date.Date{Year: 2026, Month: 12, Day: 8}
-	november.Transactions = []*parserv1.Transaction{{
-		TransactionDate:  &date.Date{Year: 2026, Month: 11, Day: 2},
-		Description:      "LEATHER SHOP FIRENZE",
-		Kind:             parserv1.TransactionKind_TRANSACTION_KIND_REFUND,
-		Amount:           &decimal.Decimal{Value: "-28009"},
-		OriginalAmount:   &decimal.Decimal{Value: "-780.00"},
-		OriginalCurrency: "EUR",
-		Country:          "IT",
-	}}
-	store := func(documentID int64, statement *parserv1.Statement) {
+	november.ClosingDate = pt.Day(11, 21)
+	november.CardBill.DueDate = pt.Day(12, 8)
+	november.Accounts[0].Lines = []*parserv2.Line{pt.CardLine(pt.Day(11, 2), "LEATHER SHOP FIRENZE",
+		parserv2.LineKind_LINE_KIND_REFUND, "-28009", pt.Foreign("EUR", "-780.00"), pt.Country("IT"))}
+	store := func(documentID int64, statement *parserv2.Statement) {
 		t.Helper()
-		if _, err := Store(ctx, pool, documentID, "", &parserv1.ParseDocumentResponse{Statement: statement, Parser: "fake", ParserVersion: "1"}); err != nil {
+		if _, err := Store(ctx, pool, documentID, "", pt.Response("fake", statement)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -79,21 +70,15 @@ func TestConcurrentStoresDoNotDeadlock(t *testing.T) {
 
 	october := sampleStatement(true)
 	november := sampleStatement(true)
-	november.ClosingDate = &date.Date{Year: 2026, Month: 11, Day: 21}
-	november.Transactions = []*parserv1.Transaction{{
-		TransactionDate:  &date.Date{Year: 2026, Month: 11, Day: 2},
-		Description:      "LEATHER SHOP FIRENZE",
-		Kind:             parserv1.TransactionKind_TRANSACTION_KIND_REFUND,
-		Amount:           &decimal.Decimal{Value: "-28009"},
-		OriginalAmount:   &decimal.Decimal{Value: "-780.00"},
-		OriginalCurrency: "EUR",
-	}}
-	documents := map[int64]*parserv1.Statement{
+	november.ClosingDate = pt.Day(11, 21)
+	november.Accounts[0].Lines = []*parserv2.Line{pt.CardLine(pt.Day(11, 2), "LEATHER SHOP FIRENZE",
+		parserv2.LineKind_LINE_KIND_REFUND, "-28009", pt.Foreign("EUR", "-780.00"))}
+	documents := map[int64]*parserv2.Statement{
 		addDocument(t, pool, "october.eml"):  october,
 		addDocument(t, pool, "november.eml"): november,
 	}
 	store := func(id int64) error {
-		_, err := Store(ctx, pool, id, "", &parserv1.ParseDocumentResponse{Statement: documents[id], Parser: "fake", ParserVersion: "1"})
+		_, err := Store(ctx, pool, id, "", pt.Response("fake", documents[id]))
 		return err
 	}
 	for id := range documents {

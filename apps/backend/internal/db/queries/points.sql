@@ -40,7 +40,7 @@ VALUES ('owner', @kind, @label)
 RETURNING id;
 
 -- name: GetAccountSource :one
-SELECT institution, kind FROM accounts WHERE id = @id AND kind <> 'credit_card';
+SELECT institution, kind FROM accounts WHERE id = @id;
 
 -- name: ClearOwnerExpiries :exec
 DELETE FROM expiries WHERE account_id = @account_id AND statement_id IS NULL;

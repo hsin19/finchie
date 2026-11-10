@@ -78,22 +78,29 @@ type Price struct {
 }
 
 type Statement struct {
-	ID                 int64
-	DocumentID         int64
-	Institution        string
-	ClosingDate        pgtype.Date
-	DueDate            pgtype.Date
-	Currency           *string
-	TotalDue           pgtype.Numeric
-	ComputedNewCharges pgtype.Numeric
-	StatedNewCharges   pgtype.Numeric
-	StatedLabel        *string
-	Balanced           bool
-	Kind               domain.AccountKind
-	PeriodStart        pgtype.Date
-	PaidOn             pgtype.Date
-	PaidBy             *int64
-	AccountNumbers     string
+	ID             int64
+	DocumentID     int64
+	Institution    string
+	ClosingDate    pgtype.Date
+	DueDate        pgtype.Date
+	Currency       *string
+	TotalDue       pgtype.Numeric
+	Balanced       bool
+	Kind           domain.AccountKind
+	PeriodStart    pgtype.Date
+	PaidOn         pgtype.Date
+	PaidBy         *int64
+	AccountNumbers string
+}
+
+type StatementCheck struct {
+	StatementID int64
+	Position    int32
+	Name        string
+	Unit        string
+	Computed    pgtype.Numeric
+	Stated      pgtype.Numeric
+	Balanced    bool
 }
 
 type Trade struct {

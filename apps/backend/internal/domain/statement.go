@@ -18,6 +18,19 @@ type StatementKey struct {
 	Closing     time.Time
 }
 
+// StatementKind is the kind of a statement, by what it reports (ADR 0021): a card bill, else a
+// securities statement when it reports a brokerage account, else a deposit statement.
+func StatementKind(cardBill bool, accounts ...AccountKind) AccountKind {
+	switch {
+	case cardBill:
+		return CreditCard
+	case slices.Contains(accounts, Securities):
+		return Securities
+	default:
+		return Deposit
+	}
+}
+
 // AccountNumbers keys the accounts a statement reports by their numbers: sorted, each once, joined by
 // commas. A bank's card and points accounts have no number, being its only ones of their kind.
 func AccountNumbers(numbers ...string) string {

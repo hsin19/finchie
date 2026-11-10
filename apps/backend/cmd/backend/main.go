@@ -28,7 +28,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/config"
 	"github.com/hsin19/finchie/apps/backend/internal/db"
 	"github.com/hsin19/finchie/apps/backend/internal/exchanges"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 	"github.com/hsin19/finchie/apps/backend/internal/jobs"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
@@ -130,7 +130,7 @@ func run() error {
 	}()
 
 	workers := river.NewWorkers()
-	parser := parserv1.NewParserServiceClient(conn)
+	parser := parserv2.NewParserServiceClient(conn)
 	river.AddWorker(workers, ingest.NewWorker(pool, parser, cfg.ParseTimeout))
 	river.AddWorker(workers, ingest.NewRetryWorker(pool, parser))
 	river.AddWorker(workers, rates.NewWorker(pool, &http.Client{Timeout: 30 * time.Second}, rates.Feeds))

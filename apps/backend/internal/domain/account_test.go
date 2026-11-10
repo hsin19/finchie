@@ -119,3 +119,14 @@ func TestAStatementIsKeyedByTheAccountsItReports(t *testing.T) {
 		t.Fatalf("a card bill's key = %q, want none", got)
 	}
 }
+
+func TestALiabilityIsWorthWhatItOwesTakenOff(t *testing.T) {
+	bill := []Balance{balance("TWD", "2026-10-21", "3000", "3000", true)}
+	standing := Assess(CreditCard, bill, Gaps{}, nil)
+	if standing.Worth.Cmp(r("-3000")) != 0 || standing.Continuity != Unknown || !standing.Newest.Equal(on("2026-10-21")) {
+		t.Fatalf("card = %+v", standing)
+	}
+	if !Loan.Liability() || Deposit.Liability() || Loan.KeptByHand() != true || CreditCard.KeptByHand() {
+		t.Fatal("sides or keeping by hand wrong")
+	}
+}

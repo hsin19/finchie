@@ -41,6 +41,7 @@ const (
 	AccountKindCreditCard AccountKind = "credit_card"
 	AccountKindDeposit    AccountKind = "deposit"
 	AccountKindExchange   AccountKind = "exchange"
+	AccountKindLoan       AccountKind = "loan"
 	AccountKindPoints     AccountKind = "points"
 	AccountKindSecurities AccountKind = "securities"
 )
@@ -54,9 +55,29 @@ func (e AccountKind) Valid() bool {
 		return true
 	case AccountKindExchange:
 		return true
+	case AccountKindLoan:
+		return true
 	case AccountKindPoints:
 		return true
 	case AccountKindSecurities:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountSide.
+const (
+	Asset     AccountSide = "asset"
+	Liability AccountSide = "liability"
+)
+
+// Valid indicates whether the value is a known member of the AccountSide enum.
+func (e AccountSide) Valid() bool {
+	switch e {
+	case Asset:
+		return true
+	case Liability:
 		return true
 	default:
 		return false
@@ -120,6 +141,24 @@ func (e DocumentStatus) Valid() bool {
 	case Pending:
 		return true
 	case Skipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HistoryStep.
+const (
+	Day   HistoryStep = "day"
+	Month HistoryStep = "month"
+)
+
+// Valid indicates whether the value is a known member of the HistoryStep enum.
+func (e HistoryStep) Valid() bool {
+	switch e {
+	case Day:
+		return true
+	case Month:
 		return true
 	default:
 		return false
@@ -304,10 +343,13 @@ type Account struct {
 	// Name The owner's name for it
 	Name *string `json:"name,omitempty"`
 
-	// Number As printed, usually masked; empty for a card bill
+	// Number As printed, usually masked; empty for a bank's card or points account
 	//
 	// Example: 1234567***890
 	Number string `json:"number"`
+
+	// Side A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)
+	Side AccountSide `json:"side"`
 
 	// Valuation What a source says the whole account is worth (ADR 0018): an exchange, by its own prices
 	Valuation *Valuation `json:"valuation,omitempty"`
@@ -369,13 +411,16 @@ type AccountDetail struct {
 	// Name The owner's name for it
 	Name *string `json:"name,omitempty"`
 
-	// Number As printed, usually masked; empty for a card bill
+	// Number As printed, usually masked; empty for a bank's card or points account
 	//
 	// Example: 1234567***890
 	Number string `json:"number"`
 
 	// Positions A securities account's: every security it holds or has traded, by name (ADR 0017)
 	Positions *[]Position `json:"positions,omitempty"`
+
+	// Side A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)
+	Side AccountSide `json:"side"`
 
 	// Valuation What a source says the whole account is worth (ADR 0018): an exchange, by its own prices
 	Valuation *Valuation `json:"valuation,omitempty"`
@@ -416,6 +461,9 @@ type AccountLine struct {
 	Trade *Trade `json:"trade,omitempty"`
 	Unit  string `json:"unit"`
 }
+
+// AccountSide A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)
+type AccountSide string
 
 // AccountTotal defines model for AccountTotal.
 type AccountTotal struct {
@@ -491,6 +539,27 @@ type CardTotal struct {
 	CardLast4   *string `json:"cardLast4,omitempty"`
 	Count       int     `json:"count"`
 	Institution string  `json:"institution"`
+}
+
+// Check defines model for Check.
+type Check struct {
+	Balanced bool `json:"balanced"`
+
+	// Computed Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Computed Decimal `json:"computed"`
+
+	// Name The statement's own label for the figure, e.g. 本期新增款項
+	Name string `json:"name"`
+
+	// Stated Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Stated Decimal `json:"stated"`
+
+	// Unit What both are in, as printed; empty when the statement prints none
+	Unit string `json:"unit"`
 }
 
 // Decimal Decimal number as a string, e.g. "-6552.97"
@@ -588,6 +657,9 @@ type Expiry struct {
 	Unit string `json:"unit"`
 }
 
+// HistoryStep Every day, or the last day of each month
+type HistoryStep string
+
 // HoldingsUpdate defines model for HoldingsUpdate.
 type HoldingsUpdate struct {
 	Holdings []struct {
@@ -657,31 +729,52 @@ type LineCounterpart struct {
 
 // NetWorth defines model for NetWorth.
 type NetWorth struct {
-	ByKind []KindWorth `json:"byKind"`
-
-	// Holdings Decimal number as a string, e.g. "-6552.97"
+	// Assets Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Holdings Decimal `json:"holdings"`
+	Assets Decimal `json:"assets"`
+
+	// Behind Accounts whose newest report is older than the day
+	Behind []int64     `json:"behind"`
+	ByKind []KindWorth `json:"byKind"`
+
+	// CompleteAsOf The newest day every account had reported by; absent when none has
+	CompleteAsOf *openapi_types.Date `json:"completeAsOf,omitempty"`
+
+	// Liabilities Negative
+	Liabilities Decimal `json:"liabilities"`
 
 	// Net Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Net Decimal `json:"net"`
+	Net Decimal            `json:"net"`
+	On  openapi_types.Date `json:"on"`
 
-	// Owed Decimal number as a string, e.g. "-6552.97"
+	// Unvalued Accounts without a worth on the day, left out
+	Unvalued int `json:"unvalued"`
+}
+
+// NetWorthPoint defines model for NetWorthPoint.
+type NetWorthPoint struct {
+	// Assets Decimal number as a string, e.g. "-6552.97"
 	//
 	// Example: 1234.50
-	Owed Decimal `json:"owed"`
+	Assets Decimal `json:"assets"`
 
-	// OwedElsewhere Unpaid bills in another currency than NT$, left out of owed
-	OwedElsewhere int `json:"owedElsewhere"`
+	// Complete Every account had reported by the day: the figure is exact
+	Complete bool `json:"complete"`
 
-	// UnpaidBills The statements that make up what is owed
-	UnpaidBills []int64 `json:"unpaidBills"`
+	// Liabilities Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Liabilities Decimal `json:"liabilities"`
 
-	// Unvalued Accounts without a worth, left out of holdings
-	Unvalued int `json:"unvalued"`
+	// Net Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Net      Decimal            `json:"net"`
+	On       openapi_types.Date `json:"on"`
+	Unvalued int                `json:"unvalued"`
 }
 
 // Position A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017).
@@ -753,22 +846,6 @@ type Problem struct {
 	Message string `json:"message"`
 }
 
-// Reconciliation defines model for Reconciliation.
-type Reconciliation struct {
-	Balanced bool `json:"balanced"`
-
-	// Computed Decimal number as a string, e.g. "-6552.97"
-	//
-	// Example: 1234.50
-	Computed Decimal `json:"computed"`
-
-	// Stated Decimal number as a string, e.g. "-6552.97"
-	//
-	// Example: 1234.50
-	Stated      Decimal `json:"stated"`
-	StatedLabel string  `json:"statedLabel"`
-}
-
 // Settings defines model for Settings.
 type Settings struct {
 	// BaseCurrency What every worth is in, e.g. TWD
@@ -794,6 +871,11 @@ type StateCount struct {
 
 // Statement defines model for Statement.
 type Statement struct {
+	// Balanced Every check balances
+	Balanced bool `json:"balanced"`
+
+	// Checks Every figure the bill prints that its lines are checked against, in its order (ADR 0021)
+	Checks      []Check            `json:"checks"`
 	ClosingDate openapi_types.Date `json:"closingDate"`
 
 	// Currency Example: TWD
@@ -806,8 +888,7 @@ type Statement struct {
 	Institution string `json:"institution"`
 
 	// PaidOn When a deposit account or a later bill showed it paid (ADR 0016); absent while that is not known
-	PaidOn         *openapi_types.Date `json:"paidOn,omitempty"`
-	Reconciliation Reconciliation      `json:"reconciliation"`
+	PaidOn *openapi_types.Date `json:"paidOn,omitempty"`
 
 	// TotalDue Decimal number as a string, e.g. "-6552.97"
 	//
@@ -1052,6 +1133,19 @@ type UploadDocumentMultipartBody struct {
 	File openapi_types.File `json:"file"`
 }
 
+// GetNetWorthParams defines parameters for GetNetWorth.
+type GetNetWorthParams struct {
+	// On The day, Taipei's today when left out
+	On *openapi_types.Date `form:"on,omitempty" json:"on,omitempty"`
+}
+
+// GetNetWorthHistoryParams defines parameters for GetNetWorthHistory.
+type GetNetWorthHistoryParams struct {
+	From openapi_types.Date  `form:"from" json:"from"`
+	To   *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+	Step *HistoryStep        `form:"step,omitempty" json:"step,omitempty"`
+}
+
 // ListStatementsParams defines parameters for ListStatements.
 type ListStatementsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1169,9 +1263,12 @@ type ServerInterface interface {
 	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
 	// (GET /api/mail-filters.xml)
 	GetMailFilters(ctx *echo.Context) error
-	// GetNetWorth What the owner has less what they owe on cards, in NT$
+	// GetNetWorth What the owner has less what they owe, in NT$, on a day
 	// (GET /api/net-worth)
-	GetNetWorth(ctx *echo.Context) error
+	GetNetWorth(ctx *echo.Context, params GetNetWorthParams) error
+	// GetNetWorthHistory Net worth over time, by day or by month end
+	// (GET /api/net-worth/history)
+	GetNetWorthHistory(ctx *echo.Context, params GetNetWorthHistoryParams) error
 	// GetSettings The deployment's settings the web app shows or obeys
 	// (GET /api/settings)
 	GetSettings(ctx *echo.Context) error
@@ -1492,8 +1589,49 @@ func (w *ServerInterfaceWrapper) GetMailFilters(ctx *echo.Context) error {
 func (w *ServerInterfaceWrapper) GetNetWorth(ctx *echo.Context) error {
 	var err error
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetNetWorthParams
+	// ------------- Optional query parameter "on" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "on", ctx.QueryParams(), &params.On, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter on: %s", err))
+	}
+
 	// Invoke the callback with all the unmarshaled arguments
-	err = w.Handler.GetNetWorth(ctx)
+	err = w.Handler.GetNetWorth(ctx, params)
+	return err
+}
+
+// GetNetWorthHistory converts echo context to params.
+func (w *ServerInterfaceWrapper) GetNetWorthHistory(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetNetWorthHistoryParams
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", ctx.QueryParams(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter from: %s", err))
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", ctx.QueryParams(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter to: %s", err))
+	}
+
+	// ------------- Optional query parameter "step" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "step", ctx.QueryParams(), &params.Step, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter step: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetNetWorthHistory(ctx, params)
 	return err
 }
 
@@ -1804,6 +1942,7 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.PUT(options.BaseURL+"/api/units/:id/price", wrapper.SetUnitPrice, options.OperationMiddlewares["setUnitPrice"]...)
 	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
 	router.GET(options.BaseURL+"/api/net-worth", wrapper.GetNetWorth, options.OperationMiddlewares["getNetWorth"]...)
+	router.GET(options.BaseURL+"/api/net-worth/history", wrapper.GetNetWorthHistory, options.OperationMiddlewares["getNetWorthHistory"]...)
 	router.GET(options.BaseURL+"/api/settings", wrapper.GetSettings, options.OperationMiddlewares["getSettings"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
@@ -2669,6 +2808,7 @@ func (response GetMailFilters404JSONResponse) VisitGetMailFiltersResponse(w http
 }
 
 type GetNetWorthRequestObject struct {
+	Params GetNetWorthParams
 }
 
 type GetNetWorthResponseObject interface {
@@ -2685,6 +2825,42 @@ func (response GetNetWorth200JSONResponse) VisitGetNetWorthResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNetWorthHistoryRequestObject struct {
+	Params GetNetWorthHistoryParams
+}
+
+type GetNetWorthHistoryResponseObject interface {
+	VisitGetNetWorthHistoryResponse(w http.ResponseWriter) error
+}
+
+type GetNetWorthHistory200JSONResponse []NetWorthPoint
+
+func (response GetNetWorthHistory200JSONResponse) VisitGetNetWorthHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNetWorthHistory400JSONResponse struct{ ProblemJSONResponse }
+
+func (response GetNetWorthHistory400JSONResponse) VisitGetNetWorthHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3009,9 +3185,12 @@ type StrictServerInterface interface {
 	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
 	// (GET /api/mail-filters.xml)
 	GetMailFilters(ctx context.Context, request GetMailFiltersRequestObject) (GetMailFiltersResponseObject, error)
-	// GetNetWorth What the owner has less what they owe on cards, in NT$
+	// GetNetWorth What the owner has less what they owe, in NT$, on a day
 	// (GET /api/net-worth)
 	GetNetWorth(ctx context.Context, request GetNetWorthRequestObject) (GetNetWorthResponseObject, error)
+	// GetNetWorthHistory Net worth over time, by day or by month end
+	// (GET /api/net-worth/history)
+	GetNetWorthHistory(ctx context.Context, request GetNetWorthHistoryRequestObject) (GetNetWorthHistoryResponseObject, error)
 	// GetSettings The deployment's settings the web app shows or obeys
 	// (GET /api/settings)
 	GetSettings(ctx context.Context, request GetSettingsRequestObject) (GetSettingsResponseObject, error)
@@ -3523,8 +3702,10 @@ func (sh *strictHandler) GetMailFilters(ctx *echo.Context) error {
 }
 
 // GetNetWorth operation middleware
-func (sh *strictHandler) GetNetWorth(ctx *echo.Context) error {
+func (sh *strictHandler) GetNetWorth(ctx *echo.Context, params GetNetWorthParams) error {
 	var request GetNetWorthRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.GetNetWorth(ctx.Request().Context(), request.(GetNetWorthRequestObject))
@@ -3539,6 +3720,31 @@ func (sh *strictHandler) GetNetWorth(ctx *echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(GetNetWorthResponseObject); ok {
 		return validResponse.VisitGetNetWorthResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetNetWorthHistory operation middleware
+func (sh *strictHandler) GetNetWorthHistory(ctx *echo.Context, params GetNetWorthHistoryParams) error {
+	var request GetNetWorthHistoryRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNetWorthHistory(ctx.Request().Context(), request.(GetNetWorthHistoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNetWorthHistory")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetNetWorthHistoryResponseObject); ok {
+		return validResponse.VisitGetNetWorthHistoryResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

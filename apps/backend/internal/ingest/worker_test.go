@@ -17,36 +17,36 @@ import (
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
 // fakeParser answers ParseDocument and DescribeParsers; the worker never calls the embedded (nil)
 // OpenDocument.
 type fakeParser struct {
-	parserv1.ParserServiceClient
-	response *parserv1.ParseDocumentResponse
+	parserv2.ParserServiceClient
+	response *parserv2.ParseDocumentResponse
 	err      error
-	requests []*parserv1.ParseDocumentRequest
+	requests []*parserv2.ParseDocumentRequest
 	// What DescribeParsers says: the parser of response at its version, and this instance.
 	instance string
 }
 
-func (f *fakeParser) DescribeParsers(context.Context, *parserv1.DescribeParsersRequest, ...grpc.CallOption) (*parserv1.DescribeParsersResponse, error) {
-	described := &parserv1.DescribeParsersResponse{Instance: f.instance}
+func (f *fakeParser) DescribeParsers(context.Context, *parserv2.DescribeParsersRequest, ...grpc.CallOption) (*parserv2.DescribeParsersResponse, error) {
+	described := &parserv2.DescribeParsersResponse{Instance: f.instance}
 	if f.response != nil {
-		described.Parsers = []*parserv1.ParserVersion{{Name: f.response.GetParser(), Version: f.response.GetParserVersion()}}
+		described.Parsers = []*parserv2.ParserVersion{{Name: f.response.GetParser(), Version: f.response.GetParserVersion()}}
 	}
 	return described, nil
 }
 
-func (f *fakeParser) ParseDocument(_ context.Context, in *parserv1.ParseDocumentRequest, _ ...grpc.CallOption) (*parserv1.ParseDocumentResponse, error) {
+func (f *fakeParser) ParseDocument(_ context.Context, in *parserv2.ParseDocumentRequest, _ ...grpc.CallOption) (*parserv2.ParseDocumentResponse, error) {
 	f.requests = append(f.requests, in)
 	return f.response, f.err
 }
 
-func parsed(statement *parserv1.Statement, warnings ...string) *fakeParser {
-	return &fakeParser{instance: "a", response: &parserv1.ParseDocumentResponse{
+func parsed(statement *parserv2.Statement, warnings ...string) *fakeParser {
+	return &fakeParser{instance: "a", response: &parserv2.ParseDocumentResponse{
 		Parser: "hsbc.credit_card", ParserVersion: "1", Statement: statement, Warnings: warnings,
 	}}
 }
@@ -102,7 +102,7 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 
 	request := parser.requests[0]
-	if request.GetDocumentId() != "1" || request.GetFilename() != "october.eml" || string(request.GetContent()) != "raw october.eml" {
+	if request.GetDocumentId() != "1" || string(request.GetContent()) != "raw october.eml" {
 		t.Fatalf("request = %v", request)
 	}
 	doc := document(t, pool, id)
@@ -121,9 +121,9 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 }
 
-func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
+func TestABillsLinesAndWhatItOwesGoToItsBanksCardAccount(t *testing.T) {
 	pool := testdb.Pool(t)
-	store := func(name string, statement *parserv1.Statement) {
+	store := func(name string, statement *parserv2.Statement) {
 		t.Helper()
 		if err := NewWorker(pool, parsed(statement), time.Minute).Work(t.Context(), job(addDocument(t, pool, name), 1, 6)); err != nil {
 			t.Fatal(err)
@@ -150,9 +150,13 @@ func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
 	other := sampleStatement(true)
 	other.Institution = "taishin"
 	store("taishin.eml", other)
-	// One account per bank, and no balance: what a bill says is owed stays on the bill (ADR 0013).
-	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 0 {
+	// One account per bank, a liability whose balance on each closing date is what that bill owes (ADR 0022).
+	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 3 {
 		t.Fatalf("accounts = %d, balances = %d", countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
+	}
+	var owed string
+	if err := pool.QueryRow(t.Context(), "SELECT amount::text FROM balances WHERE account_id = $1 ORDER BY as_of DESC LIMIT 1", account).Scan(&owed); err != nil || owed != "-40010" {
+		t.Fatalf("newest balance = %s (%v), want the bill's total due as printed", owed, err)
 	}
 }
 
@@ -211,7 +215,7 @@ func TestReparsingReplacesThePreviousResult(t *testing.T) {
 	before := statementOf(t, pool, id)
 
 	fixed := sampleStatement(true)
-	fixed.Transactions = fixed.Transactions[:1]
+	fixed.Accounts[0].Lines = fixed.Accounts[0].Lines[:1]
 	if err := NewWorker(pool, parsed(fixed), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +291,7 @@ func TestStoreErrorsFailTheDocumentOnTheLastAttempt(t *testing.T) {
 	id := addDocument(t, pool, "rejected.eml")
 	statement := sampleStatement(true)
 	// Valid for the parser contract, but Postgres rejects it: currency is CHAR(3).
-	statement.Currency = "TWDX"
+	statement.CardBill.Currency = "TWDX"
 	worker := NewWorker(pool, parsed(statement), time.Minute)
 
 	err := worker.Work(t.Context(), job(id, 1, 6))
@@ -314,7 +318,7 @@ func TestWorkerFailsAResponseWithANonFiniteAmount(t *testing.T) {
 	pool := testdb.Pool(t)
 	id := addDocument(t, pool, "nan.eml")
 	statement := sampleStatement(true)
-	statement.Transactions[0].Amount.Value = "NaN"
+	statement.Accounts[0].Lines[0].Amount.Value = "NaN"
 
 	err := NewWorker(pool, parsed(statement), time.Minute).Work(t.Context(), job(id, 1, 6))
 
@@ -337,7 +341,7 @@ type stoppingParser struct {
 	stop context.CancelFunc
 }
 
-func (p stoppingParser) ParseDocument(ctx context.Context, in *parserv1.ParseDocumentRequest, opts ...grpc.CallOption) (*parserv1.ParseDocumentResponse, error) {
+func (p stoppingParser) ParseDocument(ctx context.Context, in *parserv2.ParseDocumentRequest, opts ...grpc.CallOption) (*parserv2.ParseDocumentResponse, error) {
 	p.stop()
 	return p.fakeParser.ParseDocument(ctx, in, opts...)
 }

@@ -50,7 +50,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		history = append(history, toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID))
 	}
 	detail := AccountDetail{
-		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Number: account.Number,
+		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Side: account.Side, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
 		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
 		Gaps: account.Gaps, Expiries: account.Expiries, History: history,
@@ -135,8 +135,12 @@ func toAccount(row dbq.ListAccountsRow, latest []dbq.LatestBalancesRow, gaps dom
 	}
 	standing := domain.Assess(row.Kind, balances, gaps, valued)
 
+	side := Asset
+	if row.Kind.Liability() {
+		side = Liability
+	}
 	account := Account{
-		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Number: row.Number,
+		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Side: side, Number: row.Number,
 		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Continuity: AccountContinuity(standing.Continuity),
 		Balances: make([]Balance, 0, len(standing.Held)), Gaps: make([]BalanceGap, 0, len(gaps.Unseen)), Expiries: []Expiry{},
 	}

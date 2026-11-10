@@ -17,7 +17,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
@@ -28,7 +28,7 @@ func newAPI(t *testing.T, maxUploadBytes int64) (*echo.Echo, *pgxpool.Pool) {
 
 const testMailbox = "finchie@mailbox.example"
 
-func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv1.ParserServiceClient) (*echo.Echo, *pgxpool.Pool) {
+func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv2.ParserServiceClient) (*echo.Echo, *pgxpool.Pool) {
 	t.Helper()
 	pool := testdb.Pool(t)
 	// Insert-only client: jobs are queued but nothing works them in these tests.

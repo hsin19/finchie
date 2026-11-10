@@ -13,24 +13,23 @@ INSERT INTO balances (account_id, unit_id, as_of, amount, statement_id)
 VALUES (@account_id, @unit_id, @as_of, @amount, @statement_id::bigint);
 
 -- name: ListAccounts :many
--- The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013). Of one
--- account, or with none, of all.
+-- The owner's accounts, assets and liabilities alike (ADR 0022). Of one account, or with none, of all.
 SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
-WHERE kind <> 'credit_card' AND (sqlc.narg(id)::bigint IS NULL OR id = sqlc.narg(id)::bigint)
+WHERE sqlc.narg(id)::bigint IS NULL OR id = sqlc.narg(id)::bigint
 ORDER BY institution, kind DESC, number;
 
 -- name: GetAccount :one
 SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
-WHERE id = @id AND kind <> 'credit_card';
+WHERE id = @id;
 
 -- name: UpdateAccountDetails :one
 -- The owner's details (ADR 0016); a set flag that is false leaves its column as it is.
 UPDATE accounts
 SET name        = CASE WHEN @set_name::boolean THEN sqlc.narg(name)::text ELSE name END,
     full_number = CASE WHEN @set_full_number::boolean THEN sqlc.narg(full_number)::text ELSE full_number END
-WHERE id = @id AND kind <> 'credit_card'
+WHERE id = @id
 RETURNING id;
 
 -- name: LatestBalances :many
@@ -124,3 +123,48 @@ LEFT JOIN accounts ca ON ca.id = c.account_id
 WHERE t.account_id = @account_id
 ORDER BY t.transaction_date DESC, t.statement_id DESC, t.line_no DESC
 LIMIT @row_limit OFFSET @row_offset;
+
+-- name: BalancesOn :many
+-- What each account held of each unit at the end of each day (ADR 0023): its newest balance on or before
+-- the day, and for the itemized kinds the lines dated after that balance up to the day; with its worth in
+-- NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
+WITH days AS (
+    SELECT d::date AS day FROM unnest(@days::date[]) d
+), held AS (
+    SELECT DISTINCT ON (d.day, b.account_id, b.unit_id) d.day, b.account_id, b.unit_id, b.as_of, b.amount, b.statement_id
+    FROM days d
+    JOIN balances b ON b.as_of <= d.day
+    ORDER BY d.day, b.account_id, b.unit_id, b.as_of DESC, b.id DESC
+), moved AS (
+    SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
+           (h.amount + CASE WHEN a.kind = ANY (@itemized::text[]) THEN coalesce((
+               SELECT sum(t.amount) FROM transactions t
+               WHERE t.account_id = h.account_id AND t.unit_id = h.unit_id
+                 AND t.transaction_date > h.as_of AND t.transaction_date <= h.day), 0) ELSE 0 END)::numeric AS amount
+    FROM held h
+    JOIN accounts a ON a.id = h.account_id
+)
+SELECT m.day::date AS day, m.account_id, u.symbol AS unit, m.as_of, m.amount, m.statement_id,
+       round(m.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
+FROM moved m
+JOIN units u ON u.id = m.unit_id
+LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+    AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
+ORDER BY m.day, m.account_id, u.symbol;
+
+-- name: ValuationsOn :many
+-- Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then.
+WITH days AS (
+    SELECT d::date AS day FROM unnest(@days::date[]) d
+), valued AS (
+    SELECT DISTINCT ON (d.day, v.account_id) d.day, v.account_id, v.unit_id, v.as_of, v.amount
+    FROM days d
+    JOIN valuations v ON v.as_of <= d.day
+    ORDER BY d.day, v.account_id, v.as_of DESC
+)
+SELECT v.day::date AS day, v.account_id, v.as_of,
+       round(v.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
+FROM valued v
+LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+    AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
+ORDER BY v.day, v.account_id;

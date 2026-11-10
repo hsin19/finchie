@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 	gdate "google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/exchanges"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
@@ -40,25 +40,17 @@ func storeDeposit(t *testing.T, pool *pgxpool.Pool, month int32, closing string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	account := &parserv1.DepositAccount{Number: savings, Name: "臺幣活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: closing}}
-	for _, l := range lines {
-		account.Lines = append(account.Lines, &parserv1.DepositLine{
-			Date: &gdate.Date{Year: 2026, Month: month, Day: l.day}, Description: l.description, Memo: l.memo, Counterparty: l.opposite,
-			Amount: &decimal.Decimal{Value: l.amount}, Balance: &decimal.Decimal{Value: l.after},
-			Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-		})
-	}
 	last := map[int32]int32{4: 30, 6: 30, 9: 30, 11: 30}[month]
 	if last == 0 {
 		last = 31
 	}
-	statement := &parserv1.DepositStatement{
-		Institution: "esun",
-		PeriodStart: &gdate.Date{Year: 2026, Month: month, Day: 1},
-		PeriodEnd:   &gdate.Date{Year: 2026, Month: month, Day: last},
-		Accounts:    []*parserv1.DepositAccount{account},
+	account := pt.DepositAccount(savings, "臺幣活存", []*parserv2.Balance{pt.Balance("TWD", pt.Day(month, last), closing)})
+	for _, l := range lines {
+		account.Lines = append(account.Lines, pt.DepositLine(pt.Day(month, l.day), l.description, "TWD", l.amount, l.after,
+			pt.Memo(l.memo), pt.Counterparty(l.opposite)))
 	}
-	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
+	statement := pt.Deposit("esun", pt.Day(month, 1), pt.Day(month, last), account)
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", pt.Response("esun.deposit", statement)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -88,25 +80,18 @@ func TestAMonthSkippedWithoutActivityIsNoGap(t *testing.T) {
 
 func TestAnAccountItsStatementsListOnlyTheBalanceOfIsNotChecked(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
-	line := func(month int32, amount string) *parserv1.DepositLine {
-		return &parserv1.DepositLine{
-			Date: &gdate.Date{Year: 2026, Month: month, Day: 1}, Description: "轉入",
-			Amount: &decimal.Decimal{Value: amount}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-		}
+	line := func(month int32, amount string) *parserv2.Line {
+		return pt.DepositLine(pt.Day(month, 1), "轉入", "TWD", amount, "")
 	}
 	// As CTBC's: a passbook savings account (活儲有摺) by its balance only, beside an account with lines
 	// and one no line has moved yet.
-	statement := func(month int32, passbook, current string, lines ...*parserv1.DepositLine) *parserv1.ParseDocumentResponse {
-		return &parserv1.ParseDocumentResponse{Parser: "ctbc.deposit", DepositStatement: &parserv1.DepositStatement{
-			Institution: "ctbc",
-			PeriodStart: &gdate.Date{Year: 2026, Month: month - 1, Day: 13},
-			PeriodEnd:   &gdate.Date{Year: 2026, Month: month, Day: 12},
-			Accounts: []*parserv1.DepositAccount{
-				{Number: "11111**2222*", Name: "活儲有摺", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: passbook}},
-				{Number: "33333**4444*", Name: "台幣數二", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: current}, Lines: lines},
-				{Number: "55555**6666*", Name: "外幣活期", Currency: "USD", ClosingBalance: &decimal.Decimal{Value: "12.34"}},
-			},
-		}}
+	statement := func(month int32, passbook, current string, lines ...*parserv2.Line) *parserv2.ParseDocumentResponse {
+		closing := pt.Day(month, 12)
+		return pt.Response("ctbc.deposit", pt.Deposit("ctbc", pt.Day(month-1, 13), closing,
+			pt.DepositAccount("11111**2222*", "活儲有摺", []*parserv2.Balance{pt.Balance("TWD", closing, passbook)}),
+			pt.DepositAccount("33333**4444*", "台幣數二", []*parserv2.Balance{pt.Balance("TWD", closing, current)}, lines...),
+			pt.DepositAccount("55555**6666*", "外幣活期", []*parserv2.Balance{pt.Balance("USD", closing, "12.34")}),
+		))
 	}
 	store(t, pool, "june.eml", statement(6, "1000", "500", line(6, "500")))
 	// The passbook account earned 26 no statement lists; 100 came into the other one unseen too.
@@ -131,20 +116,14 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 	storeDeposit(t, pool, 9, "1500", depositLine{day: 5, amount: "500", after: "1500", description: "ATM跨行轉", memo: "永*銀行", opposite: "807 0000000000***123"})
 	// October's statement is missing, and 800 came in that month: November starts from 2300, not 1500.
 	storeDeposit(t, pool, 11, "2500", depositLine{day: 3, amount: "200", after: "2500", description: "利息"})
-	bill := &parserv1.Statement{
-		Institution: "esun", ClosingDate: &gdate.Date{Year: 2026, Month: 10, Day: 7}, DueDate: &gdate.Date{Year: 2026, Month: 10, Day: 22},
-		Currency: "TWD", TotalDue: &decimal.Decimal{Value: "300"},
-		Transactions: []*parserv1.Transaction{{
-			TransactionDate: &gdate.Date{Year: 2026, Month: 9, Day: 30}, Description: "SHOP",
-			Kind: parserv1.TransactionKind_TRANSACTION_KIND_PURCHASE, Amount: &decimal.Decimal{Value: "300"},
-		}},
-		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "300"}, Stated: &decimal.Decimal{Value: "300"}, StatedLabel: "x"},
-	}
+	bill := pt.Bill("esun", pt.Day(10, 7), pt.Day(10, 22), "300",
+		pt.CardLine(pt.Day(9, 30), "SHOP", parserv2.LineKind_LINE_KIND_PURCHASE, "300"))
+	bill.Checks = []*parserv2.Check{pt.Check("x", "TWD", "300", "300")}
 	doc, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{Sha256: []byte("bill"), Filename: "bill.eml", ContentType: "message/rfc822", Content: []byte("From: bank")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: bill}); err != nil {
+	if _, err := ingest.Store(t.Context(), pool, doc.ID, "", pt.Response("esun.credit_card", bill)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,17 +141,27 @@ func TestAccountsShowTheirNewestBalanceAndWhereMoneyMovedUnseen(t *testing.T) {
 	if gap := deposit.Gaps[0]; gap.From.String() != "2026-09-30" || gap.To.String() != "2026-11-30" || gap.Unseen != "800" || gap.Unit != "TWD" {
 		t.Fatalf("gap = %+v", gap)
 	}
-	// A card bill holds no balance and is no account the owner has: it is not listed (ADR 0013).
+	// The bank's card account is a liability: what its bill owes, taken off (ADR 0022).
+	var card Account
 	for _, a := range accounts {
 		if a.Kind == AccountKindCreditCard {
-			t.Fatalf("card account listed: %+v", a)
+			card = a
 		}
 	}
-	// What the bill owes, never shown paid, comes off what the account is worth.
-	net := decode[NetWorth](t, get(t, e, "/api/net-worth"))
-	if net.Holdings != "2500.00" || net.Owed != "300.00" || net.Net != "2200.00" || len(net.UnpaidBills) != 1 || net.Unvalued != 0 ||
-		len(net.ByKind) != 1 || net.ByKind[0].Kind != AccountKindDeposit {
+	if card.Side != Liability || card.Worth == nil || *card.Worth != "-300.00" || len(card.Balances) != 1 || card.Balances[0].Amount != "300" {
+		t.Fatalf("card account = %+v", card)
+	}
+	if deposit.Side != Asset {
+		t.Fatalf("deposit side = %s", deposit.Side)
+	}
+	net := decode[NetWorth](t, get(t, e, "/api/net-worth?on=2026-11-30"))
+	if net.Assets != "2500.00" || net.Liabilities != "-300.00" || net.Net != "2200.00" || net.Unvalued != 0 || len(net.ByKind) != 2 ||
+		net.ByKind[0].Kind != AccountKindDeposit || net.ByKind[1].Kind != AccountKindCreditCard {
 		t.Fatalf("net worth = %+v", net)
+	}
+	// The bill closed on 10/7, the deposit statement on 11/30: exact up to 10/7, and the card is behind after it.
+	if net.CompleteAsOf == nil || net.CompleteAsOf.String() != "2026-10-07" || len(net.Behind) != 1 || net.Behind[0] != card.Id {
+		t.Fatalf("complete as of %v, behind %v", net.CompleteAsOf, net.Behind)
 	}
 
 	path := fmt.Sprintf("/api/accounts/%d", deposit.Id)
@@ -205,21 +194,16 @@ func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	balance := func(number, currency, closing string) *parserv1.DepositAccount {
-		return &parserv1.DepositAccount{Number: number, Name: "外幣活存", Currency: currency, ClosingBalance: &decimal.Decimal{Value: closing}}
+	end := pt.Day(10, 31)
+	balance := func(number string, balances ...*parserv2.Balance) *parserv2.AccountReport {
+		return pt.DepositAccount(number, "外幣活存", balances)
 	}
-	statement := &parserv1.DepositStatement{
-		Institution: "esun",
-		PeriodStart: &gdate.Date{Year: 2026, Month: 10, Day: 1},
-		PeriodEnd:   &gdate.Date{Year: 2026, Month: 10, Day: 31},
-		Accounts: []*parserv1.DepositAccount{
-			balance(savings, "TWD", "1000"),
-			balance("7777777***777", "USD", "10.50"),
-			balance("8888888***888", "USD", "100"),
-			balance("8888888***888", "JPY", "500"),
-		},
-	}
-	if _, err := ingest.Store(ctx, pool, doc.ID, "", &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: statement}); err != nil {
+	statement := pt.Deposit("esun", pt.Day(10, 1), end,
+		balance(savings, pt.Balance("TWD", end, "1000")),
+		balance("7777777***777", pt.Balance("USD", end, "10.50")),
+		balance("8888888***888", pt.Balance("USD", end, "100"), pt.Balance("JPY", end, "500")),
+	)
+	if _, err := ingest.Store(ctx, pool, doc.ID, "", pt.Response("esun.deposit", statement)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -253,7 +237,7 @@ func patch(t *testing.T, e *echo.Echo, path, body string) *httptest.ResponseReco
 }
 
 // store stores a parsed document the way the ingest worker would, and returns the document's ID.
-func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.ParseDocumentResponse) int64 {
+func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv2.ParseDocumentResponse) int64 {
 	t.Helper()
 	doc, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
 		Sha256: []byte(name), Filename: name, ContentType: "message/rfc822", Content: []byte("From: bank"),
@@ -267,39 +251,23 @@ func store(t *testing.T, pool *pgxpool.Pool, name string, response *parserv1.Par
 	return doc.ID
 }
 
-func septemberLine(day int32, amount, description, counterparty string) *parserv1.DepositLine {
-	return &parserv1.DepositLine{
-		Date: &gdate.Date{Year: 2026, Month: 9, Day: day}, Description: description, Counterparty: counterparty,
-		Amount: &decimal.Decimal{Value: amount}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-	}
+func septemberLine(day int32, amount, description, counterparty string) *parserv2.Line {
+	return pt.DepositLine(pt.Day(9, day), description, "TWD", amount, "", pt.Counterparty(counterparty))
 }
 
 // septemberDeposit is one account's statement for September 2026.
-func septemberDeposit(institution, number, closing string, lines ...*parserv1.DepositLine) *parserv1.ParseDocumentResponse {
-	return &parserv1.ParseDocumentResponse{Parser: institution + ".deposit", DepositStatement: &parserv1.DepositStatement{
-		Institution: institution,
-		PeriodStart: &gdate.Date{Year: 2026, Month: 9, Day: 1},
-		PeriodEnd:   &gdate.Date{Year: 2026, Month: 9, Day: 30},
-		Accounts: []*parserv1.DepositAccount{{
-			Number: number, Name: "活存", Currency: "TWD", ClosingBalance: &decimal.Decimal{Value: closing}, Lines: lines,
-		}},
-	}}
+func septemberDeposit(institution, number, closing string, lines ...*parserv2.Line) *parserv2.ParseDocumentResponse {
+	return pt.Response(institution+".deposit", pt.Deposit(institution, pt.Day(9, 1), pt.Day(9, 30),
+		pt.DepositAccount(number, "活存", []*parserv2.Balance{pt.Balance("TWD", pt.Day(9, 30), closing)}, lines...)))
 }
 
 // septemberBill is E.SUN's card bill closing 9/7, due 9/22.
-func septemberBill(totalDue string, lines ...*parserv1.Transaction) *parserv1.ParseDocumentResponse {
-	return &parserv1.ParseDocumentResponse{Parser: "esun.credit_card", Statement: &parserv1.Statement{
-		Institution: "esun", ClosingDate: &gdate.Date{Year: 2026, Month: 9, Day: 7}, DueDate: &gdate.Date{Year: 2026, Month: 9, Day: 22},
-		Currency: "TWD", TotalDue: &decimal.Decimal{Value: totalDue}, Transactions: lines,
-		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "0"}, Stated: &decimal.Decimal{Value: "0"}, StatedLabel: "x"},
-	}}
+func septemberBill(totalDue string, lines ...*parserv2.Line) *parserv2.ParseDocumentResponse {
+	return pt.Response("esun.credit_card", pt.Bill("esun", pt.Day(9, 7), pt.Day(9, 22), totalDue, lines...))
 }
 
-func cardLine(day int32, kind parserv1.TransactionKind, amount, description, card string) *parserv1.Transaction {
-	return &parserv1.Transaction{
-		TransactionDate: &gdate.Date{Year: 2026, Month: 9, Day: day}, Description: description, Kind: kind,
-		Amount: &decimal.Decimal{Value: amount}, CardLast4: card,
-	}
+func cardLine(day int32, kind parserv2.LineKind, amount, description, card string) *parserv2.Line {
+	return pt.CardLine(pt.Day(9, day), description, kind, amount, pt.OnCard(card))
 }
 
 func TestTheOwnerNamesAnAccountAndGivesItsFullNumberWhichMustFit(t *testing.T) {
@@ -343,7 +311,7 @@ func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 	))
 	store(t, pool, "taishin.eml", septemberDeposit("taishin", "876543****9234", "5000", septemberLine(25, "5000", "CD轉入", "")))
 	store(t, pool, "bill.eml", septemberBill("6350",
-		cardLine(22, parserv1.TransactionKind_TRANSACTION_KIND_PAYMENT, "-6350", "感謝您辦理本行自動轉帳繳款", "")))
+		cardLine(22, parserv2.LineKind_LINE_KIND_PAYMENT, "-6350", "感謝您辦理本行自動轉帳繳款", "")))
 
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
 	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")
@@ -353,7 +321,8 @@ func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 		*transfer.Counterpart.AccountNumber != "876543****9234" {
 		t.Fatalf("transfer counterpart = %+v", transfer.Counterpart)
 	}
-	if card.Counterpart == nil || card.Counterpart.AccountKind != AccountKindCreditCard || card.Counterpart.AccountId != nil || card.Counterpart.Institution != "esun" {
+	// The bank's card account, a liability like any other account (ADR 0022).
+	if card.Counterpart == nil || card.Counterpart.AccountKind != AccountKindCreditCard || card.Counterpart.AccountId == nil || card.Counterpart.Institution != "esun" {
 		t.Fatalf("card payment counterpart = %+v", card.Counterpart)
 	}
 	statements := decode[[]Statement](t, get(t, e, "/api/statements"))
@@ -364,25 +333,15 @@ func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 
 func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSpending(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
-	dec := func(s string) *decimal.Decimal { return &decimal.Decimal{Value: s} }
-	trade := func(day int32, name string, side parserv1.TradeSide, shares, amount, net string) *parserv1.SecuritiesTrade {
-		return &parserv1.SecuritiesTrade{
-			Date: &gdate.Date{Year: 2026, Month: 7, Day: day}, Name: name, Side: side, Shares: dec(shares), Price: dec("50"),
-			Category: "集賣", Amount: dec(amount), Fee: dec("143"), Tax: dec("303"), Net: dec(net),
-		}
+	sold := func(day int32, name, shares, amount, net string) *parserv2.Line {
+		return pt.Trade(pt.Day(7, day), name, parserv2.LineKind_LINE_KIND_SELL, "-"+shares, "50", amount, "143", "303", net)
 	}
 	// Synthetic (ADR 0006): 範例航運 sold out, so not held.
-	store(t, pool, "skis.eml", &parserv1.ParseDocumentResponse{Parser: "skis.securities", SecuritiesStatement: &parserv1.SecuritiesStatement{
-		Institution: "skis", AccountNumber: "12**345",
-		PeriodStart: &gdate.Date{Year: 2026, Month: 7, Day: 1}, PeriodEnd: &gdate.Date{Year: 2026, Month: 7, Day: 31},
-		HoldingsDate: &gdate.Date{Year: 2026, Month: 8, Day: 4},
-		Holdings:     []*parserv1.SecuritiesHolding{{Name: "範例電子", Shares: dec("3500")}},
-		Trades: []*parserv1.SecuritiesTrade{
-			trade(3, "範例電子", parserv1.TradeSide_TRADE_SIDE_SELL, "2000", "101000", "100554"),
-			trade(15, "範例航運", parserv1.TradeSide_TRADE_SIDE_SELL, "1000", "30000", "29554"),
-		},
-		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: dec("0"), Stated: dec("0"), StatedLabel: "應收付金額"},
-	}})
+	store(t, pool, "skis.eml", pt.Response("skis.securities", pt.Securities("skis", "12**345", pt.Day(7, 1), pt.Day(8, 4),
+		[]*parserv2.Balance{pt.Balance("範例電子", pt.Day(8, 4), "3500")},
+		sold(3, "範例電子", "2000", "101000", "100554"),
+		sold(15, "範例航運", "1000", "30000", "29554"),
+	)))
 	closed := func(d int) time.Time { return taipei.At(time.Date(2026, 11, d, 0, 0, 0, 0, time.UTC), 13, 30) }
 	price(t, pool, "security", "範例電子", "twse", closed(5), "1", "TWD", "49.00")
 	price(t, pool, "security", "範例電子", "twse", closed(6), "1", "TWD", "50.50")
@@ -478,30 +437,61 @@ func TestAnExchangeIsWorthItsHoldingsElseItsValuationOfTheSameDay(t *testing.T) 
 }
 
 // cathayBill is a Cathay card bill closing on the first of the month, with its points programs.
-func cathayBill(month int32, programs ...*parserv1.PointsProgram) *parserv1.ParseDocumentResponse {
-	return &parserv1.ParseDocumentResponse{Parser: "cathay.credit_card", Statement: &parserv1.Statement{
-		Institution: "cathay", ClosingDate: &gdate.Date{Year: 2026, Month: month, Day: 1}, DueDate: &gdate.Date{Year: 2026, Month: month, Day: 17},
-		Currency: "TWD", TotalDue: &decimal.Decimal{Value: "0"}, Points: programs,
-		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: &decimal.Decimal{Value: "0"}, Stated: &decimal.Decimal{Value: "0"}, StatedLabel: "x"},
-	}}
+// A points program on a bill: its closing, its period's movements, and what will lapse (ADR 0019).
+type pointsProgram struct {
+	name, closing string
+	moves         []pointsMove
+	lapses        []lapse
 }
 
-func program(name, closing string, expiries ...*parserv1.PointsExpiry) *parserv1.PointsProgram {
-	return &parserv1.PointsProgram{Name: name, Closing: &decimal.Decimal{Value: closing}, Expiries: expiries}
+type pointsMove struct {
+	label  string
+	kind   parserv2.LineKind
+	amount string
+}
+
+type lapse struct {
+	amount string
+	by     *gdate.Date
+}
+
+func cathayBill(month int32, programs ...pointsProgram) *parserv2.ParseDocumentResponse {
+	closing := pt.Day(month, 1)
+	bill := pt.Bill("cathay", closing, pt.Day(month, 17), "0")
+	if len(programs) == 0 {
+		return pt.Response("cathay.credit_card", bill)
+	}
+	var balances []*parserv2.Balance
+	var lines []*parserv2.Line
+	var expiries []*parserv2.Expiry
+	for _, p := range programs {
+		balances = append(balances, pt.Balance(p.name, closing, p.closing))
+		for _, m := range p.moves {
+			lines = append(lines, pt.PointsLine(closing, p.name, m.label, m.kind, m.amount))
+		}
+		for _, l := range p.lapses {
+			expiries = append(expiries, pt.Expiry(p.name, l.amount, l.by))
+		}
+	}
+	return pt.Response("cathay.credit_card", pt.Points(bill, balances, lines, expiries...))
+}
+
+func program(name, closing string, lapses ...lapse) pointsProgram {
+	return pointsProgram{name: name, closing: closing, lapses: lapses}
 }
 
 // withLines gives a program its period's movements.
-func withLines(p *parserv1.PointsProgram, lines ...*parserv1.PointsLine) *parserv1.PointsProgram {
-	p.Lines = lines
+func withLines(p pointsProgram, moves ...pointsMove) pointsProgram {
+	p.moves = moves
 	return p
 }
 
-func pointsLine(label string, kind parserv1.PointsLineKind, amount string) *parserv1.PointsLine {
-	return &parserv1.PointsLine{Label: label, Kind: kind, Amount: &decimal.Decimal{Value: amount}}
+func pointsLine(label string, kind parserv2.LineKind, amount string) pointsMove {
+	return pointsMove{label: label, kind: kind, amount: amount}
 }
 
-func lapsing(amount string, year, month, day int32) *parserv1.PointsExpiry {
-	return &parserv1.PointsExpiry{Amount: &decimal.Decimal{Value: amount}, By: &gdate.Date{Year: year, Month: month, Day: day}}
+func lapsing(amount string, year, month, day int32) lapse {
+	return lapse{amount: amount, by: &gdate.Date{Year: year, Month: month, Day: day}}
 }
 
 func TestACardBillsPointsAreAPointsAccountWithWhatTheNewestBillSaysWillLapse(t *testing.T) {
@@ -509,8 +499,8 @@ func TestACardBillsPointsAreAPointsAccountWithWhatTheNewestBillSaysWillLapse(t *
 	// Stored newest first: the older bill's expiries must not come back.
 	store(t, pool, "november", cathayBill(11,
 		withLines(program("小樹點(信用卡)", "3253", lapsing("0", 2026, 11, 30), lapsing("669", 2099, 10, 31)),
-			pointsLine("本期新增/扣除", parserv1.PointsLineKind_POINTS_LINE_KIND_EARN, "64"),
-			pointsLine("本期兌/轉換", parserv1.PointsLineKind_POINTS_LINE_KIND_REDEEM, "-1")),
+			pointsLine("本期新增/扣除", parserv2.LineKind_LINE_KIND_EARN, "64"),
+			pointsLine("本期兌/轉換", parserv2.LineKind_LINE_KIND_REDEEM, "-1")),
 		program("亞洲萬里通里數", "0")))
 	store(t, pool, "october", cathayBill(10,
 		program("小樹點(信用卡)", "3190", lapsing("88", 2099, 10, 31), lapsing("700", 2099, 9, 30)),
@@ -580,8 +570,8 @@ func TestANewerBillThatPrintsNothingLapsingSaysNothingWill(t *testing.T) {
 func TestAnAccountWhoseSourcesSayItHoldsNothingIsWorthNothing(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	store(t, pool, "empty", cathayBill(10, program("小樹點(信用卡)", "0")))
-	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
-	if len(accounts) != 1 || len(accounts[0].Balances) != 0 || accounts[0].Worth == nil || *accounts[0].Worth != "0.00" {
-		t.Fatalf("accounts = %+v", accounts)
+	points := pointsOf(t, e)
+	if len(points.Balances) != 0 || points.Worth == nil || *points.Worth != "0.00" {
+		t.Fatalf("points account = %+v", points)
 	}
 }

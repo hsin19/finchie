@@ -12,7 +12,6 @@ import (
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
@@ -20,9 +19,9 @@ import (
 
 func TestTwoAccountsStatementsForTheSameMonthAreTwoStatementsNotDuplicates(t *testing.T) {
 	pool := testdb.Pool(t)
-	first := monthly(10, 30, []*parserv1.SecuritiesHolding{holding("範例電子", "1000")})
-	second := monthly(10, 30, []*parserv1.SecuritiesHolding{holding("範例航運", "500")})
-	second.AccountNumber = "98**765"
+	first := monthly(10, 30, []held{holding("範例電子", "1000")})
+	second := monthly(10, 30, []held{holding("範例航運", "500")})
+	second.Accounts[0].Number = "98**765"
 
 	storeSecurities(t, pool, "first.eml", first)
 	storeSecurities(t, pool, "second.eml", second)
@@ -39,7 +38,7 @@ func TestTwoAccountsStatementsForTheSameMonthAreTwoStatementsNotDuplicates(t *te
 	}
 
 	// The same account's statement forwarded again still is one.
-	storeSecurities(t, pool, "first-forwarded.eml", monthly(10, 30, []*parserv1.SecuritiesHolding{holding("範例電子", "1000")}))
+	storeSecurities(t, pool, "first-forwarded.eml", monthly(10, 30, []held{holding("範例電子", "1000")}))
 	if n := countRows(t, pool, "statements"); n != 2 {
 		t.Fatalf("statements = %d after a copy, want 2", n)
 	}

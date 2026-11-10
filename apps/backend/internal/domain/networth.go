@@ -1,72 +1,48 @@
 package domain
 
 import (
-	"maps"
 	"math/big"
-	"slices"
 	"time"
 )
 
-// Bill is a card bill: what it says is owed, and when a deposit account or a later bill showed it paid
-// (ADR 0016).
-type Bill struct {
-	ID          int64
-	Institution string
-	Closing     time.Time
-	Currency    string
-	TotalDue    *big.Rat
-	PaidOn      *time.Time
-}
-
-// Owed is what the owner still owes on cards: each bank's newest bill, when it owes something and
-// nothing has shown it paid. An older unpaid bill is the newer one's past: its amount is in the newer
-// one's.
-func Owed(bills []Bill) []Bill {
-	newest := map[string]Bill{}
-	for _, b := range bills {
-		if seen, ok := newest[b.Institution]; !ok || b.Closing.After(seen.Closing) || (b.Closing.Equal(seen.Closing) && b.ID > seen.ID) {
-			newest[b.Institution] = b
-		}
-	}
-	var owed []Bill
-	for _, institution := range slices.Sorted(maps.Keys(newest)) {
-		if b := newest[institution]; b.PaidOn == nil && b.TotalDue != nil && b.TotalDue.Sign() > 0 {
-			owed = append(owed, b)
-		}
-	}
-	return owed
-}
-
-// Worth is what one account is worth in the base currency; nil when it cannot be worked out.
+// Worth is how one account stands for net worth: its worth in the base currency, negative for a
+// liability, or nil when it cannot be worked out; and whether its newest report says when it is exact.
 type Worth struct {
-	Kind  AccountKind
-	Worth *big.Rat
+	AccountID int64
+	Kind      AccountKind
+	Worth     *big.Rat
+	// The day of its newest report; zero when nothing has reported it.
+	Newest time.Time
+	// The owner keeps it (ADR 0019): it reports when they do, which says nothing about any other day.
+	ByHand bool
+	// Its sources say it holds nothing.
+	Empty bool
 }
 
 // KindWorth is the worth of an account kind's accounts added up.
 type KindWorth struct {
 	Kind AccountKind
-	// Of the accounts with a worth.
+	// Of the accounts with a worth; negative for a liability.
 	Worth *big.Rat
 	// Accounts without a worth, left out of it.
 	Unvalued int
 }
 
-// NetWorth is what the owner has less what they owe on cards, in the base currency.
+// NetWorth is what the owner has less what they owe, in the base currency, on a day (ADR 0023).
 type NetWorth struct {
-	Holdings *big.Rat
-	ByKind   []KindWorth
-	// Accounts without a worth, left out of Holdings.
+	Assets, Liabilities, Net *big.Rat
+	ByKind                   []KindWorth
+	// Accounts without a worth, left out.
 	Unvalued int
-	Owed     *big.Rat
-	// Bills owed in another currency than the base one, left out of Owed.
-	OwedElsewhere int
-	Net           *big.Rat
+	// The newest day every account has reported on or after (CompleteAsOf); zero when none has.
+	CompleteAsOf time.Time
+	// The accounts whose newest report is older than the day asked for.
+	Behind []int64
 }
 
-// Net adds up the accounts' worth and subtracts what bills owe (Owed).
-func Net(accounts []Worth, owed []Bill) NetWorth {
-	n := NetWorth{Holdings: new(big.Rat), Owed: new(big.Rat)}
+// Net adds up the accounts' worth on a day: assets, liabilities (negative), and their sum.
+func Net(day time.Time, accounts []Worth) NetWorth {
+	n := NetWorth{Assets: new(big.Rat), Liabilities: new(big.Rat)}
 	byKind := map[AccountKind]*KindWorth{}
 	for _, a := range accounts {
 		k := byKind[a.Kind]
@@ -79,21 +55,42 @@ func Net(accounts []Worth, owed []Bill) NetWorth {
 			k.Unvalued++
 			continue
 		}
-		n.Holdings.Add(n.Holdings, a.Worth)
 		k.Worth.Add(k.Worth, a.Worth)
+		if a.Kind.Liability() {
+			n.Liabilities.Add(n.Liabilities, a.Worth)
+		} else {
+			n.Assets.Add(n.Assets, a.Worth)
+		}
 	}
 	for _, kind := range AccountKinds {
 		if k := byKind[kind]; k != nil {
 			n.ByKind = append(n.ByKind, *k)
 		}
 	}
-	for _, b := range owed {
-		if b.Currency != BaseCurrency {
-			n.OwedElsewhere++
-			continue
+	n.Net = new(big.Rat).Add(n.Assets, n.Liabilities)
+	n.CompleteAsOf = CompleteAsOf(accounts)
+	for _, a := range accounts {
+		if counts(a) && a.Newest.Before(day) {
+			n.Behind = append(n.Behind, a.AccountID)
 		}
-		n.Owed.Add(n.Owed, b.TotalDue)
 	}
-	n.Net = new(big.Rat).Sub(n.Holdings, n.Owed)
 	return n
 }
+
+// CompleteAsOf is the newest day on which every account had reported (ADR 0023): sources report on days
+// of their own, so a figure is exact only up to the oldest of their newest reports. Accounts the owner
+// keeps, which report when they do, and accounts that hold nothing are left out.
+func CompleteAsOf(accounts []Worth) time.Time {
+	var complete time.Time
+	for _, a := range accounts {
+		if !counts(a) {
+			continue
+		}
+		if complete.IsZero() || a.Newest.Before(complete) {
+			complete = a.Newest
+		}
+	}
+	return complete
+}
+
+func counts(a Worth) bool { return !a.ByHand && !a.Empty && !a.Newest.IsZero() }

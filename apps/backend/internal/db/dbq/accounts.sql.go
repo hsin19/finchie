@@ -238,10 +238,82 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 	return items, nil
 }
 
+const balancesOn = `-- name: BalancesOn :many
+WITH days AS (
+    SELECT d::date AS day FROM unnest($1::date[]) d
+), held AS (
+    SELECT DISTINCT ON (d.day, b.account_id, b.unit_id) d.day, b.account_id, b.unit_id, b.as_of, b.amount, b.statement_id
+    FROM days d
+    JOIN balances b ON b.as_of <= d.day
+    ORDER BY d.day, b.account_id, b.unit_id, b.as_of DESC, b.id DESC
+), moved AS (
+    SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
+           (h.amount + CASE WHEN a.kind = ANY ($2::text[]) THEN coalesce((
+               SELECT sum(t.amount) FROM transactions t
+               WHERE t.account_id = h.account_id AND t.unit_id = h.unit_id
+                 AND t.transaction_date > h.as_of AND t.transaction_date <= h.day), 0) ELSE 0 END)::numeric AS amount
+    FROM held h
+    JOIN accounts a ON a.id = h.account_id
+)
+SELECT m.day::date AS day, m.account_id, u.symbol AS unit, m.as_of, m.amount, m.statement_id,
+       round(m.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
+FROM moved m
+JOIN units u ON u.id = m.unit_id
+LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+    AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
+ORDER BY m.day, m.account_id, u.symbol
+`
+
+type BalancesOnParams struct {
+	Days     []pgtype.Date
+	Itemized []string
+}
+
+type BalancesOnRow struct {
+	Day         pgtype.Date
+	AccountID   int64
+	Unit        string
+	AsOf        pgtype.Date
+	Amount      pgtype.Numeric
+	StatementID *int64
+	Worth       pgtype.Numeric
+}
+
+// What each account held of each unit at the end of each day (ADR 0023): its newest balance on or before
+// the day, and for the itemized kinds the lines dated after that balance up to the day; with its worth in
+// NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
+func (q *Queries) BalancesOn(ctx context.Context, arg BalancesOnParams) ([]BalancesOnRow, error) {
+	rows, err := q.db.Query(ctx, balancesOn, arg.Days, arg.Itemized)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BalancesOnRow
+	for rows.Next() {
+		var i BalancesOnRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.AccountID,
+			&i.Unit,
+			&i.AsOf,
+			&i.Amount,
+			&i.StatementID,
+			&i.Worth,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
-WHERE id = $1 AND kind <> 'credit_card'
+WHERE id = $1
 `
 
 type GetAccountRow struct {
@@ -410,7 +482,7 @@ func (q *Queries) LatestValuations(ctx context.Context, accountID *int64) ([]Lat
 const listAccounts = `-- name: ListAccounts :many
 SELECT id, institution, kind, number, label, name, full_number
 FROM accounts
-WHERE kind <> 'credit_card' AND ($1::bigint IS NULL OR id = $1::bigint)
+WHERE $1::bigint IS NULL OR id = $1::bigint
 ORDER BY institution, kind DESC, number
 `
 
@@ -424,8 +496,7 @@ type ListAccountsRow struct {
 	FullNumber  *string
 }
 
-// The accounts the owner has: a credit_card account only holds its bank's card lines (ADR 0013). Of one
-// account, or with none, of all.
+// The owner's accounts, assets and liabilities alike (ADR 0022). Of one account, or with none, of all.
 func (q *Queries) ListAccounts(ctx context.Context, id *int64) ([]ListAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listAccounts, id)
 	if err != nil {
@@ -458,7 +529,7 @@ const updateAccountDetails = `-- name: UpdateAccountDetails :one
 UPDATE accounts
 SET name        = CASE WHEN $1::boolean THEN $2::text ELSE name END,
     full_number = CASE WHEN $3::boolean THEN $4::text ELSE full_number END
-WHERE id = $5 AND kind <> 'credit_card'
+WHERE id = $5
 RETURNING id
 `
 
@@ -511,4 +582,54 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (i
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const valuationsOn = `-- name: ValuationsOn :many
+WITH days AS (
+    SELECT d::date AS day FROM unnest($1::date[]) d
+), valued AS (
+    SELECT DISTINCT ON (d.day, v.account_id) d.day, v.account_id, v.unit_id, v.as_of, v.amount
+    FROM days d
+    JOIN valuations v ON v.as_of <= d.day
+    ORDER BY d.day, v.account_id, v.as_of DESC
+)
+SELECT v.day::date AS day, v.account_id, v.as_of,
+       round(v.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
+FROM valued v
+LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+    AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
+ORDER BY v.day, v.account_id
+`
+
+type ValuationsOnRow struct {
+	Day       pgtype.Date
+	AccountID int64
+	AsOf      pgtype.Date
+	Worth     pgtype.Numeric
+}
+
+// Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then.
+func (q *Queries) ValuationsOn(ctx context.Context, days []pgtype.Date) ([]ValuationsOnRow, error) {
+	rows, err := q.db.Query(ctx, valuationsOn, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ValuationsOnRow
+	for rows.Next() {
+		var i ValuationsOnRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.AccountID,
+			&i.AsOf,
+			&i.Worth,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -6,46 +6,44 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
 // Synthetic names and figures (ADR 0006).
 
-func dec(s string) *decimal.Decimal { return &decimal.Decimal{Value: s} }
+type held struct{ name, shares string }
 
-func holding(name, shares string) *parserv1.SecuritiesHolding {
-	return &parserv1.SecuritiesHolding{Name: name, Shares: dec(shares)}
-}
+func holding(name, shares string) held { return held{name, shares} }
 
-func trade(month, day int32, name string, side parserv1.TradeSide, shares, amount, net string) *parserv1.SecuritiesTrade {
-	return &parserv1.SecuritiesTrade{
-		Date: &date.Date{Year: 2026, Month: month, Day: day}, Name: name, Side: side, Shares: dec(shares),
-		Price: dec("10"), Category: "集買", Amount: dec(amount), Fee: dec("20"), Tax: dec("0"), Net: dec(net),
+// traded is a trade of 2026, its shares as printed, positive: the line takes them off when sold.
+func traded(month, day int32, name string, side parserv2.LineKind, shares, amount, net string) *parserv2.Line {
+	if side == sell {
+		shares = "-" + shares
 	}
+	return pt.Trade(pt.Day(month, day), name, side, shares, "10", amount, "20", "0", net)
 }
 
 // monthly is a statement for a month of 2026 whose holdings are as of the given day of the next month.
-func monthly(month, holdingsDay int32, holdings []*parserv1.SecuritiesHolding, trades ...*parserv1.SecuritiesTrade) *parserv1.SecuritiesStatement {
-	return &parserv1.SecuritiesStatement{
-		Institution: "skis", AccountNumber: "12**345",
-		PeriodStart:  &date.Date{Year: 2026, Month: month, Day: 1},
-		PeriodEnd:    &date.Date{Year: 2026, Month: month, Day: 28},
-		HoldingsDate: &date.Date{Year: 2026, Month: month + 1, Day: holdingsDay},
-		Holdings:     holdings, Trades: trades,
-		Reconciliation: &parserv1.Reconciliation{Balanced: true, Computed: dec("0"), Stated: dec("0"), StatedLabel: "應收付金額"},
+func monthly(month, holdingsDay int32, holdings []held, trades ...*parserv2.Line) *parserv2.Statement {
+	on := pt.Day(month+1, holdingsDay)
+	balances := make([]*parserv2.Balance, 0, len(holdings))
+	for _, h := range holdings {
+		balances = append(balances, pt.Balance(h.name, on, h.shares))
 	}
+	s := pt.Securities("skis", "12**345", pt.Day(month, 1), on, balances, trades...)
+	s.Checks = []*parserv2.Check{pt.Check("應收付金額", "TWD", "0", "0")}
+	return s
 }
 
-func storeSecurities(t *testing.T, pool *pgxpool.Pool, name string, statement *parserv1.SecuritiesStatement) {
+func storeSecurities(t *testing.T, pool *pgxpool.Pool, name string, statement *parserv2.Statement) {
 	t.Helper()
 	id := addDocument(t, pool, name)
-	parser := &fakeParser{response: &parserv1.ParseDocumentResponse{Parser: "skis.securities", ParserVersion: "1", SecuritiesStatement: statement}}
+	parser := &fakeParser{response: pt.Response("skis.securities", statement)}
 	if err := NewWorker(pool, parser, time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
@@ -82,16 +80,16 @@ func holdingsOf(t *testing.T, pool *pgxpool.Pool, account int64) []string {
 }
 
 var (
-	buy  = parserv1.TradeSide_TRADE_SIDE_BUY
-	sell = parserv1.TradeSide_TRADE_SIDE_SELL
+	buy  = parserv2.LineKind_LINE_KIND_BUY
+	sell = parserv2.LineKind_LINE_KIND_SELL
 )
 
 func TestASecuritiesStatementStoresTradesAsSharesAndHoldingsAsBalances(t *testing.T) {
 	pool := testdb.Pool(t)
 	storeSecurities(t, pool, "july.eml", monthly(7, 4,
-		[]*parserv1.SecuritiesHolding{holding("範例一號", "1000"), holding("範例電子", "3500")},
-		trade(7, 3, "範例電子", sell, "2000", "101000", "100554"),
-		trade(7, 10, "範例一號", buy, "1000", "20000", "-20020"),
+		[]held{holding("範例一號", "1000"), holding("範例電子", "3500")},
+		traded(7, 3, "範例電子", sell, "2000", "101000", "100554"),
+		traded(7, 10, "範例一號", buy, "1000", "20000", "-20020"),
 	))
 	account := securitiesAccount(t, pool)
 
@@ -122,11 +120,11 @@ func TestASecuritiesStatementStoresTradesAsSharesAndHoldingsAsBalances(t *testin
 
 func TestASecurityAStatementDoesNotListIsAtZeroWhicheverStatementArrivesFirst(t *testing.T) {
 	pool := testdb.Pool(t)
-	june := monthly(6, 2, []*parserv1.SecuritiesHolding{holding("範例電子", "5500"), holding("範例航運", "1000")})
-	july := monthly(7, 4, []*parserv1.SecuritiesHolding{holding("範例一號", "1000"), holding("範例電子", "3500")},
-		trade(7, 3, "範例電子", sell, "2000", "101000", "100554"),
-		trade(7, 10, "範例一號", buy, "1000", "20000", "-20020"),
-		trade(7, 15, "範例航運", sell, "1000", "30000", "29900"),
+	june := monthly(6, 2, []held{holding("範例電子", "5500"), holding("範例航運", "1000")})
+	july := monthly(7, 4, []held{holding("範例一號", "1000"), holding("範例電子", "3500")},
+		traded(7, 3, "範例電子", sell, "2000", "101000", "100554"),
+		traded(7, 10, "範例一號", buy, "1000", "20000", "-20020"),
+		traded(7, 15, "範例航運", sell, "1000", "30000", "29900"),
 	)
 	storeSecurities(t, pool, "july.eml", july)
 	storeSecurities(t, pool, "june.eml", june)
@@ -147,10 +145,10 @@ func TestASecurityAStatementDoesNotListIsAtZeroWhicheverStatementArrivesFirst(t 
 
 func TestSharesNoTradeExplainsAreAGap(t *testing.T) {
 	pool := testdb.Pool(t)
-	storeSecurities(t, pool, "june.eml", monthly(6, 2, []*parserv1.SecuritiesHolding{holding("範例電子", "5500")}))
+	storeSecurities(t, pool, "june.eml", monthly(6, 2, []held{holding("範例電子", "5500")}))
 	// A stock dividend of 100 shares: no trade says so.
-	storeSecurities(t, pool, "july.eml", monthly(7, 4, []*parserv1.SecuritiesHolding{holding("範例電子", "3600")},
-		trade(7, 3, "範例電子", sell, "2000", "101000", "100554"),
+	storeSecurities(t, pool, "july.eml", monthly(7, 4, []held{holding("範例電子", "3600")},
+		traded(7, 3, "範例電子", sell, "2000", "101000", "100554"),
 	))
 	account := securitiesAccount(t, pool)
 	gaps, err := ledger.Gaps(t.Context(), dbq.New(pool), &account)

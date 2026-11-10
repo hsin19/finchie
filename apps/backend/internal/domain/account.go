@@ -97,9 +97,11 @@ type Standing struct {
 	// Its newest balance in each unit it holds.
 	Held       []Balance
 	Continuity Continuity
-	// In the base currency; nil when it cannot be worked out.
+	// In the base currency, negative for a liability; nil when it cannot be worked out.
 	Worth     *big.Rat
 	WorthFrom WorthFrom
+	// The day of its newest report, zero when nothing has reported it.
+	Newest time.Time
 }
 
 // Assess works out an account's standing from its newest balance in each unit, its gaps, and its newest
@@ -108,7 +110,8 @@ type Standing struct {
 //     Snapshots alone have no lines to join balances with (ADR 0018, ADR 0019).
 //   - A unit at 0 is one an account that holds positions no longer holds.
 //   - Its worth is its holdings' worth added up exactly; when one of them has none, its valuation on the
-//     day of its newest balance; else none. An account its sources say holds nothing is worth 0.
+//     day of its newest balance; else none. An account its sources say holds nothing is worth 0. A
+//     liability's worth is negative (ADR 0022).
 func Assess(kind AccountKind, latest []Balance, gaps Gaps, valuation *Valuation) Standing {
 	standing := Standing{Continuity: Unknown}
 	fromStatement := slices.ContainsFunc(latest, func(b Balance) bool { return b.FromStatement })
@@ -136,6 +139,9 @@ func Assess(kind AccountKind, latest []Balance, gaps Gaps, valuation *Valuation)
 	case valuation != nil && valuation.Worth != nil && valuation.AsOf.Equal(newest):
 		standing.Worth, standing.WorthFrom = new(big.Rat).Set(valuation.Worth), FromValuation
 	}
+	// What a liability holds is owed (ADR 0022).
+	standing.Worth = kind.Signed(standing.Worth)
+	standing.Newest = newest
 	return standing
 }
 

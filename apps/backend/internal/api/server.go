@@ -25,8 +25,9 @@ import (
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/numeric"
 )
 
 const defaultLimit = 100
@@ -34,13 +35,13 @@ const defaultLimit = 100
 type Server struct {
 	pool           *pgxpool.Pool
 	jobs           *river.Client[pgx.Tx]
-	parser         parserv1.ParserServiceClient
+	parser         parserv2.ParserServiceClient
 	maxUploadBytes int64
 	// Where the Gmail filter forwards statements; empty when the deployment has not set it.
 	mailboxAddress string
 }
 
-func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv1.ParserServiceClient, maxUploadBytes int64, mailboxAddress string) *Server {
+func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv2.ParserServiceClient, maxUploadBytes int64, mailboxAddress string) *Server {
 	return &Server{pool: pool, jobs: jobs, parser: parser, maxUploadBytes: maxUploadBytes, mailboxAddress: mailboxAddress}
 }
 
@@ -229,26 +230,55 @@ func serveFile(contentType, filename string) servedFile {
 }
 
 func (s *Server) ListStatements(ctx context.Context, request ListStatementsRequestObject) (ListStatementsResponseObject, error) {
-	rows, err := dbq.New(s.pool).ListStatements(ctx, limit(request.Params.Limit))
+	queries := dbq.New(s.pool)
+	rows, err := queries.ListStatements(ctx, limit(request.Params.Limit))
 	if err != nil {
 		return nil, fmt.Errorf("list statements: %w", err)
 	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	checks, err := statementChecks(ctx, queries, ids)
+	if err != nil {
+		return nil, err
+	}
 	statements := make(ListStatements200JSONResponse, 0, len(rows))
 	for _, row := range rows {
-		statements = append(statements, toStatement(row))
+		statements = append(statements, toStatement(row, checks[row.ID]))
 	}
 	return statements, nil
 }
 
 func (s *Server) GetStatement(ctx context.Context, request GetStatementRequestObject) (GetStatementResponseObject, error) {
-	row, err := dbq.New(s.pool).GetStatement(ctx, request.Id)
+	queries := dbq.New(s.pool)
+	row, err := queries.GetStatement(ctx, request.Id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GetStatement404JSONResponse{notFound("statement", request.Id)}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get statement %d: %w", request.Id, err)
 	}
-	return GetStatement200JSONResponse(toStatement(dbq.ListStatementsRow(row))), nil
+	checks, err := statementChecks(ctx, queries, []int64{row.ID})
+	if err != nil {
+		return nil, err
+	}
+	return GetStatement200JSONResponse(toStatement(dbq.ListStatementsRow(row), checks[row.ID])), nil
+}
+
+// statementChecks are the statements' checks (ADR 0021), by statement, each's in order.
+func statementChecks(ctx context.Context, queries *dbq.Queries, ids []int64) (map[int64][]Check, error) {
+	rows, err := queries.StatementChecks(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("statement checks: %w", err)
+	}
+	checks := map[int64][]Check{}
+	for _, r := range rows {
+		checks[r.StatementID] = append(checks[r.StatementID], Check{
+			Name: r.Name, Unit: r.Unit, Computed: numeric.String(r.Computed), Stated: numeric.String(r.Stated), Balanced: r.Balanced,
+		})
+	}
+	return checks, nil
 }
 
 func (s *Server) ListStatementTransactions(ctx context.Context, request ListStatementTransactionsRequestObject) (ListStatementTransactionsResponseObject, error) {

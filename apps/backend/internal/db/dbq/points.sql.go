@@ -44,7 +44,7 @@ func (q *Queries) CreateOwnerAccount(ctx context.Context, arg CreateOwnerAccount
 }
 
 const getAccountSource = `-- name: GetAccountSource :one
-SELECT institution, kind FROM accounts WHERE id = $1 AND kind <> 'credit_card'
+SELECT institution, kind FROM accounts WHERE id = $1
 `
 
 type GetAccountSourceRow struct {

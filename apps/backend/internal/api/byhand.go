@@ -19,7 +19,7 @@ import (
 
 func (s *Server) CreateAccount(ctx context.Context, request CreateAccountRequestObject) (CreateAccountResponseObject, error) {
 	kind := domain.AccountKind(request.Body.Kind)
-	if !kind.OwnersAccount() {
+	if !kind.KeptByHand() {
 		return CreateAccount400JSONResponse{ProblemJSONResponse{Message: "a card account holds only its bank's bills' lines; none is kept by hand"}}, nil
 	}
 	if strings.TrimSpace(request.Body.Name) == "" {

@@ -12,50 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const cardBillsOwed = `-- name: CardBillsOwed :many
-SELECT id, institution, closing_date, currency, total_due, paid_on
-FROM statements
-WHERE kind = 'credit_card'
-ORDER BY institution, closing_date
-`
-
-type CardBillsOwedRow struct {
-	ID          int64
-	Institution string
-	ClosingDate pgtype.Date
-	Currency    *string
-	TotalDue    pgtype.Numeric
-	PaidOn      pgtype.Date
-}
-
-// Every card bill with when it was shown paid, for working out what is still owed (domain.Owed).
-func (q *Queries) CardBillsOwed(ctx context.Context) ([]CardBillsOwedRow, error) {
-	rows, err := q.db.Query(ctx, cardBillsOwed)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CardBillsOwedRow
-	for rows.Next() {
-		var i CardBillsOwedRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Institution,
-			&i.ClosingDate,
-			&i.Currency,
-			&i.TotalDue,
-			&i.PaidOn,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const deleteStatementsForDocument = `-- name: DeleteStatementsForDocument :many
 DELETE FROM statements
 WHERE document_id = $1
@@ -121,26 +77,23 @@ func (q *Queries) FindStatementByKey(ctx context.Context, arg FindStatementByKey
 
 const getStatement = `-- name: GetStatement :one
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
+       s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 WHERE s.id = $1 AND s.kind = 'credit_card'
 `
 
 type GetStatementRow struct {
-	ID                 int64
-	DocumentID         int64
-	Institution        string
-	ClosingDate        pgtype.Date
-	DueDate            pgtype.Date
-	Currency           *string
-	TotalDue           pgtype.Numeric
-	ComputedNewCharges pgtype.Numeric
-	StatedNewCharges   pgtype.Numeric
-	StatedLabel        *string
-	Balanced           bool
-	PaidOn             pgtype.Date
-	TransactionCount   int32
+	ID               int64
+	DocumentID       int64
+	Institution      string
+	ClosingDate      pgtype.Date
+	DueDate          pgtype.Date
+	Currency         *string
+	TotalDue         pgtype.Numeric
+	Balanced         bool
+	PaidOn           pgtype.Date
+	TransactionCount int32
 }
 
 func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, error) {
@@ -154,9 +107,6 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 		&i.DueDate,
 		&i.Currency,
 		&i.TotalDue,
-		&i.ComputedNewCharges,
-		&i.StatedNewCharges,
-		&i.StatedLabel,
 		&i.Balanced,
 		&i.PaidOn,
 		&i.TransactionCount,
@@ -166,29 +116,26 @@ func (q *Queries) GetStatement(ctx context.Context, id int64) (GetStatementRow, 
 
 const insertStatement = `-- name: InsertStatement :one
 INSERT INTO statements (id, document_id, institution, kind, account_numbers, period_start, closing_date, due_date,
-                        currency, total_due, computed_new_charges, stated_new_charges, stated_label, balanced)
+                        currency, total_due, balanced)
 OVERRIDING SYSTEM VALUE
 VALUES (coalesce($1::bigint, nextval(pg_get_serial_sequence('statements', 'id'))),
         $2, $3, $4, $5, $6, $7, $8, $9,
-        $10, $11, $12, $13, $14)
+        $10, $11)
 RETURNING id
 `
 
 type InsertStatementParams struct {
-	ID                 *int64
-	DocumentID         int64
-	Institution        string
-	Kind               domain.AccountKind
-	AccountNumbers     string
-	PeriodStart        pgtype.Date
-	ClosingDate        pgtype.Date
-	DueDate            pgtype.Date
-	Currency           *string
-	TotalDue           pgtype.Numeric
-	ComputedNewCharges pgtype.Numeric
-	StatedNewCharges   pgtype.Numeric
-	StatedLabel        *string
-	Balanced           bool
+	ID             *int64
+	DocumentID     int64
+	Institution    string
+	Kind           domain.AccountKind
+	AccountNumbers string
+	PeriodStart    pgtype.Date
+	ClosingDate    pgtype.Date
+	DueDate        pgtype.Date
+	Currency       *string
+	TotalDue       pgtype.Numeric
+	Balanced       bool
 }
 
 // The bill's columns are null for a deposit statement (ADR 0013). With `id`, a re-parsed statement keeps
@@ -205,14 +152,39 @@ func (q *Queries) InsertStatement(ctx context.Context, arg InsertStatementParams
 		arg.DueDate,
 		arg.Currency,
 		arg.TotalDue,
-		arg.ComputedNewCharges,
-		arg.StatedNewCharges,
-		arg.StatedLabel,
 		arg.Balanced,
 	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertStatementChecks = `-- name: InsertStatementChecks :exec
+INSERT INTO statement_checks (statement_id, position, name, unit, computed, stated, balanced)
+SELECT $1, generate_series(0, cardinality($2::text[]) - 1), unnest($2::text[]),
+       unnest($3::text[]), unnest($4::numeric[]), unnest($5::numeric[]), unnest($6::boolean[])
+`
+
+type InsertStatementChecksParams struct {
+	StatementID int64
+	Names       []string
+	Units       []string
+	Computed    []pgtype.Numeric
+	Stated      []pgtype.Numeric
+	Balanced    []bool
+}
+
+// A statement's checks, in the order it prints them (ADR 0021).
+func (q *Queries) InsertStatementChecks(ctx context.Context, arg InsertStatementChecksParams) error {
+	_, err := q.db.Exec(ctx, insertStatementChecks,
+		arg.StatementID,
+		arg.Names,
+		arg.Units,
+		arg.Computed,
+		arg.Stated,
+		arg.Balanced,
+	)
+	return err
 }
 
 type InsertTransactionsParams struct {
@@ -236,7 +208,7 @@ type InsertTransactionsParams struct {
 
 const listStatements = `-- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
+       s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 WHERE s.kind = 'credit_card'
@@ -245,19 +217,16 @@ LIMIT $1
 `
 
 type ListStatementsRow struct {
-	ID                 int64
-	DocumentID         int64
-	Institution        string
-	ClosingDate        pgtype.Date
-	DueDate            pgtype.Date
-	Currency           *string
-	TotalDue           pgtype.Numeric
-	ComputedNewCharges pgtype.Numeric
-	StatedNewCharges   pgtype.Numeric
-	StatedLabel        *string
-	Balanced           bool
-	PaidOn             pgtype.Date
-	TransactionCount   int32
+	ID               int64
+	DocumentID       int64
+	Institution      string
+	ClosingDate      pgtype.Date
+	DueDate          pgtype.Date
+	Currency         *string
+	TotalDue         pgtype.Numeric
+	Balanced         bool
+	PaidOn           pgtype.Date
+	TransactionCount int32
 }
 
 // Card bills only, until deposit statements get views of their own (ADR 0013).
@@ -278,9 +247,6 @@ func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListSta
 			&i.DueDate,
 			&i.Currency,
 			&i.TotalDue,
-			&i.ComputedNewCharges,
-			&i.StatedNewCharges,
-			&i.StatedLabel,
 			&i.Balanced,
 			&i.PaidOn,
 			&i.TransactionCount,
@@ -484,6 +450,50 @@ func (q *Queries) OverlappingDepositStatements(ctx context.Context, arg Overlapp
 			&i.DocumentID,
 			&i.PeriodStart,
 			&i.ClosingDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const statementChecks = `-- name: StatementChecks :many
+SELECT statement_id, name, unit, computed, stated, balanced
+FROM statement_checks
+WHERE statement_id = ANY ($1::bigint[])
+ORDER BY statement_id, position
+`
+
+type StatementChecksRow struct {
+	StatementID int64
+	Name        string
+	Unit        string
+	Computed    pgtype.Numeric
+	Stated      pgtype.Numeric
+	Balanced    bool
+}
+
+// The checks of these statements, each statement's in order.
+func (q *Queries) StatementChecks(ctx context.Context, statementIds []int64) ([]StatementChecksRow, error) {
+	rows, err := q.db.Query(ctx, statementChecks, statementIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StatementChecksRow
+	for rows.Next() {
+		var i StatementChecksRow
+		if err := rows.Scan(
+			&i.StatementID,
+			&i.Name,
+			&i.Unit,
+			&i.Computed,
+			&i.Stated,
+			&i.Balanced,
 		); err != nil {
 			return nil, err
 		}

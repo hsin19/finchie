@@ -52,11 +52,11 @@ WHERE b.statement_id = @statement_id::bigint
 -- The bill's columns are null for a deposit statement (ADR 0013). With `id`, a re-parsed statement keeps
 -- the id it had, so its page and the links to it keep working; without, it takes the next.
 INSERT INTO statements (id, document_id, institution, kind, account_numbers, period_start, closing_date, due_date,
-                        currency, total_due, computed_new_charges, stated_new_charges, stated_label, balanced)
+                        currency, total_due, balanced)
 OVERRIDING SYSTEM VALUE
 VALUES (coalesce(sqlc.narg(id)::bigint, nextval(pg_get_serial_sequence('statements', 'id'))),
         @document_id, @institution, @kind, @account_numbers, @period_start, @closing_date, @due_date, @currency,
-        @total_due, @computed_new_charges, @stated_new_charges, @stated_label, @balanced)
+        @total_due, @balanced)
 RETURNING id;
 
 -- name: InsertTransactions :copyfrom
@@ -67,7 +67,7 @@ VALUES (@statement_id, @account_id, @unit_id, @line_no, @transaction_date, @post
 
 -- name: ListStatements :many
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
+       s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 -- Card bills only, until deposit statements get views of their own (ADR 0013).
@@ -77,7 +77,7 @@ LIMIT @row_limit;
 
 -- name: GetStatement :one
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
-       s.computed_new_charges, s.stated_new_charges, s.stated_label, s.balanced, s.paid_on,
+       s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
 WHERE s.id = @id AND s.kind = 'credit_card';
@@ -127,9 +127,15 @@ LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
 WHERE t.statement_id = @statement_id
 ORDER BY t.line_no;
 
--- name: CardBillsOwed :many
--- Every card bill with when it was shown paid, for working out what is still owed (domain.Owed).
-SELECT id, institution, closing_date, currency, total_due, paid_on
-FROM statements
-WHERE kind = 'credit_card'
-ORDER BY institution, closing_date;
+-- name: InsertStatementChecks :exec
+-- A statement's checks, in the order it prints them (ADR 0021).
+INSERT INTO statement_checks (statement_id, position, name, unit, computed, stated, balanced)
+SELECT @statement_id, generate_series(0, cardinality(@names::text[]) - 1), unnest(@names::text[]),
+       unnest(@units::text[]), unnest(@computed::numeric[]), unnest(@stated::numeric[]), unnest(@balanced::boolean[]);
+
+-- name: StatementChecks :many
+-- The checks of these statements, each statement's in order.
+SELECT statement_id, name, unit, computed, stated, balanced
+FROM statement_checks
+WHERE statement_id = ANY (@statement_ids::bigint[])
+ORDER BY statement_id, position;

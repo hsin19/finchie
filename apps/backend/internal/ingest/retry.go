@@ -11,7 +11,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/jobs"
 )
 
@@ -42,10 +42,10 @@ func RetryPeriodic() *river.PeriodicJob {
 type RetryWorker struct {
 	river.WorkerDefaults[RetryArgs]
 	pool   *pgxpool.Pool
-	parser parserv1.ParserServiceClient
+	parser parserv2.ParserServiceClient
 }
 
-func NewRetryWorker(pool *pgxpool.Pool, parser parserv1.ParserServiceClient) *RetryWorker {
+func NewRetryWorker(pool *pgxpool.Pool, parser parserv2.ParserServiceClient) *RetryWorker {
 	return &RetryWorker{pool: pool, parser: parser}
 }
 
@@ -57,7 +57,7 @@ func (w *RetryWorker) Work(ctx context.Context, _ *river.Job[RetryArgs]) error {
 		return fmt.Errorf("river client: %w", err)
 	}
 	// Without the parser, which documents are outdated is not known; stalled ones are queued all the same.
-	described, describeErr := w.parser.DescribeParsers(ctx, &parserv1.DescribeParsersRequest{})
+	described, describeErr := w.parser.DescribeParsers(ctx, &parserv2.DescribeParsersRequest{})
 	if describeErr != nil {
 		slog.WarnContext(ctx, "parser not described; outdated documents wait for the next run", "error", describeErr)
 	}

@@ -122,3 +122,36 @@ func TestABackendRefusesADatabaseANewerOneMigrated(t *testing.T) {
 		t.Fatalf("err = %v, want ErrSchemaNewer", err)
 	}
 }
+
+func TestABillsReconciliationBecomesItsFirstCheckAndWhatItOwesItsCardAccountsBalance(t *testing.T) {
+	pool := testdb.Empty(t)
+	ctx := t.Context()
+	if err := db.MigrateTo(ctx, pool, 19); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO documents (sha256, filename, content_type, content, status) VALUES ('1', 'bill.eml', 'message/rfc822', '', 'needs_review');
+		INSERT INTO accounts (institution, kind, number) VALUES ('esun', 'credit_card', '');
+		INSERT INTO statements (document_id, institution, kind, account_numbers, closing_date, due_date, currency, total_due,
+		                        computed_new_charges, stated_new_charges, stated_label, balanced)
+		VALUES (1, 'esun', 'credit_card', '', '2026-10-21', '2026-11-08', 'TWD', 3000, 2900, 3000, '本期新增款項', false)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MigrateTo(ctx, pool, 20); err != nil {
+		t.Fatal(err)
+	}
+	var check string
+	if err := pool.QueryRow(ctx, `SELECT name || ' ' || unit || ' ' || computed || ' ' || stated || ' ' || balanced FROM statement_checks`).Scan(&check); err != nil {
+		t.Fatal(err)
+	}
+	if check != "本期新增款項 TWD 2900 3000 false" {
+		t.Fatalf("check = %q", check)
+	}
+	var balance string
+	if err := pool.QueryRow(ctx, `SELECT u.symbol || ' ' || b.as_of || ' ' || b.amount FROM balances b JOIN units u ON u.id = b.unit_id`).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if balance != "TWD 2026-10-21 3000" {
+		t.Fatalf("card balance = %q", balance)
+	}
+}

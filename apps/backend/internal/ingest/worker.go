@@ -18,7 +18,7 @@ import (
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 )
 
@@ -46,11 +46,11 @@ func (ParseDocumentArgs) InsertOpts() river.InsertOpts {
 type Worker struct {
 	river.WorkerDefaults[ParseDocumentArgs]
 	pool    *pgxpool.Pool
-	parser  parserv1.ParserServiceClient
+	parser  parserv2.ParserServiceClient
 	timeout time.Duration
 }
 
-func NewWorker(pool *pgxpool.Pool, parser parserv1.ParserServiceClient, timeout time.Duration) *Worker {
+func NewWorker(pool *pgxpool.Pool, parser parserv2.ParserServiceClient, timeout time.Duration) *Worker {
 	return &Worker{pool: pool, parser: parser, timeout: timeout}
 }
 
@@ -72,17 +72,15 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[ParseDocumentArgs]) er
 
 	callCtx, cancel := context.WithTimeout(ctx, w.timeout)
 	// Which instance parses it, so that a failure can be tried again under a later one (Retry).
-	described, err := w.parser.DescribeParsers(callCtx, &parserv1.DescribeParsersRequest{})
+	described, err := w.parser.DescribeParsers(callCtx, &parserv2.DescribeParsersRequest{})
 	if err != nil {
 		cancel()
 		return w.retry(ctx, job, "", domain.Unavailable, fmt.Errorf("describe parsers: %w", err))
 	}
 	instance := described.GetInstance()
-	response, err := w.parser.ParseDocument(callCtx, &parserv1.ParseDocumentRequest{
-		DocumentId:  strconv.FormatInt(id, 10),
-		Filename:    doc.Filename,
-		ContentType: doc.ContentType,
-		Content:     doc.Content,
+	response, err := w.parser.ParseDocument(callCtx, &parserv2.ParseDocumentRequest{
+		DocumentId: strconv.FormatInt(id, 10),
+		Content:    doc.Content,
 	})
 	cancel()
 
@@ -103,7 +101,7 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[ParseDocumentArgs]) er
 		return w.retry(ctx, job, instance, domain.OtherFailure, fmt.Errorf("store document %d: %w", id, err))
 	}
 	slog.InfoContext(ctx, "document parsed", "document_id", id, "status", outcome,
-		"parser", response.GetParser(), "transactions", len(response.GetStatement().GetTransactions()))
+		"parser", response.GetParser(), "accounts", len(response.GetStatement().GetAccounts()))
 	return nil
 }
 

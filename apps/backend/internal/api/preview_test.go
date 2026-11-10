@@ -14,18 +14,18 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 )
 
 // openingParser answers OpenDocument; the API never calls the embedded (nil) ParseDocument.
 type openingParser struct {
-	parserv1.ParserServiceClient
-	response *parserv1.OpenDocumentResponse
+	parserv2.ParserServiceClient
+	response *parserv2.OpenDocumentResponse
 	err      error
-	requests []*parserv1.OpenDocumentRequest
+	requests []*parserv2.OpenDocumentRequest
 }
 
-func (p *openingParser) OpenDocument(_ context.Context, in *parserv1.OpenDocumentRequest, _ ...grpc.CallOption) (*parserv1.OpenDocumentResponse, error) {
+func (p *openingParser) OpenDocument(_ context.Context, in *parserv2.OpenDocumentRequest, _ ...grpc.CallOption) (*parserv2.OpenDocumentResponse, error) {
 	p.requests = append(p.requests, in)
 	return p.response, p.err
 }
@@ -40,9 +40,9 @@ func previewAPI(t *testing.T, parser *openingParser) (*echo.Echo, int64) {
 	return e, doc.Id
 }
 
-func statementEmail(html, text string) *parserv1.OpenDocumentResponse {
-	return &parserv1.OpenDocumentResponse{
-		Email: &parserv1.Email{
+func statementEmail(html, text string) *parserv2.OpenDocumentResponse {
+	return &parserv2.OpenDocumentResponse{
+		Email: &parserv2.Email{
 			Sender:    "範例銀行 <statements@bank.example>",
 			Recipient: "someone@example.com",
 			Subject:   "信用卡電子帳單",
@@ -50,7 +50,7 @@ func statementEmail(html, text string) *parserv1.OpenDocumentResponse {
 			Html:      html,
 			Text:      text,
 		},
-		Files: []*parserv1.File{
+		Files: []*parserv2.File{
 			{Filename: "帳單.pdf", ContentType: "application/pdf", Content: []byte("%PDF decrypted"), Primary: true},
 			{Filename: "slip.html", ContentType: "text/html", Content: []byte("<script>alert(1)</script>")},
 		},
@@ -80,8 +80,7 @@ func TestPreviewShowsTheEmailAndItsFilesFromTheStoredOriginal(t *testing.T) {
 	}
 
 	sent := parser.requests[0]
-	if sent.GetDocumentId() != fmt.Sprint(id) || sent.GetFilename() != "statement.eml" ||
-		sent.GetContentType() != "message/rfc822" || string(sent.GetContent()) != storedEmail {
+	if sent.GetDocumentId() != fmt.Sprint(id) || string(sent.GetContent()) != storedEmail {
 		t.Fatalf("parser got %+v", sent)
 	}
 }
@@ -124,7 +123,7 @@ func TestPreviewPDFIsTheStatementOpenedInPlace(t *testing.T) {
 		t.Fatalf("pdf: %d %v %q", recorder.Code, header, recorder.Body)
 	}
 
-	noPDF := &parserv1.OpenDocumentResponse{Email: &parserv1.Email{Text: "hello"}}
+	noPDF := &parserv2.OpenDocumentResponse{Email: &parserv2.Email{Text: "hello"}}
 	e, id = previewAPI(t, &openingParser{response: noPDF})
 	if recorder := get(t, e, fmt.Sprintf("/api/documents/%d/preview/pdf", id)); recorder.Code != http.StatusNotFound {
 		t.Fatalf("no pdf: status = %d", recorder.Code)
@@ -172,7 +171,7 @@ func TestPreviewBodyIsASandboxedPageWhoseLinksOpenANewTab(t *testing.T) {
 }
 
 func TestPreviewBodyOfABarePDFIsNotFound(t *testing.T) {
-	bare := &parserv1.OpenDocumentResponse{Files: []*parserv1.File{{Filename: "a.pdf", ContentType: "application/pdf"}}}
+	bare := &parserv2.OpenDocumentResponse{Files: []*parserv2.File{{Filename: "a.pdf", ContentType: "application/pdf"}}}
 	e, id := previewAPI(t, &openingParser{response: bare})
 	if recorder := get(t, e, fmt.Sprintf("/api/documents/%d/preview/body", id)); recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", recorder.Code)

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"slices"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
@@ -43,4 +44,15 @@ func (a storedAccount) unitIDs(ctx context.Context, queries *dbq.Queries) (map[s
 // unitID is the unit of a symbol the account reports, among its units.
 func (a storedAccount) unitID(units map[string]int64, symbol string) int64 {
 	return units[domain.Symbol(a.account.Kind.UnitKind(), symbol)]
+}
+
+// balanceUnits are the units the account reports a balance in, each once, in order.
+func (a storedAccount) balanceUnits() []string {
+	var units []string
+	for _, b := range a.balances {
+		if !slices.Contains(units, b.unit) {
+			units = append(units, b.unit)
+		}
+	}
+	return units
 }
