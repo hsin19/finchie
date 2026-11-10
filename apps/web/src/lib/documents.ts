@@ -5,6 +5,7 @@ import {
     type DocumentState,
     type DocumentStatus,
     previewPdfUrl,
+    type StateCount,
     type Statement,
 } from "#lib/api/client.js";
 import { monthOf } from "#lib/dates.js";
@@ -77,6 +78,22 @@ export function documentQuery(filters: DocumentFilters, before?: number) {
 export function shownCount(byState: { state: DocumentState; count: number; }[], filter?: DocumentFilter): number {
     const states: readonly DocumentState[] | undefined = filter?.states;
     return byState.filter(c => !states || states.includes(c.state)).reduce((n, c) => n + c.count, 0);
+}
+
+/** Updates `byState` for any document in `items` whose status in `live` has changed since the page loaded. */
+export function liveByState(byState: StateCount[], items: Document[], live: ReadonlyMap<number, Document>): StateCount[] {
+    const counts = new Map(byState.map(c => [c.state, c.count]));
+    for (const doc of items) {
+        const current = live.get(doc.id);
+        if (!current) continue;
+        const before = documentStatus(doc);
+        const after = documentStatus(current);
+        if (before !== after) {
+            counts.set(before, (counts.get(before) ?? 0) - 1);
+            counts.set(after, (counts.get(after) ?? 0) + 1);
+        }
+    }
+    return [...counts].filter(([, count]) => count > 0).map(([state, count]) => ({ state, count }));
 }
 
 // ---- What became of parsing a document

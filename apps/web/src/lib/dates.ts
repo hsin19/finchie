@@ -44,9 +44,9 @@ export function weekday(date: string): string {
     return WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }
 
-export function today(): string {
-    const now = new Date();
-    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+/** The owner's day, wherever the browser is (ADR 0004). */
+export function today(now = new Date()): string {
+    return now.toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" });
 }
 
 export function thisMonth(): Month {

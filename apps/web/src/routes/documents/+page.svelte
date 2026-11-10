@@ -18,6 +18,7 @@ import {
     type DocumentFilter,
     documentFilters,
     documentQuery,
+    liveByState,
     outcome,
     readDocumentFilters,
     shownCount,
@@ -202,11 +203,6 @@ function show(filter?: DocumentFilter) {
     void navigate({ show: filter?.value ?? null });
 }
 
-// Every filter with something in it, and the one picked even when it has nothing.
-const byState = $derived(data.first.byState);
-const total = $derived(shownCount(byState));
-const chips = $derived(documentFilters.filter(f => f === filters.show || shownCount(byState, f) > 0));
-
 // Search applies while typing, a moment after the last key; as on /transactions, the box follows the
 // URL except when the change is the search it sent itself.
 const urlQuery = $derived(page.url.searchParams.get("q") ?? "");
@@ -247,6 +243,12 @@ function onSearchKeydown(event: KeyboardEvent) {
 // The pages loaded so far; a new first page (another filter) starts over.
 let items = $derived(data.first.items);
 let end = $derived(data.first.items.length < DOCUMENTS_PAGE_SIZE);
+// Every filter with something in it, and the one picked even when it has nothing. Without a search,
+// the layout's counts stay fresh as uploads and re-parses finish; with one, changes among the loaded
+// items still move between states.
+const byState = $derived(data.filters.q ? liveByState(data.first.byState, items, live) : data.documentsByState);
+const total = $derived(shownCount(byState));
+const chips = $derived(documentFilters.filter(f => f === filters.show || shownCount(byState, f) > 0));
 let loading = $state(false);
 let loadError = $state<string>();
 /** The bottom of the list is on screen, or nearly. */

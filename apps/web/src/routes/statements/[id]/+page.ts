@@ -14,18 +14,18 @@ export const load = (async ({ fetch, params }) => {
 
     const client = api(fetch);
     const statement = need(await client.GET("/api/statements/{id}", { params: { path: { id } } }));
-    const [transactions, document] = await Promise.all([
+    const [transactions, document, accounts] = await Promise.all([
         client.GET("/api/statements/{id}/transactions", { params: { path: { id } } }),
         client.GET("/api/documents/{id}", { params: { path: { id: statement.documentId } } }),
+        client.GET("/api/accounts"),
     ]);
-    const lines = need(transactions);
     // The points a card bill reports have an account of their own (ADR 0019): its balance after this
-    // bill, and what will lapse.
-    const pointsAccounts = [...new Set(lines.filter(t => t.accountKind === "points" && t.accountId).map(t => t.accountId as number))];
-    const points = await Promise.all(pointsAccounts.map(async id => need(await client.GET("/api/accounts/{id}", { params: { path: { id } } }))));
+    // bill, even when no points moved in the period, and what will lapse.
+    const pointsAccounts = need(accounts).filter(a => a.kind === "points" && a.institution === statement.institution);
+    const points = await Promise.all(pointsAccounts.map(async a => need(await client.GET("/api/accounts/{id}", { params: { path: { id: a.id } } }))));
     return {
         statement,
-        transactions: lines,
+        transactions: need(transactions),
         points,
         document: need(document),
         command: `statements show ${statement.institution}/${monthOf(statement.closingDate)}`,

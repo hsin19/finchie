@@ -1,12 +1,14 @@
 import {
     api,
     attempt,
+    LEDGER,
     need,
 } from "#lib/api/client.js";
 import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
-export const load = (async ({ fetch, params }) => {
+export const load = (async ({ fetch, params, depends }) => {
+    depends(LEDGER);
     const id = Number(params.id);
     if (!Number.isSafeInteger(id) || id <= 0) error(404, `document ${params.id} not found`);
 

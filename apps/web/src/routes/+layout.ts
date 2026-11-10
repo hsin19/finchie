@@ -34,11 +34,13 @@ export const load = (async ({ fetch, depends }) => {
     const oldest = oldestClosing ? shiftMonth(monthOf(oldestClosing), -2) : latestMonth;
     const newestMonth = latestMonth > thisMonth() ? latestMonth : thisMonth();
 
+    const docPage = need(documents);
     return {
         statements: statementList,
         // The newest, for what every page shows of them and to see what is still parsing; /documents
         // lists them all.
-        documents: need(documents).items,
+        documents: docPage.items,
+        documentsByState: docPage.byState,
         latestMonth,
         months: monthsBetween(oldest, newestMonth),
     };

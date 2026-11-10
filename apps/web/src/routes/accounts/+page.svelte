@@ -15,6 +15,7 @@ import {
 } from "#lib/accounts.js";
 import type { Account } from "#lib/api/client.js";
 import NewAccount from "#lib/components/NewAccount.svelte";
+import { today } from "#lib/dates.js";
 import {
     accountKinds,
     accountName,
@@ -36,9 +37,8 @@ let { data }: PageProps = $props();
 const hideSmall = $derived(!data.all);
 // The form for an account kept by hand; not a filter, so not in the URL.
 let adding = $state(false);
-// For telling points that lapse soon; the page is not open across days.
-// The owner's day, wherever the browser is (ADR 0004).
-const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" });
+// For telling how old balances are and which points lapse soon; the page is not open across days.
+const now = today();
 
 // By kind, in a fixed order. Card bills are no accounts the owner has and are not listed (ADR 0013).
 // Small accounts are left out of the list, never out of the totals.
@@ -204,7 +204,7 @@ function href(account: Account) {
                         <!-- A worth line only where something has a worth: not for points no one has valued. -->
                         {@const worthLine = !ntdOnly && (account.worth !== undefined || account.balances.some(b => b.worth !== undefined))}
                         {@const lapsing = account.expiries[0]}
-                        {@const status = accountStatus(account, today)}
+                        {@const status = accountStatus(account, now)}
                         <tr class="border-t border-rule align-top hover:bg-raised">
                             <td class="py-2.5 pr-2">{institution(account.institution).name}</td>
                             <td class="px-2 py-2.5">
@@ -236,7 +236,7 @@ function href(account: Account) {
                                 {/each}
                                 {#if note}<div class="text-[12px] text-mute">{note}</div>{/if}
                                 {#if lapsing}
-                                    <div class="text-[12px] {lapsesSoon(lapsing.by, today) ? 'text-neg' : 'text-mute'}">
+                                    <div class="text-[12px] {lapsesSoon(lapsing.by, now) ? 'text-neg' : 'text-mute'}">
                                         {formatAmount(lapsing.amount)} {lapsing.unit} {lapsing.by} 前到期
                                     </div>
                                 {/if}

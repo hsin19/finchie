@@ -8,6 +8,7 @@ import {
     documentFilters,
     documentQuery,
     duplicateOf,
+    liveByState,
     type Openable,
     openUrl,
     outcome,
@@ -72,6 +73,12 @@ describe("the document list", () => {
         const byState = [{ state: "parsed", count: 5 }, { state: "needs_review", count: 2 }, { state: "failed", count: 3 }, { state: "skipped", count: 4 }] as const;
         expect(shownCount([...byState], documentFilters[0])).toBe(5);
         expect(shownCount([...byState])).toBe(14);
+    });
+
+    it("moves a document's count to its new state when a re-parse finishes", () => {
+        const byState = [{ state: "parsed" as const, count: 5 }, { state: "failed" as const, count: 1 }];
+        const live = new Map([[9, doc("parsed")]]);
+        expect(liveByState(byState, [doc("failed")], live)).toEqual([{ state: "parsed", count: 6 }]);
     });
 });
 

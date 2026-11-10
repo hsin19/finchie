@@ -16,6 +16,7 @@ import {
 import Counterpart from "#lib/components/Counterpart.svelte";
 import HoldingsForm from "#lib/components/HoldingsForm.svelte";
 import UnitPrices from "#lib/components/UnitPrices.svelte";
+import { today } from "#lib/dates.js";
 import {
     accountKinds,
     accountName,
@@ -43,8 +44,7 @@ const exchange = $derived(account.kind === "exchange");
 const points = $derived(account.kind === "points");
 // One the owner opened and keeps by hand: its number is its unit (ADR 0019).
 const owned = $derived(account.institution === "owner");
-// The owner's day, wherever the browser is (ADR 0004).
-const status = $derived(accountStatus(account, new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" })));
+const status = $derived(accountStatus(account, today()));
 const holdings = $derived(holdingsByWorth(account.balances));
 const unpriced = $derived(account.balances.filter(b => b.worth === undefined).length);
 const snapshots = $derived(historyByDay(account.history));

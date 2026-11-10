@@ -11,6 +11,7 @@ import {
     type Month,
     shortDateTime,
 } from "#lib/dates.js";
+import { shownCount } from "#lib/documents.js";
 import { onKeys } from "#lib/keys.svelte.js";
 import { carriedQueries } from "#lib/nav.js";
 import { poll } from "#lib/poll.js";
@@ -140,7 +141,7 @@ function onkeydown(event: KeyboardEvent) {
         <span><span class="text-pos">●</span> backend ok</span>
         {#if parser}<span>parser v{parser}</span>{/if}
         {#if lastUpload}<span>last upload {shortDateTime(lastUpload.receivedAt)}</span>{/if}
-        <span>{data.statements.length} statements · {data.documents.length} documents</span>
+        <span>{data.statements.length} statements · {shownCount(data.documentsByState)} documents</span>
         <span class="ml-auto"><button type="button" class="text-mute hover:text-ink" onclick={() => (help = true)}><span class="text-accent">[?]</span> 快捷鍵</button> · <button
                 type="button"
                 class="text-mute hover:text-ink"

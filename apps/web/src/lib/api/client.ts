@@ -25,6 +25,7 @@ export type LineCounterpart = Schemas["LineCounterpart"];
 export type PreviewFile = Schemas["PreviewFile"];
 export type Price = Schemas["Price"];
 export type PriceSource = Schemas["PriceSource"];
+export type StateCount = Schemas["StateCount"];
 export type Statement = Schemas["Statement"];
 export type Trade = Schemas["Trade"];
 export type Transaction = Schemas["Transaction"];

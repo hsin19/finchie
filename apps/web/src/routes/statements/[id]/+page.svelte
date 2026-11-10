@@ -68,17 +68,20 @@ const byKind = $derived(
 );
 
 // The points the bill reports, by program: its lines, the balance after it, and what will lapse, which
-// is known as of the newest bill only.
+// is known as of the newest bill only. A program with no movement in the period still has its balance.
 const points = $derived(
     data.points.flatMap(account => {
         const lines = data.transactions.filter(t => isPoints(t) && t.accountId === account.id);
-        const newest = account.balances.some(b => b.statementId === s.id);
-        return [...new Set(lines.map(t => t.unit ?? ""))].map(unit => ({
+        const balances = account.history.filter(b => b.statementId === s.id);
+        const units = [...new Set([...lines.map(t => t.unit ?? ""), ...balances.map(b => b.unit)])];
+        return units.map(unit => ({
             account,
             unit,
             lines: lines.filter(t => (t.unit ?? "") === unit),
-            balance: account.history.find(b => b.statementId === s.id && b.unit === unit),
-            expiries: newest ? account.expiries.filter(e => e.unit === unit) : [],
+            balance: balances.find(b => b.unit === unit),
+            expiries: account.history.find(b => b.unit === unit)?.statementId === s.id
+                ? account.expiries.filter(e => e.unit === unit)
+                : [],
         }));
     }),
 );
@@ -219,7 +222,9 @@ onKeys({
                         <dd class="m-0 text-right">{formatAmount(line.amount, { signed: true })}</dd>
                     {/each}
                     {#if program.balance}
-                        <div aria-hidden="true" class="col-span-2 border-t border-dashed border-line"></div>
+                        {#if program.lines.length > 0}
+                            <div aria-hidden="true" class="col-span-2 border-t border-dashed border-line"></div>
+                        {/if}
                         <dt class="text-mute">這期之後的餘額</dt>
                         <dd class="m-0 text-right font-bold text-ink-bright">{formatAmount(program.balance.amount)}</dd>
                     {/if}

@@ -8,6 +8,7 @@ import {
     monthRange,
     monthsBetween,
     shiftMonth,
+    today,
     weekday,
 } from "./dates";
 
@@ -37,5 +38,11 @@ describe("months", () => {
 describe("weekday", () => {
     it("ignores the local time zone", () => {
         expect(weekday("2026-10-16")).toBe("五");
+    });
+});
+
+describe("today", () => {
+    it("is the calendar day in Taipei, wherever the browser is", () => {
+        expect(today(new Date("2026-11-09T20:00:00Z"))).toBe("2026-11-10");
     });
 });
