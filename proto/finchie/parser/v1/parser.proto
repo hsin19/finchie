@@ -15,24 +15,49 @@ service ParserService {
   //   INVALID_ARGUMENT    the file is unreadable (do not retry)
   //   FAILED_PRECONDITION the PDF password is missing or wrong (do not retry)
   //   INTERNAL            a known statement no longer matches its parser (do not retry)
-  //   UNAVAILABLE         transient (retry)
+  //   UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED
+  //                       transient (retry)
   // An unbalanced statement is still OK; see Reconciliation.
   rpc ParseDocument(ParseDocumentRequest) returns (ParseDocumentResponse);
 
   // Opens a document for a person to read: an e-mail's headers, body, and
-  // attachments, or a bare PDF as its one file. A PDF comes back decrypted
-  // when it opens without a password or with a configured one, so the reader
-  // never needs the password (ADR 0012).
-  //   UNIMPLEMENTED       neither an e-mail nor a PDF
-  //   INVALID_ARGUMENT    the file is unreadable
+  // attachments. A PDF comes back decrypted when it opens without a password
+  // or with a configured one, so the reader never needs the password
+  // (ADR 0012).
+  //   INVALID_ARGUMENT    the file is no e-mail (a bare PDF included: ADR 0014),
+  //                       or is unreadable
   rpc OpenDocument(OpenDocumentRequest) returns (OpenDocumentResponse);
+
+  // What the parser can parse now, so the caller can tell which documents to
+  // parse again: one an older version of its parser read, and one that failed
+  // under an earlier instance, whose configuration may have changed since.
+  rpc DescribeParsers(DescribeParsersRequest) returns (DescribeParsersResponse);
+}
+
+message DescribeParsersRequest {}
+
+message DescribeParsersResponse {
+  repeated ParserVersion parsers = 1;
+  // Changes every time the parser starts. Passwords, the owner's details, and
+  // OCR are set when it starts, so a document that failed for want of one may
+  // parse under a new instance; never anything derived from them.
+  string instance = 2;
+}
+
+message ParserVersion {
+  // As in ParseDocumentResponse.parser, e.g. "taishin.credit_card".
+  string name = 1;
+  // As in ParseDocumentResponse.parser_version.
+  string version = 2;
 }
 
 message ParseDocumentRequest {
   // The caller's document ID, echoed in logs and traces on both sides.
   string document_id = 1;
+  // For logs only: the parser reads the document from its bytes.
   string filename = 2;
-  // "message/rfc822" for an e-mail, "application/pdf" for a bare PDF.
+  // Always "message/rfc822": every document is an e-mail (ADR 0014). For logs
+  // only, like filename.
   string content_type = 3;
   bytes content = 4;
 }
@@ -40,6 +65,7 @@ message ParseDocumentRequest {
 message OpenDocumentRequest {
   // The caller's document ID, echoed in logs and traces on both sides.
   string document_id = 1;
+  // As in ParseDocumentRequest.
   string filename = 2;
   // As in ParseDocumentRequest.
   string content_type = 3;
@@ -47,9 +73,8 @@ message OpenDocumentRequest {
 }
 
 message OpenDocumentResponse {
-  // Unset for a bare PDF.
   Email email = 1;
-  // The e-mail's attachments in order, or the bare PDF.
+  // The e-mail's attachments in order.
   repeated File files = 2;
 }
 
@@ -84,8 +109,9 @@ message File {
 message ParseDocumentResponse {
   // Which parser handled the document, e.g. "taishin.credit_card".
   string parser = 1;
-  // Bumped whenever the parser's output for the same input can change, so the
-  // caller knows what to re-parse.
+  // Bumped whenever the parser's output for the same input can change. The
+  // caller keeps it with what it stored, to tell which documents an older
+  // version parsed.
   string parser_version = 2;
   // A credit card bill. Exactly one of statement, deposit_statement, and
   // securities_statement is set (ADR 0013, ADR 0017).

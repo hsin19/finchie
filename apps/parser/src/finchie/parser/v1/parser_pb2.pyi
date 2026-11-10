@@ -60,6 +60,26 @@ TRADE_SIDE_UNSPECIFIED: TradeSide
 TRADE_SIDE_BUY: TradeSide
 TRADE_SIDE_SELL: TradeSide
 
+class DescribeParsersRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class DescribeParsersResponse(_message.Message):
+    __slots__ = ("parsers", "instance")
+    PARSERS_FIELD_NUMBER: _ClassVar[int]
+    INSTANCE_FIELD_NUMBER: _ClassVar[int]
+    parsers: _containers.RepeatedCompositeFieldContainer[ParserVersion]
+    instance: str
+    def __init__(self, parsers: _Optional[_Iterable[_Union[ParserVersion, _Mapping]]] = ..., instance: _Optional[str] = ...) -> None: ...
+
+class ParserVersion(_message.Message):
+    __slots__ = ("name", "version")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    version: str
+    def __init__(self, name: _Optional[str] = ..., version: _Optional[str] = ...) -> None: ...
+
 class ParseDocumentRequest(_message.Message):
     __slots__ = ("document_id", "filename", "content_type", "content")
     DOCUMENT_ID_FIELD_NUMBER: _ClassVar[int]

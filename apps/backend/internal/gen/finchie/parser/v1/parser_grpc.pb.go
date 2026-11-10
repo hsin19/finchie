@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ParserService_ParseDocument_FullMethodName = "/finchie.parser.v1.ParserService/ParseDocument"
-	ParserService_OpenDocument_FullMethodName  = "/finchie.parser.v1.ParserService/OpenDocument"
+	ParserService_ParseDocument_FullMethodName   = "/finchie.parser.v1.ParserService/ParseDocument"
+	ParserService_OpenDocument_FullMethodName    = "/finchie.parser.v1.ParserService/OpenDocument"
+	ParserService_DescribeParsers_FullMethodName = "/finchie.parser.v1.ParserService/DescribeParsers"
 )
 
 // ParserServiceClient is the client API for ParserService service.
@@ -37,18 +38,23 @@ type ParserServiceClient interface {
 	//	INVALID_ARGUMENT    the file is unreadable (do not retry)
 	//	FAILED_PRECONDITION the PDF password is missing or wrong (do not retry)
 	//	INTERNAL            a known statement no longer matches its parser (do not retry)
-	//	UNAVAILABLE         transient (retry)
+	//	UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED
+	//	                    transient (retry)
 	//
 	// An unbalanced statement is still OK; see Reconciliation.
 	ParseDocument(ctx context.Context, in *ParseDocumentRequest, opts ...grpc.CallOption) (*ParseDocumentResponse, error)
 	// Opens a document for a person to read: an e-mail's headers, body, and
-	// attachments, or a bare PDF as its one file. A PDF comes back decrypted
-	// when it opens without a password or with a configured one, so the reader
-	// never needs the password (ADR 0012).
+	// attachments. A PDF comes back decrypted when it opens without a password
+	// or with a configured one, so the reader never needs the password
+	// (ADR 0012).
 	//
-	//	UNIMPLEMENTED       neither an e-mail nor a PDF
-	//	INVALID_ARGUMENT    the file is unreadable
+	//	INVALID_ARGUMENT    the file is no e-mail (a bare PDF included: ADR 0014),
+	//	                    or is unreadable
 	OpenDocument(ctx context.Context, in *OpenDocumentRequest, opts ...grpc.CallOption) (*OpenDocumentResponse, error)
+	// What the parser can parse now, so the caller can tell which documents to
+	// parse again: one an older version of its parser read, and one that failed
+	// under an earlier instance, whose configuration may have changed since.
+	DescribeParsers(ctx context.Context, in *DescribeParsersRequest, opts ...grpc.CallOption) (*DescribeParsersResponse, error)
 }
 
 type parserServiceClient struct {
@@ -79,6 +85,16 @@ func (c *parserServiceClient) OpenDocument(ctx context.Context, in *OpenDocument
 	return out, nil
 }
 
+func (c *parserServiceClient) DescribeParsers(ctx context.Context, in *DescribeParsersRequest, opts ...grpc.CallOption) (*DescribeParsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeParsersResponse)
+	err := c.cc.Invoke(ctx, ParserService_DescribeParsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ParserServiceServer is the server API for ParserService service.
 // All implementations must embed UnimplementedParserServiceServer
 // for forward compatibility.
@@ -93,18 +109,23 @@ type ParserServiceServer interface {
 	//	INVALID_ARGUMENT    the file is unreadable (do not retry)
 	//	FAILED_PRECONDITION the PDF password is missing or wrong (do not retry)
 	//	INTERNAL            a known statement no longer matches its parser (do not retry)
-	//	UNAVAILABLE         transient (retry)
+	//	UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED
+	//	                    transient (retry)
 	//
 	// An unbalanced statement is still OK; see Reconciliation.
 	ParseDocument(context.Context, *ParseDocumentRequest) (*ParseDocumentResponse, error)
 	// Opens a document for a person to read: an e-mail's headers, body, and
-	// attachments, or a bare PDF as its one file. A PDF comes back decrypted
-	// when it opens without a password or with a configured one, so the reader
-	// never needs the password (ADR 0012).
+	// attachments. A PDF comes back decrypted when it opens without a password
+	// or with a configured one, so the reader never needs the password
+	// (ADR 0012).
 	//
-	//	UNIMPLEMENTED       neither an e-mail nor a PDF
-	//	INVALID_ARGUMENT    the file is unreadable
+	//	INVALID_ARGUMENT    the file is no e-mail (a bare PDF included: ADR 0014),
+	//	                    or is unreadable
 	OpenDocument(context.Context, *OpenDocumentRequest) (*OpenDocumentResponse, error)
+	// What the parser can parse now, so the caller can tell which documents to
+	// parse again: one an older version of its parser read, and one that failed
+	// under an earlier instance, whose configuration may have changed since.
+	DescribeParsers(context.Context, *DescribeParsersRequest) (*DescribeParsersResponse, error)
 	mustEmbedUnimplementedParserServiceServer()
 }
 
@@ -120,6 +141,9 @@ func (UnimplementedParserServiceServer) ParseDocument(context.Context, *ParseDoc
 }
 func (UnimplementedParserServiceServer) OpenDocument(context.Context, *OpenDocumentRequest) (*OpenDocumentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenDocument not implemented")
+}
+func (UnimplementedParserServiceServer) DescribeParsers(context.Context, *DescribeParsersRequest) (*DescribeParsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeParsers not implemented")
 }
 func (UnimplementedParserServiceServer) mustEmbedUnimplementedParserServiceServer() {}
 func (UnimplementedParserServiceServer) testEmbeddedByValue()                       {}
@@ -178,6 +202,24 @@ func _ParserService_OpenDocument_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ParserService_DescribeParsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeParsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ParserServiceServer).DescribeParsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ParserService_DescribeParsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ParserServiceServer).DescribeParsers(ctx, req.(*DescribeParsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ParserService_ServiceDesc is the grpc.ServiceDesc for ParserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -192,6 +234,10 @@ var ParserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OpenDocument",
 			Handler:    _ParserService_OpenDocument_Handler,
+		},
+		{
+			MethodName: "DescribeParsers",
+			Handler:    _ParserService_DescribeParsers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

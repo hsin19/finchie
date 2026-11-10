@@ -27,6 +27,11 @@ class ParserServiceStub:
                 request_serializer=finchie_dot_parser_dot_v1_dot_parser__pb2.OpenDocumentRequest.SerializeToString,
                 response_deserializer=finchie_dot_parser_dot_v1_dot_parser__pb2.OpenDocumentResponse.FromString,
                 _registered_method=True)
+        self.DescribeParsers = channel.unary_unary(
+                '/finchie.parser.v1.ParserService/DescribeParsers',
+                request_serializer=finchie_dot_parser_dot_v1_dot_parser__pb2.DescribeParsersRequest.SerializeToString,
+                response_deserializer=finchie_dot_parser_dot_v1_dot_parser__pb2.DescribeParsersResponse.FromString,
+                _registered_method=True)
 
 
 class ParserServiceServicer:
@@ -41,7 +46,8 @@ class ParserServiceServicer:
         INVALID_ARGUMENT    the file is unreadable (do not retry)
         FAILED_PRECONDITION the PDF password is missing or wrong (do not retry)
         INTERNAL            a known statement no longer matches its parser (do not retry)
-        UNAVAILABLE         transient (retry)
+        UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED
+        transient (retry)
         An unbalanced statement is still OK; see Reconciliation.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -50,11 +56,20 @@ class ParserServiceServicer:
 
     def OpenDocument(self, request, context):
         """Opens a document for a person to read: an e-mail's headers, body, and
-        attachments, or a bare PDF as its one file. A PDF comes back decrypted
-        when it opens without a password or with a configured one, so the reader
-        never needs the password (ADR 0012).
-        UNIMPLEMENTED       neither an e-mail nor a PDF
-        INVALID_ARGUMENT    the file is unreadable
+        attachments. A PDF comes back decrypted when it opens without a password
+        or with a configured one, so the reader never needs the password
+        (ADR 0012).
+        INVALID_ARGUMENT    the file is no e-mail (a bare PDF included: ADR 0014),
+        or is unreadable
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DescribeParsers(self, request, context):
+        """What the parser can parse now, so the caller can tell which documents to
+        parse again: one an older version of its parser read, and one that failed
+        under an earlier instance, whose configuration may have changed since.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -72,6 +87,11 @@ def add_ParserServiceServicer_to_server(servicer, server):
                     servicer.OpenDocument,
                     request_deserializer=finchie_dot_parser_dot_v1_dot_parser__pb2.OpenDocumentRequest.FromString,
                     response_serializer=finchie_dot_parser_dot_v1_dot_parser__pb2.OpenDocumentResponse.SerializeToString,
+            ),
+            'DescribeParsers': grpc.unary_unary_rpc_method_handler(
+                    servicer.DescribeParsers,
+                    request_deserializer=finchie_dot_parser_dot_v1_dot_parser__pb2.DescribeParsersRequest.FromString,
+                    response_serializer=finchie_dot_parser_dot_v1_dot_parser__pb2.DescribeParsersResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -131,6 +151,33 @@ class ParserService:
             '/finchie.parser.v1.ParserService/OpenDocument',
             finchie_dot_parser_dot_v1_dot_parser__pb2.OpenDocumentRequest.SerializeToString,
             finchie_dot_parser_dot_v1_dot_parser__pb2.OpenDocumentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DescribeParsers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/finchie.parser.v1.ParserService/DescribeParsers',
+            finchie_dot_parser_dot_v1_dot_parser__pb2.DescribeParsersRequest.SerializeToString,
+            finchie_dot_parser_dot_v1_dot_parser__pb2.DescribeParsersResponse.FromString,
             options,
             channel_credentials,
             insecure,
