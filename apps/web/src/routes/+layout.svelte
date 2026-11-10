@@ -15,6 +15,7 @@ import { shownCount } from "#lib/documents.js";
 import { onKeys } from "#lib/keys.svelte.js";
 import { carriedQueries } from "#lib/nav.js";
 import { poll } from "#lib/poll.js";
+import { version } from "$app/env";
 import {
     goto,
     invalidate,
@@ -138,7 +139,7 @@ function onkeydown(event: KeyboardEvent) {
     </main>
 
     <footer class="hidden flex-wrap gap-x-5 gap-y-1 border-t border-dashed border-line pt-2.5 text-[12px] text-mute md:flex">
-        <span><span class="text-pos">●</span> backend ok</span>
+        <span><span class="text-pos">●</span> backend {version === "dev" ? "dev" : `v${version}`} ok</span>
         {#if parser}<span>parser v{parser}</span>{/if}
         {#if lastUpload}<span>last upload {shortDateTime(lastUpload.receivedAt)}</span>{/if}
         <span>{data.statements.length} statements · {shownCount(data.documentsByState)} documents</span>

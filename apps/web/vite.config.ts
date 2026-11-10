@@ -13,6 +13,7 @@ export default defineConfig({
             // A single-page app (ADR 0007): the backend embeds build/ and answers every route it does
             // not know with 200.html.
             adapter: adapter({ fallback: "200.html" }),
+            version: { name: (process.env.VERSION || "dev").replace(/^v/, "") },
         }),
     ],
     server: {

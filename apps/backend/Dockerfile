@@ -10,6 +10,7 @@ COPY apps/web/package.json apps/web/pnpm-lock.yaml apps/web/pnpm-workspace.yaml 
 RUN npm install --global "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")"
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
 COPY apps/web/ ./
+ARG VERSION=dev
 RUN pnpm build
 
 
