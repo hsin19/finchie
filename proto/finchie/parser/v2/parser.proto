@@ -1,0 +1,284 @@
+syntax = "proto3";
+
+package finchie.parser.v2;
+
+import "google/protobuf/timestamp.proto";
+import "google/type/date.proto";
+import "google/type/decimal.proto";
+
+// Turns a statement e-mail into the accounts it reports, and opens one for a
+// person to read. Stateless: the caller owns storage, retries, and
+// deduplication (ADR 0002, ADR 0005). Every statement is a report of accounts:
+// their balances on a day and the lines between (ADR 0021).
+service ParserService {
+  // Status codes carry the retry decision:
+  //   UNIMPLEMENTED       no parser recognizes the document (do not retry)
+  //   INVALID_ARGUMENT    the file is unreadable (do not retry)
+  //   FAILED_PRECONDITION the PDF password is missing or wrong (do not retry)
+  //   INTERNAL            a known statement no longer matches its parser (do not retry)
+  //   UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED
+  //                       transient (retry)
+  // A statement whose checks do not all balance is still OK; see Check.
+  rpc ParseDocument(ParseDocumentRequest) returns (ParseDocumentResponse);
+
+  // Opens a document for a person to read: an e-mail's headers, body, and
+  // attachments. A PDF comes back decrypted when it opens without a password
+  // or with a configured one, so the reader never needs the password
+  // (ADR 0012).
+  //   INVALID_ARGUMENT    the file is no e-mail (a bare PDF included: ADR 0014),
+  //                       or is unreadable
+  rpc OpenDocument(OpenDocumentRequest) returns (OpenDocumentResponse);
+
+  // What the parser can parse now, so the caller can tell which documents to
+  // parse again: one an older version of its parser read, and one that failed
+  // under an earlier instance, whose configuration may have changed since.
+  rpc DescribeParsers(DescribeParsersRequest) returns (DescribeParsersResponse);
+}
+
+message DescribeParsersRequest {}
+
+message DescribeParsersResponse {
+  repeated ParserVersion parsers = 1;
+  // Changes every time the parser starts. Passwords, the owner's details, and
+  // OCR are set when it starts, so a document that failed for want of one may
+  // parse under a new instance; never anything derived from them.
+  string instance = 2;
+}
+
+message ParserVersion {
+  // As in ParseDocumentResponse.parser, e.g. "taishin.credit_card".
+  string name = 1;
+  // As in ParseDocumentResponse.parser_version.
+  string version = 2;
+}
+
+message ParseDocumentRequest {
+  // The caller's document ID, echoed in logs and traces on both sides.
+  string document_id = 1;
+  // A statement e-mail (ADR 0014), as received.
+  bytes content = 2;
+}
+
+message OpenDocumentRequest {
+  // As in ParseDocumentRequest.
+  string document_id = 1;
+  bytes content = 2;
+}
+
+message OpenDocumentResponse {
+  Email email = 1;
+  // The e-mail's attachments in order.
+  repeated File files = 2;
+}
+
+message Email {
+  // Header values with encoded words decoded, e.g. "國泰世華銀行 <bank@example.com>".
+  string sender = 1;
+  string recipient = 2;
+  string subject = 3;
+  // Unset when the message has no readable Date header.
+  google.protobuf.Timestamp date = 4;
+  // The body to show, HTML when the message has it, else plain text; at most
+  // one is set. Images the HTML references by Content-ID are embedded as data:
+  // URIs, so it needs nothing else to display.
+  string html = 5;
+  string text = 6;
+}
+
+message File {
+  string filename = 1;
+  // "application/pdf" when the bytes are a PDF, else as the e-mail declares it.
+  string content_type = 2;
+  bytes content = 3;
+  // A PDF that none of the configured passwords opens, returned as received.
+  bool locked = 4;
+  // The one file that stands for the document: the PDF that parsing would
+  // pick as the statement (a known name whose text carries the bank's marker,
+  // else any PDF a parser recognizes by its text), else the first PDF. None
+  // without a PDF.
+  bool primary = 5;
+}
+
+message ParseDocumentResponse {
+  // Which parser handled the document, e.g. "taishin.credit_card".
+  string parser = 1;
+  // Bumped whenever the parser's output for the same input can change. The
+  // caller keeps it with what it stored, to tell which documents an older
+  // version parsed.
+  string parser_version = 2;
+  Statement statement = 3;
+  // Problems that did not stop parsing, e.g. OCR text that could not be read.
+  // A figure that does not add up is a Check, never a warning.
+  repeated string warnings = 4;
+}
+
+// What one statement reports.
+message Statement {
+  // Stable institution ID: "esun", "taishin", "skis".
+  string institution = 1;
+  // The first day the statement covers; unset when it prints none, as a card
+  // bill.
+  google.type.Date period_start = 2;
+  // The day it closes on: a bill's closing date, a deposit statement's last
+  // day, a securities statement's holdings date.
+  google.type.Date closing_date = 3;
+  // Each account once, all its units together.
+  repeated AccountReport accounts = 4;
+  // Every figure the statement prints that its lines can be checked against.
+  repeated Check checks = 5;
+  // Set for a card bill only.
+  CardBill card_bill = 6;
+}
+
+// What only a card bill has. What it owes is also its card account's balance
+// on the closing date; the caller makes it so (ADR 0022).
+message CardBill {
+  google.type.Date due_date = 1;
+  // ISO 4217 code of the bill, e.g. "TWD".
+  string currency = 2;
+  // As printed.
+  google.type.Decimal total_due = 3;
+}
+
+enum AccountKind {
+  ACCOUNT_KIND_UNSPECIFIED = 0;
+  // A bank's card account: one per bank, its number empty. Its lines are the
+  // bill's card lines; its balance comes from the bill's total due.
+  ACCOUNT_KIND_CREDIT_CARD = 1;
+  ACCOUNT_KIND_DEPOSIT = 2;
+  // A brokerage account: its units are securities, by name (ADR 0017).
+  ACCOUNT_KIND_SECURITIES = 3;
+  // A bank's rewards: one per bank, its number empty, each program a unit
+  // (ADR 0019).
+  ACCOUNT_KIND_POINTS = 4;
+  // A loan: its balance is the principal outstanding (ADR 0022).
+  ACCOUNT_KIND_LOAN = 5;
+}
+
+message AccountReport {
+  AccountKind kind = 1;
+  // As printed, usually masked by the bank, and normalized by the parser so
+  // one account reads the same every month. Empty for a bank's card and
+  // points accounts.
+  string number = 2;
+  // The source's name for it, e.g. "臺幣活存".
+  string name = 3;
+  repeated Balance balances = 4;
+  repeated Line lines = 5;
+  // Points the statement says will lapse (ADR 0019).
+  repeated Expiry expiries = 6;
+}
+
+// What the statement prints the account held of a unit at the end of a day:
+// a closing balance on the closing date, an opening balance on the day before
+// the period, a holding on the holdings date. A securities statement lists the
+// whole account: a security it does not list holds nothing.
+message Balance {
+  // Money: ISO 4217. A security: its name, Unicode-normalized. Points: the
+  // program's name as printed.
+  string unit = 1;
+  google.type.Date as_of = 2;
+  google.type.Decimal amount = 3;
+}
+
+// A line, its amount as the statement prints it for the account (ADR 0021):
+// a card bill's charges positive and credits negative; a deposit line's money
+// in positive; a trade's shares bought positive and sold negative; points
+// added positive and used negative.
+message Line {
+  google.type.Date date = 1;
+  // As for Balance.
+  string unit = 2;
+  google.type.Decimal amount = 3;
+  LineKind kind = 4;
+  // As printed: the merchant, the bank's summary, the security's name, or a
+  // points column's label.
+  string description = 5;
+  oneof detail {
+    CardLine card = 10;
+    DepositLine deposit = 11;
+    Trade trade = 12;
+  }
+}
+
+enum LineKind {
+  LINE_KIND_UNSPECIFIED = 0;
+  // Card lines.
+  LINE_KIND_PURCHASE = 1;
+  LINE_KIND_FOREIGN_TRANSACTION_FEE = 2;
+  // Annual fees and their waivers (negative).
+  LINE_KIND_ANNUAL_FEE = 3;
+  LINE_KIND_REFUND = 4;
+  // Cash back and points redeemed against the bill.
+  LINE_KIND_REBATE = 5;
+  LINE_KIND_PAYMENT = 6;
+  // Deposit lines: only what the bank's wording says; payments and transfers
+  // between the owner's accounts are worked out by the caller.
+  LINE_KIND_INTEREST = 7;
+  LINE_KIND_FEE = 8;
+  LINE_KIND_OTHER = 9;
+  // Trades.
+  LINE_KIND_BUY = 10;
+  LINE_KIND_SELL = 11;
+  // Points.
+  LINE_KIND_EARN = 12;
+  LINE_KIND_ADJUST = 13;
+  LINE_KIND_REDEEM = 14;
+}
+
+message CardLine {
+  // Unset when the statement does not print a posting date.
+  google.type.Date posting_date = 1;
+  // For a foreign charge: the amount and ISO 4217 currency as charged, both or
+  // neither.
+  google.type.Decimal original_amount = 2;
+  string original_currency = 3;
+  // ISO 3166-1 alpha-2 country of the merchant, when printed.
+  string country = 4;
+  // Last four digits of the card, when the bill lists several cards.
+  string card_last4 = 5;
+}
+
+message DepositLine {
+  // The bank's note on it, e.g. who a transfer came from.
+  string memo = 1;
+  // The other side's bank and account, when printed.
+  string counterparty = 2;
+  // The running balance after the line, when printed.
+  google.type.Decimal balance = 3;
+}
+
+// A trade's money (ADR 0017); its shares are the line's amount.
+message Trade {
+  google.type.Decimal price = 1;
+  // The broker's category as printed, e.g. "集買".
+  string category = 2;
+  // 價金: the shares at the price.
+  google.type.Decimal amount = 3;
+  google.type.Decimal fee = 4;
+  google.type.Decimal tax = 5;
+  // 應收付: what the owner receives (positive) or pays (negative); zero for a
+  // buy paid in advance.
+  google.type.Decimal net = 6;
+  // 預繳金, unset unless the buy was paid in advance.
+  google.type.Decimal prepaid = 7;
+}
+
+// Points that will lapse by a date, as printed: one date's, one month's (by
+// its last day), or several months' together.
+message Expiry {
+  string unit = 1;
+  google.type.Decimal amount = 2;
+  google.type.Date by = 3;
+}
+
+// A figure the statement prints and what the lines it covers come to.
+message Check {
+  // The statement's own label, e.g. "本期新增款項", "臺幣活存 期末餘額".
+  string name = 1;
+  // As for Balance.
+  string unit = 2;
+  google.type.Decimal computed = 3;
+  google.type.Decimal stated = 4;
+  bool balanced = 5;
+}

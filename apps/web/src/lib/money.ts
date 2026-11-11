@@ -50,6 +50,22 @@ export function sign(value: string): -1 | 0 | 1 {
     return units < 0n ? -1 : units > 0n ? 1 : 0;
 }
 
+/**
+ * `value` divided by a whole number `n`, to `places` decimals, halves away from zero: an average.
+ * ("2000", 3) → "667", ("-10", 4, 1) → "-2.5".
+ */
+export function divide(value: string, n: number, places = 0): string {
+    if (!Number.isSafeInteger(n) || n <= 0) throw new Error(`not a positive whole divisor: ${n}`);
+    const { units, scale } = parse(value);
+    // Scaled to `places` decimals and one more, then rounded as roundTo does.
+    const extra = Math.max(0, places + 1 - scale);
+    const quotient = (units * 10n ** BigInt(extra)) / BigInt(n);
+    const remainder = (units * 10n ** BigInt(extra)) % BigInt(n);
+    // The digits below the quotient's last only matter for an exact half: a remainder tips it over.
+    const tipped = remainder === 0n ? quotient : quotient * 10n + (units < 0n ? -1n : 1n);
+    return roundTo(render({ units: tipped, scale: scale + extra + (remainder === 0n ? 0 : 1) }), places);
+}
+
 /** To the nearest whole unit, halves away from zero: "296380.87" → "296381", "-2.5" → "-3". */
 export function roundWhole(value: string): string {
     return roundTo(value, 0);

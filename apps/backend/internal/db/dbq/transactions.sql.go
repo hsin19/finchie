@@ -8,6 +8,7 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -85,35 +86,31 @@ const kindTotals = `-- name: KindTotals :many
 SELECT t.kind,
        count(*)::integer AS row_count,
        sum(t.amount)::numeric AS amount,
-       sum(CASE WHEN a.kind = 'credit_card' THEN -t.amount ELSE t.amount END)::numeric AS flow
+       sum(owner_flow(a.kind, t.amount))::numeric AS flow
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
-WHERE ($1::date IS NULL OR t.transaction_date >= $1::date)
-  AND ($2::date IS NULL OR t.transaction_date <= $2::date)
-  AND ($3::date IS NULL OR s.closing_date >= $3::date)
-  AND ($4::date IS NULL OR s.closing_date <= $4::date)
-  AND ($5::text IS NULL OR s.institution = $5::text)
-  AND ($6::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $6::text)
-  AND ($7::bigint IS NULL OR t.account_id = $7::bigint)
-  AND (NOT $8::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND ($9::text IS NULL OR a.kind = $9::text)
-  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
-  AND (NOT $10::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-  AND ($11::text IS NULL
-       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($11::text)) > 0)
+WHERE ($1::text IS NULL OR s.institution = $1::text)
+  AND ($2::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $2::text)
+  AND ($3::bigint IS NULL OR t.account_id = $3::bigint)
+  AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
+      t.description, t.memo,
+      from_date => $4::date, to_date => $5::date,
+      closing_from => $6::date, closing_to => $7::date,
+      overseas => $8::boolean, of_account_kind => $9::text,
+      hide_transfers => $10::boolean, query => $11::text)
 GROUP BY t.kind
 ORDER BY t.kind
 `
 
 type KindTotalsParams struct {
+	Institution   *string
+	CardLast4     *string
+	AccountID     *int64
 	FromDate      pgtype.Date
 	ToDate        pgtype.Date
 	ClosingFrom   pgtype.Date
 	ClosingTo     pgtype.Date
-	Institution   *string
-	CardLast4     *string
-	AccountID     *int64
 	Overseas      bool
 	AccountKind   *string
 	HideTransfers bool
@@ -121,7 +118,7 @@ type KindTotalsParams struct {
 }
 
 type KindTotalsRow struct {
-	Kind     string
+	Kind     domain.LineKind
 	RowCount int32
 	Amount   pgtype.Numeric
 	Flow     pgtype.Numeric
@@ -131,13 +128,13 @@ type KindTotalsRow struct {
 // applies.
 func (q *Queries) KindTotals(ctx context.Context, arg KindTotalsParams) ([]KindTotalsRow, error) {
 	rows, err := q.db.Query(ctx, kindTotals,
+		arg.Institution,
+		arg.CardLast4,
+		arg.AccountID,
 		arg.FromDate,
 		arg.ToDate,
 		arg.ClosingFrom,
 		arg.ClosingTo,
-		arg.Institution,
-		arg.CardLast4,
-		arg.AccountID,
 		arg.Overseas,
 		arg.AccountKind,
 		arg.HideTransfers,
@@ -171,7 +168,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.description, t
        t.original_amount, t.original_currency, t.card_last4
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
-WHERE t.kind IN ('purchase', 'foreign_transaction_fee', 'refund')
+WHERE t.kind = ANY ($1::text[])
 ORDER BY t.id
 `
 
@@ -181,16 +178,16 @@ type LinkLinesRow struct {
 	Institution      string
 	TransactionDate  pgtype.Date
 	Description      string
-	Kind             string
+	Kind             domain.LineKind
 	Amount           pgtype.Numeric
 	OriginalAmount   pgtype.Numeric
 	OriginalCurrency *string
 	CardLast4        *string
 }
 
-// The lines a link can start or end at.
-func (q *Queries) LinkLines(ctx context.Context) ([]LinkLinesRow, error) {
-	rows, err := q.db.Query(ctx, linkLines)
+// The lines of these kinds, which a parent link can start or end at.
+func (q *Queries) LinkLines(ctx context.Context, kinds []string) ([]LinkLinesRow, error) {
+	rows, err := q.db.Query(ctx, linkLines, kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -240,20 +237,16 @@ WITH matched AS (
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
     WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
-      AND ($5::date IS NULL OR t.transaction_date >= $5::date)
-      AND ($6::date IS NULL OR t.transaction_date <= $6::date)
-      AND ($7::date IS NULL OR s.closing_date >= $7::date)
-      AND ($8::date IS NULL OR s.closing_date <= $8::date)
-      AND ($9::text[] IS NULL OR t.kind = ANY ($9::text[]))
-      AND ($10::text IS NULL OR s.institution = $10::text)
-      AND ($11::text IS NULL OR t.card_last4 = $11::text)
-      AND ($12::bigint IS NULL OR t.account_id = $12::bigint)
-      AND (NOT $13::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-      AND ($14::text IS NULL OR a.kind = $14::text)
-      -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
-      AND (NOT $15::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-      AND ($16::text IS NULL
-           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($16::text)) > 0)
+      AND ($5::text[] IS NULL OR t.kind = ANY ($5::text[]))
+      AND ($6::text IS NULL OR s.institution = $6::text)
+      AND ($7::text IS NULL OR t.card_last4 = $7::text)
+      AND ($8::bigint IS NULL OR t.account_id = $8::bigint)
+      AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
+                       t.description, t.memo,
+                       from_date => $9::date, to_date => $10::date,
+                       closing_from => $11::date, closing_to => $12::date,
+                       overseas => $13::boolean, of_account_kind => $14::text,
+                       hide_transfers => $15::boolean, query => $16::text)
 )
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
@@ -261,7 +254,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
-       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -303,14 +296,14 @@ type SearchTransactionsParams struct {
 	Sort          string
 	RowOffset     int32
 	RowLimit      int32
-	FromDate      pgtype.Date
-	ToDate        pgtype.Date
-	ClosingFrom   pgtype.Date
-	ClosingTo     pgtype.Date
 	Kinds         []string
 	Institution   *string
 	CardLast4     *string
 	AccountID     *int64
+	FromDate      pgtype.Date
+	ToDate        pgtype.Date
+	ClosingFrom   pgtype.Date
+	ClosingTo     pgtype.Date
 	Overseas      bool
 	AccountKind   *string
 	HideTransfers bool
@@ -324,7 +317,7 @@ type SearchTransactionsRow struct {
 	TransactionDate          pgtype.Date
 	PostingDate              pgtype.Date
 	Description              string
-	Kind                     string
+	Kind                     domain.LineKind
 	Amount                   pgtype.Numeric
 	OriginalAmount           pgtype.Numeric
 	OriginalCurrency         *string
@@ -333,7 +326,7 @@ type SearchTransactionsRow struct {
 	ParentID                 *int64
 	Parent                   []byte
 	Children                 []byte
-	AccountKind              string
+	AccountKind              domain.AccountKind
 	AccountID                int64
 	AccountName              *string
 	AccountNumber            string
@@ -353,15 +346,15 @@ type SearchTransactionsRow struct {
 	CounterpartStatementID   *int64
 	CounterpartDate          pgtype.Date
 	CounterpartAccountID     *int64
-	CounterpartAccountKind   *string
+	CounterpartAccountKind   domain.AccountKind
 	CounterpartInstitution   *string
 	CounterpartAccountName   *string
 	CounterpartAccountNumber *string
 	CounterpartFullNumber    *string
 }
 
-// Search filters: a NULL argument means "no filter". SearchTransactions and TransactionTotals must
-// apply the same ones. With @fold, a line with a parent (a linked fee or refund) is not a row of its
+// Search filters: a NULL argument means "no filter". The ones every view of the lines shares are
+// line_matches (migration 00017). With @fold, a line with a parent (a linked fee or refund) is not a row of its
 // own: it is one of its parent's children, and the parent's amounts count it (ADR 0009).
 // A link (ADR 0016) is one row too: the line its money went to (another account's inflow, a card bill's
 // payment line) is listed under the outflow it came from whenever that outflow matches as well. A view
@@ -376,14 +369,14 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 		arg.Sort,
 		arg.RowOffset,
 		arg.RowLimit,
-		arg.FromDate,
-		arg.ToDate,
-		arg.ClosingFrom,
-		arg.ClosingTo,
 		arg.Kinds,
 		arg.Institution,
 		arg.CardLast4,
 		arg.AccountID,
+		arg.FromDate,
+		arg.ToDate,
+		arg.ClosingFrom,
+		arg.ClosingTo,
 		arg.Overseas,
 		arg.AccountKind,
 		arg.HideTransfers,
@@ -506,7 +499,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
-       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -547,7 +540,7 @@ type TransactionFamilyRow struct {
 	TransactionDate          pgtype.Date
 	PostingDate              pgtype.Date
 	Description              string
-	Kind                     string
+	Kind                     domain.LineKind
 	Amount                   pgtype.Numeric
 	OriginalAmount           pgtype.Numeric
 	OriginalCurrency         *string
@@ -556,7 +549,7 @@ type TransactionFamilyRow struct {
 	ParentID                 *int64
 	Parent                   []byte
 	Children                 []byte
-	AccountKind              string
+	AccountKind              domain.AccountKind
 	AccountID                int64
 	AccountName              *string
 	AccountNumber            string
@@ -576,7 +569,7 @@ type TransactionFamilyRow struct {
 	CounterpartStatementID   *int64
 	CounterpartDate          pgtype.Date
 	CounterpartAccountID     *int64
-	CounterpartAccountKind   *string
+	CounterpartAccountKind   domain.AccountKind
 	CounterpartInstitution   *string
 	CounterpartAccountName   *string
 	CounterpartAccountNumber *string
@@ -659,7 +652,7 @@ WITH lines AS (
                AND ($3::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $3::text)
                AND ($4::bigint IS NULL OR t.account_id = $4::bigint)) AS pick_match,
            t.amount + coalesce(kids.amount, 0) AS amount,
-           CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS flow,
+           owner_flow(a.kind, t.amount + coalesce(kids.amount, 0)) AS flow,
            (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer,
            -- Shares or points, not money: neither spent nor received (ADR 0017, ADR 0019).
            a.kind IN ('securities', 'points') AS shares
@@ -671,15 +664,12 @@ WITH lines AS (
                        FROM transactions c
                        WHERE $5::boolean AND c.parent_id = t.id) kids ON true
     WHERE NOT ($5::boolean AND t.parent_id IS NOT NULL)
-      AND ($6::date IS NULL OR t.transaction_date >= $6::date)
-      AND ($7::date IS NULL OR t.transaction_date <= $7::date)
-      AND ($8::date IS NULL OR s.closing_date >= $8::date)
-      AND ($9::date IS NULL OR s.closing_date <= $9::date)
-      AND (NOT $10::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-      AND ($11::text IS NULL OR a.kind = $11::text)
-      AND (NOT $12::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-      AND ($13::text IS NULL
-           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower($13::text)) > 0)
+      AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
+                       t.description, t.memo,
+                       from_date => $6::date, to_date => $7::date,
+                       closing_from => $8::date, closing_to => $9::date,
+                       overseas => $10::boolean, of_account_kind => $11::text,
+                       hide_transfers => $12::boolean, query => $13::text)
 ),
 marked AS (
     SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
@@ -807,13 +797,13 @@ ORDER BY t.id
 type TransferLinesRow struct {
 	ID              int64
 	AccountID       int64
-	AccountKind     string
+	AccountKind     domain.AccountKind
 	Institution     string
 	Number          string
 	FullNumber      *string
 	StatementID     int64
 	TransactionDate pgtype.Date
-	Kind            string
+	Kind            domain.LineKind
 	Amount          pgtype.Numeric
 	Unit            string
 	Memo            *string

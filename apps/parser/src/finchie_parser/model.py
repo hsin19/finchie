@@ -1,24 +1,46 @@
+"""What a statement reports, as `finchie.parser.v2` carries it (ADR 0021): the accounts it reports, each with
+its balances on a day and the lines between, the figures it can be checked against, and what only a card bill
+has. `convert.py` maps it to the proto field by field; the proto's comments define each field."""
+
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 
+from finchie_parser.errors import LayoutError
 
-class Kind(StrEnum):
+
+class AccountKind(StrEnum):
+    CREDIT_CARD = "credit_card"
+    DEPOSIT = "deposit"
+    SECURITIES = "securities"
+    POINTS = "points"
+    LOAN = "loan"
+
+
+class LineKind(StrEnum):
+    # Card lines.
     PURCHASE = "purchase"
     FOREIGN_TRANSACTION_FEE = "foreign_transaction_fee"
     ANNUAL_FEE = "annual_fee"
     REFUND = "refund"
     REBATE = "rebate"
     PAYMENT = "payment"
+    # Deposit lines: only what the bank's own wording says (ADR 0013).
+    INTEREST = "interest"
+    FEE = "fee"
+    OTHER = "other"
+    # Trades.
+    BUY = "buy"
+    SELL = "sell"
+    # Points.
+    EARN = "earn"
+    ADJUST = "adjust"
+    REDEEM = "redeem"
 
 
 @dataclass(frozen=True)
-class Transaction:
-    transaction_date: date
-    description: str
-    kind: Kind
-    amount: Decimal
+class CardLine:
     posting_date: date | None = None
     original_amount: Decimal | None = None
     original_currency: str = ""
@@ -27,77 +49,7 @@ class Transaction:
 
 
 @dataclass(frozen=True)
-class Reconciliation:
-    computed: Decimal
-    stated: Decimal
-    stated_label: str
-
-    @property
-    def balanced(self) -> bool:
-        return self.computed == self.stated
-
-
-@dataclass(frozen=True)
-class PointsExpiry:
-    """Points the bill says will lapse by a date (ADR 0019)."""
-
-    amount: Decimal
-    by: date
-
-
-class PointsKind(StrEnum):
-    EARN = "earn"
-    ADJUST = "adjust"
-    REDEEM = "redeem"
-
-
-@dataclass(frozen=True)
-class PointsLine:
-    """A period's movement as the bill totals it, under the bill's own label (ADR 0019)."""
-
-    label: str
-    kind: PointsKind
-    # Seen from the account: added positive, used negative.
-    amount: Decimal
-
-
-@dataclass(frozen=True)
-class PointsProgram:
-    """A rewards program on a card bill, its points a unit of their own (ADR 0019)."""
-
-    name: str
-    closing: Decimal
-    expiries: list[PointsExpiry] = field(default_factory=list)
-    lines: list[PointsLine] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class Statement:
-    institution: str
-    closing_date: date
-    due_date: date
-    currency: str
-    total_due: Decimal
-    transactions: list[Transaction]
-    reconciliation: Reconciliation
-    points: list[PointsProgram] = field(default_factory=list)
-
-
-class DepositKind(StrEnum):
-    """Only what the bank's own wording says (ADR 0013)."""
-
-    OTHER = "other"
-    INTEREST = "interest"
-    FEE = "fee"
-
-
-@dataclass(frozen=True)
 class DepositLine:
-    date: date
-    description: str
-    # Seen from the account: money in is positive.
-    amount: Decimal
-    kind: DepositKind = DepositKind.OTHER
     memo: str = ""
     counterparty: str = ""
     # The running balance after the line, when printed.
@@ -105,44 +57,9 @@ class DepositLine:
 
 
 @dataclass(frozen=True)
-class DepositAccount:
-    """One account in one currency, as a deposit statement shows it."""
+class Trade:
+    """A trade's money (ADR 0017); its shares are its line's amount."""
 
-    number: str
-    name: str
-    currency: str
-    closing_balance: Decimal
-    lines: list[DepositLine]
-    # None when there is nothing to add up: no opening balance and no running balance printed.
-    reconciliation: Reconciliation | None
-    opening_balance: Decimal | None = None
-
-
-@dataclass(frozen=True)
-class DepositStatement:
-    institution: str
-    period_start: date
-    period_end: date
-    accounts: list[DepositAccount]
-
-    @property
-    def balanced(self) -> bool:
-        return all(a.reconciliation is None or a.reconciliation.balanced for a in self.accounts)
-
-
-class TradeSide(StrEnum):
-    BUY = "buy"
-    SELL = "sell"
-
-
-@dataclass(frozen=True)
-class SecuritiesTrade:
-    date: date
-    # Unicode-normalized, as the exchanges spell it (ADR 0017).
-    name: str
-    side: TradeSide
-    # Positive, whichever the side.
-    shares: Decimal
     price: Decimal
     category: str
     amount: Decimal
@@ -154,34 +71,95 @@ class SecuritiesTrade:
 
 
 @dataclass(frozen=True)
-class SecuritiesHolding:
-    name: str
-    shares: Decimal
+class Line:
+    date: date
+    # Money: ISO 4217. A security: its name. Points: the program's name.
+    unit: str
+    # As the statement prints it for the account (ADR 0021).
+    amount: Decimal
+    kind: LineKind
+    description: str
+    detail: CardLine | DepositLine | Trade | None = None
+
+    def __post_init__(self) -> None:
+        # A foreign amount means nothing without its currency, nor a currency without the amount: the
+        # backend matches refunds in either both or neither (ADR 0009).
+        card = self.detail
+        if isinstance(card, CardLine) and (card.original_amount is None) != (card.original_currency == ""):
+            raise LayoutError(f"{self.date} {self.description!r}: a foreign amount and its currency come together")
 
 
 @dataclass(frozen=True)
-class SecuritiesStatement:
-    institution: str
-    account_number: str
-    period_start: date
-    period_end: date
-    holdings_date: date
-    # The whole account: a security not listed holds nothing.
-    holdings: list[SecuritiesHolding]
-    trades: list[SecuritiesTrade]
-    reconciliation: Reconciliation
+class Balance:
+    unit: str
+    as_of: date
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class Expiry:
+    """Points that will lapse by a date (ADR 0019)."""
+
+    unit: str
+    amount: Decimal
+    by: date
+
+
+@dataclass(frozen=True)
+class AccountReport:
+    kind: AccountKind
+    # Empty for a bank's card and points accounts.
+    number: str
+    name: str
+    balances: list[Balance] = field(default_factory=list)
+    lines: list[Line] = field(default_factory=list)
+    expiries: list[Expiry] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Check:
+    """A figure the statement prints, under its own label, and what the lines it covers come to."""
+
+    name: str
+    unit: str
+    computed: Decimal
+    stated: Decimal
 
     @property
     def balanced(self) -> bool:
-        return self.reconciliation.balanced
+        return self.computed == self.stated
 
 
-AnyStatement = Statement | DepositStatement | SecuritiesStatement
+@dataclass(frozen=True)
+class CardBill:
+    due_date: date
+    currency: str
+    total_due: Decimal
+
+
+@dataclass(frozen=True)
+class Statement:
+    institution: str
+    # None when the statement prints no first day, as a card bill.
+    period_start: date | None
+    closing_date: date
+    accounts: list[AccountReport]
+    checks: list[Check] = field(default_factory=list)
+    card_bill: CardBill | None = None
+
+    @property
+    def balanced(self) -> bool:
+        """Whether every check balances; one with nothing to check is."""
+        return all(check.balanced for check in self.checks)
+
+    @property
+    def line_count(self) -> int:
+        return sum(len(account.lines) for account in self.accounts)
 
 
 @dataclass(frozen=True)
 class ParseResult:
     parser: str
     parser_version: str
-    statement: AnyStatement
+    statement: Statement
     warnings: list[str] = field(default_factory=list)

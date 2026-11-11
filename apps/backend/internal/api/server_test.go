@@ -17,7 +17,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
@@ -28,7 +28,7 @@ func newAPI(t *testing.T, maxUploadBytes int64) (*echo.Echo, *pgxpool.Pool) {
 
 const testMailbox = "finchie@mailbox.example"
 
-func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv1.ParserServiceClient) (*echo.Echo, *pgxpool.Pool) {
+func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv2.ParserServiceClient) (*echo.Echo, *pgxpool.Pool) {
 	t.Helper()
 	pool := testdb.Pool(t)
 	// Insert-only client: jobs are queued but nothing works them in these tests.
@@ -104,7 +104,7 @@ func TestUploadStoresTheDocumentAndQueuesOneParse(t *testing.T) {
 		t.Fatalf("status = %d: %s", first.Code, first.Body)
 	}
 	doc := decode[Document](t, first)
-	if doc.Status != DocumentStatusPending || doc.ContentType != "message/rfc822" || doc.SizeBytes != 19 || len(doc.Sha256) != 64 {
+	if doc.Status != Pending || doc.ContentType != "message/rfc822" || doc.SizeBytes != 19 || len(doc.Sha256) != 64 {
 		t.Fatalf("document = %+v", doc)
 	}
 
@@ -197,21 +197,21 @@ func TestReadEndpoints(t *testing.T) {
 func TestDocumentListPagesOnFromTheLastDocumentAndFilters(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	// Oldest first: a1 parsed, a2 failed, a3 skipped (no parser handles it), b4 needs review.
-	states := []struct{ name, status, error string }{
+	states := []struct{ name, status, failure string }{
 		{"a1-bill.eml", "parsed", ""},
-		{"a2-bill.eml", "failed", "Internal: a line before its table's headings"},
-		{"a3-promo.eml", "failed", "Unimplemented: no parser claims it"},
+		{"a2-bill.eml", "failed", "layout"},
+		{"a3-promo.eml", "skipped", "unsupported"},
 		{"b4-BILL.eml", "needs_review", ""},
 	}
 	ids := map[string]int64{}
 	for i, s := range states {
 		doc := decode[Document](t, postFile(t, e, "file", s.name, fmt.Appendf(nil, "From: bank\r\n\r\n%d", i)))
 		ids[s.name] = doc.Id
-		var docError *string
-		if s.error != "" {
-			docError = &s.error
+		var failure *string
+		if s.failure != "" {
+			failure = &s.failure
 		}
-		if _, err := pool.Exec(t.Context(), "UPDATE documents SET status = $1, error = $2 WHERE id = $3", s.status, docError, doc.Id); err != nil {
+		if _, err := pool.Exec(t.Context(), "UPDATE documents SET status = $1, failure = $2 WHERE id = $3", s.status, failure, doc.Id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -231,7 +231,7 @@ func TestDocumentListPagesOnFromTheLastDocumentAndFilters(t *testing.T) {
 	if got := names(next); !slices.Equal(got, []string{"a2-bill.eml", "a1-bill.eml"}) {
 		t.Fatalf("next page = %v", got)
 	}
-	want := []StateCount{{State: DocumentStateParsed, Count: 1}, {State: DocumentStateNeedsReview, Count: 1}, {State: DocumentStateFailed, Count: 1}, {State: DocumentStateSkipped, Count: 1}}
+	want := []StateCount{{State: Parsed, Count: 1}, {State: NeedsReview, Count: 1}, {State: Failed, Count: 1}, {State: Skipped, Count: 1}}
 	if !slices.Equal(next.ByState, want) {
 		t.Fatalf("byState = %+v, want %+v", next.ByState, want)
 	}
@@ -246,9 +246,14 @@ func TestDocumentListPagesOnFromTheLastDocumentAndFilters(t *testing.T) {
 	if got := names(bills); !slices.Equal(got, []string{"a1-bill.eml"}) {
 		t.Fatalf("parsed bills = %v", got)
 	}
-	want = []StateCount{{State: DocumentStateParsed, Count: 1}, {State: DocumentStateNeedsReview, Count: 1}, {State: DocumentStateFailed, Count: 1}}
+	want = []StateCount{{State: Parsed, Count: 1}, {State: NeedsReview, Count: 1}, {State: Failed, Count: 1}}
 	if !slices.Equal(bills.ByState, want) {
 		t.Fatalf("bills byState = %+v, want %+v", bills.ByState, want)
+	}
+	// Documents already shown are fetched again by id, wherever they fall in the list.
+	shown := decode[DocumentPage](t, get(t, e, fmt.Sprintf("/api/documents?id=%d&id=%d", ids["a1-bill.eml"], ids["a3-promo.eml"])))
+	if got := names(shown); !slices.Equal(got, []string{"a3-promo.eml", "a1-bill.eml"}) {
+		t.Fatalf("by id = %v", got)
 	}
 }
 
@@ -298,5 +303,13 @@ func TestTheMailFilterIsMissingWithoutAMailboxAddress(t *testing.T) {
 	recorder := get(t, e, "/api/mail-filters.xml")
 	if recorder.Code != http.StatusNotFound || !strings.Contains(decode[Problem](t, recorder).Message, "BACKEND_MAILBOX_ADDRESS") {
 		t.Fatalf("mail filter: %d %s", recorder.Code, recorder.Body)
+	}
+}
+
+func TestTheWebAppReadsTheDeploymentsSettingsRatherThanKeepingItsOwn(t *testing.T) {
+	e, _ := newAPI(t, 32<<20)
+	settings := decode[Settings](t, get(t, e, "/api/settings"))
+	if settings.MaxUploadBytes != 32<<20 || settings.SourceIntervalHours != 6 || settings.BaseCurrency != "TWD" {
+		t.Fatalf("settings = %+v", settings)
 	}
 }

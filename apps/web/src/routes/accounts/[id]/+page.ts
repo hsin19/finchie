@@ -3,7 +3,7 @@ import {
     LEDGER,
     need,
 } from "#lib/api/client.js";
-import { institution } from "#lib/labels.js";
+import { institution } from "#lib/institutions.js";
 import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 

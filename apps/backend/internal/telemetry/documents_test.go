@@ -8,13 +8,14 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
 func TestDocumentsByStatus(t *testing.T) {
 	pool := testdb.Pool(t)
 	queries := dbq.New(pool)
-	add := func(name, status, reason string) {
+	add := func(name string, status domain.DocumentStatus, failure domain.Failure) {
 		t.Helper()
 		doc, err := queries.UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
 			Sha256: []byte(name), Filename: name, ContentType: "application/pdf", Content: []byte("%PDF"),
@@ -23,18 +24,18 @@ func TestDocumentsByStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		finish := dbq.FinishDocumentParams{ID: doc.ID, Status: status, Warnings: []string{}}
-		if reason != "" {
-			finish.Error = &reason
+		if failure != "" {
+			finish.Failure = &failure
 		}
 		if err := queries.FinishDocument(t.Context(), finish); err != nil {
 			t.Fatal(err)
 		}
 	}
-	add("a.pdf", "parsed", "")
-	add("b.pdf", "parsed", "")
-	add("c.pdf", "needs_review", "")
-	add("d.pdf", "failed", "Internal: layout changed")
-	add("e.pdf", "failed", "Unimplemented: no parser recognizes e.pdf")
+	add("a.pdf", domain.Parsed, "")
+	add("b.pdf", domain.Parsed, "")
+	add("c.pdf", domain.NeedsReview, "")
+	add("d.pdf", domain.Failed, domain.Layout)
+	add("e.pdf", domain.Skipped, domain.Unsupported)
 
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))

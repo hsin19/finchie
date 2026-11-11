@@ -29,6 +29,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy==2.4.1",
     "pytest>=8.4.2",
     "ruff>=0.14.0",
 ]
@@ -46,6 +47,7 @@ packages = ["src/finchie_parser", "src/finchie"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["real_environment: reads PARSER_* from the environment (tests/conftest.py)"]
 
 [tool.ruff]
 line-length = 120
@@ -55,3 +57,30 @@ extend-exclude = ["src/finchie"]
 select = ["E", "W", "F", "UP", "B", "SIM", "I", "N", "RUF", "PT", "DTZ"]
 # Statements are full of full-width CJK punctuation; parsers and fixtures must match it verbatim.
 ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src/finchie_parser", "tests"]
+mypy_path = ["src", "tests"]
+# Generated from proto/ (do not edit); its .pyi stubs are what the rest is checked against.
+exclude = ["^src/finchie/"]
+# Generated without annotations (grpcio's plugin), and OpenTelemetry's unannotated constructors.
+untyped_calls_exclude = ["finchie.parser.v2.parser_pb2_grpc", "opentelemetry"]
+
+[[tool.mypy.overrides]]
+# No type information shipped.
+module = [
+    "pdfplumber",
+    "pdfplumber.*",
+    "rapidocr",
+    "grpc",
+    "grpc.*",
+    "grpc_health.*",
+    "grpc_reflection.*",
+    "google.type.*",
+    "google.protobuf.*",
+    "pycountry",
+    "pypdfium2",
+]
+ignore_missing_imports = true

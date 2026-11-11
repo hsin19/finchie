@@ -8,6 +8,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 )
 
 // ObserveAccountGaps reports finchie.accounts.gaps: how many accounts have balances that do not join
@@ -22,19 +24,11 @@ func ObserveAccountGaps(pool *pgxpool.Pool, meter metric.Meter) error {
 		return fmt.Errorf("account gaps gauge: %w", err)
 	}
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		gaps, err := dbq.New(pool).AccountGaps(ctx, nil)
+		gaps, err := ledger.Gaps(ctx, dbq.New(pool), nil)
 		if err != nil {
-			return fmt.Errorf("account gaps: %w", err)
+			return err
 		}
-		accounts := map[int64]bool{}
-		for _, gap := range gaps {
-			// A move in a unit no statement lists a line of is one nothing could show (ADR 0013).
-			if !gap.Itemized {
-				continue
-			}
-			accounts[gap.AccountID] = true
-		}
-		observer.ObserveInt64(gauge, int64(len(accounts)))
+		observer.ObserveInt64(gauge, int64(domain.GappedAccounts(gaps)))
 		return nil
 	}, gauge)
 	if err != nil {

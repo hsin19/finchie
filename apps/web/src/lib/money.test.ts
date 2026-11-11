@@ -4,6 +4,7 @@ import {
     it,
 } from "vitest";
 import {
+    divide,
     formatAmount,
     formatPrice,
     negate,
@@ -83,5 +84,25 @@ describe("roundWhole", () => {
         ["15124", "15124"],
     ])("%s → %s", (input, expected) => {
         expect(roundWhole(input)).toBe(expected);
+    });
+});
+
+describe("divide", () => {
+    it("averages exactly, rounding halves away from zero", () => {
+        expect(divide("2000", 3)).toBe("667");
+        expect(divide("1000", 3)).toBe("333");
+        expect(divide("5", 2)).toBe("3");
+        expect(divide("-5", 2)).toBe("-3");
+        expect(divide("-10", 4, 1)).toBe("-2.5");
+        expect(divide("100.01", 2, 2)).toBe("50.01");
+        expect(divide("100.01", 2)).toBe("50");
+        // Past what a float holds: 2^53 + 1 split in two.
+        expect(divide("9007199254740993", 1)).toBe("9007199254740993");
+        expect(divide("18014398509481987", 2)).toBe("9007199254740994");
+    });
+
+    it("refuses a divisor that is no positive whole number", () => {
+        expect(() => divide("10", 0)).toThrow();
+        expect(() => divide("10", 1.5)).toThrow();
     });
 });

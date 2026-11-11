@@ -10,7 +10,7 @@ import {
     monthOf,
     monthRange,
 } from "#lib/dates.js";
-import { institutionOrder } from "#lib/labels.js";
+import { sortInstitutions } from "#lib/institutions.js";
 import {
     approx,
     sum,
@@ -84,10 +84,12 @@ export function monthlyBills(statements: readonly Statement[], months: readonly 
     });
 }
 
-export function sortInstitutions(ids: string[]): string[] {
-    const rank = (id: string) => {
-        const i = institutionOrder.indexOf(id);
-        return i === -1 ? institutionOrder.length : i;
-    };
-    return ids.toSorted((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+/**
+ * What is still to pay: every bill due today or later that no deposit account has shown paid (a bill
+ * autopaid before its due date is not still due, ADR 0016). Not what the accounts page owes, which is
+ * each bank's newest unpaid bill, past due or not (the backend's net worth).
+ */
+export function dueBills(statements: readonly Statement[], today: string): { amount: string; next?: string; count: number; } {
+    const upcoming = statements.filter(s => s.dueDate >= today && !s.paidOn);
+    return { amount: totalDue(upcoming), next: upcoming.map(s => s.dueDate).sort()[0], count: upcoming.length };
 }

@@ -7,10 +7,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, deposit_detail, row
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositKind, DepositStatement
+from finchie_parser.model import Balance, Check, LineKind, Statement
 from finchie_parser.parsers.nextbank_deposit import NextBankDepositParser
 from finchie_parser.pdf import Word
 
@@ -25,10 +25,6 @@ HEADINGS = (
     ("餘額", 305, 322),
     ("備註", 434, 451),
 )
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 def heading(top: float, number: str, currency: str, balance: str) -> list[Word]:
@@ -83,35 +79,43 @@ PAGE_3 = [
 ]
 
 
-def parse(page_3: list[Word] = PAGE_3, page_1: str = PAGE_1) -> DepositStatement:
-    document = FakeDocument([page_1, "", ""], words={1: PAGE_2, 2: page_3})
-    statement = NextBankDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+def parse(page_3: list[Word] = PAGE_3, page_1: str = PAGE_1) -> Statement:
+    document = FakeDocument([page_1], words={1: PAGE_2, 2: page_3})
+    statement = deposit(NextBankDepositParser().parse(document, ocr=None))
     return statement
 
 
 def test_nextbank_deposit_reads_a_section_per_account_and_currency_and_each_pocket() -> None:
     statement = parse()
-    assert (statement.period_start, statement.period_end) == (date(2026, 12, 1), date(2026, 12, 31))
-    assert [(a.name, a.number, a.currency, a.opening_balance, a.closing_balance) for a in statement.accounts] == [
-        ("新臺幣帳戶", TWD, "TWD", Decimal(10000), Decimal(10150)),
-        ("外幣帳戶", FX, "USD", Decimal("12.00"), Decimal("12.50")),
-        ("外幣帳戶", FX, "JPY", None, Decimal(1000)),
-        ("旅行基金", "AB12C", "TWD", None, Decimal(800)),
+    assert (statement.period_start, statement.closing_date) == (date(2026, 12, 1), date(2026, 12, 31))
+    before, end = date(2026, 11, 30), date(2026, 12, 31)
+    assert [(a.name, a.number, a.balances) for a in statement.accounts] == [
+        ("新臺幣帳戶", TWD, [Balance("TWD", before, Decimal(10000)), Balance("TWD", end, Decimal(10150))]),
+        # One account in two currencies: one report, each currency's balances in it.
+        (
+            "外幣帳戶",
+            FX,
+            [
+                Balance("USD", before, Decimal("12.00")),
+                Balance("USD", end, Decimal("12.50")),
+                Balance("JPY", end, Decimal(1000)),
+            ],
+        ),
+        ("旅行基金", "AB12C", [Balance("TWD", end, Decimal(800))]),
     ]
 
 
 def test_nextbank_deposit_reads_income_before_expense_and_marks_interest() -> None:
     lines = parse().accounts[0].lines
     assert [(line.date, line.description, line.amount, line.kind) for line in lines[:2]] == [
-        (date(2026, 12, 21), "利息存入", Decimal(300), DepositKind.INTEREST),
+        (date(2026, 12, 21), "利息存入", Decimal(300), LineKind.INTEREST),
         # Printed "-50" under 支出: money out, not a negative expense.
-        (date(2026, 12, 28), "轉帳支出", Decimal(-50), DepositKind.OTHER),
+        (date(2026, 12, 28), "轉帳支出", Decimal(-50), LineKind.OTHER),
     ]
 
 
 def test_nextbank_deposit_joins_a_wrapped_memo_to_its_line_in_printed_order() -> None:
-    assert [line.memo for line in parse().accounts[0].lines] == [
+    assert [deposit_detail(line).memo for line in parse().accounts[0].lines] == [
         "REF0001",
         "玉山銀行-0012345678901;FT0002",
         "INB0001;BPAY GLOBAL;REF0003",
@@ -119,15 +123,14 @@ def test_nextbank_deposit_joins_a_wrapped_memo_to_its_line_in_printed_order() ->
 
 
 def test_nextbank_deposit_reads_the_other_side_of_a_transfer_from_its_memo() -> None:
-    assert [line.counterparty for line in parse().accounts[0].lines] == ["", "808 0012345678901", ""]
+    assert [deposit_detail(line).counterparty for line in parse().accounts[0].lines] == ["", "808 0012345678901", ""]
 
 
 def test_nextbank_deposit_keeps_a_bank_it_has_no_code_for_by_name() -> None:
     page_2 = [Word("某某銀行-123456;FT0002", w.x0, w.x1, w.top) if w.text.startswith("玉山銀行") else w for w in PAGE_2]
-    document = FakeDocument([PAGE_1, "", ""], words={1: page_2, 2: PAGE_3})
-    statement = NextBankDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
-    assert statement.accounts[0].lines[1].counterparty == "某某銀行 123456"
+    document = FakeDocument([PAGE_1], words={1: page_2, 2: PAGE_3})
+    statement = deposit(NextBankDepositParser().parse(document, ocr=None))
+    assert deposit_detail(statement.accounts[0].lines[1]).counterparty == "某某銀行 123456"
 
 
 def test_nextbank_deposit_refuses_a_memo_row_with_no_line_next_to_it() -> None:
@@ -151,12 +154,21 @@ def test_nextbank_deposit_refuses_a_date_outside_the_period() -> None:
         parse(NEW_YEAR)
 
 
-def test_nextbank_deposit_reconciles_from_the_balance_brought_forward() -> None:
+def test_nextbank_deposit_checks_each_currency_from_the_balance_brought_forward() -> None:
     statement = parse()
-    dollars = statement.accounts[1]
-    assert dollars.reconciliation is not None
-    assert dollars.reconciliation.balanced
+    # The yen has neither lines nor a balance brought forward, the pocket no lines: nothing to check.
+    assert statement.checks == [
+        Check(f"新臺幣帳戶 {TWD} TWD 餘額", "TWD", Decimal(10150), Decimal(10150)),
+        Check(f"外幣帳戶 {FX} USD 餘額", "USD", Decimal("12.50"), Decimal("12.50")),
+    ]
     assert statement.balanced
+
+
+def test_nextbank_deposit_places_each_line_in_its_currency() -> None:
+    dollars = parse().accounts[1]
+    assert [(line.unit, line.amount, line.kind) for line in dollars.lines] == [
+        ("USD", Decimal("0.50"), LineKind.INTEREST)
+    ]
 
 
 def test_nextbank_deposit_refuses_a_pockets_lines_until_their_layout_is_seen() -> None:

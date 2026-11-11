@@ -7,27 +7,41 @@ them holds an amount, and the text alone does not say which.
 
 import re
 from collections.abc import Sequence
-from decimal import Decimal
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositAccount, DepositLine, DepositStatement
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, reconcile_account, rows_of
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.deposit import Accounts, Entry, amount_and_balance
+from finchie_parser.parsers.kinds import deposit_kind
+from finchie_parser.parsers.layout import rows_of
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
-from finchie_parser.text import amount, clean, iso_date, roc_date
+from finchie_parser.text import (
+    CENTS,
+    CURRENCY,
+    ISO_DATE,
+    MASKED_ACCOUNT,
+    ROC_DATE,
+    amount,
+    clean,
+    find,
+    iso_date,
+    roc_date,
+    token,
+)
 
-_PERIOD = re.compile(r"對帳單期間：(\d{4}/\d\d/\d\d)－(\d{4}/\d\d/\d\d)", re.ASCII)
+_PERIOD = re.compile(rf"對帳單期間：({ISO_DATE})－({ISO_DATE})", re.ASCII)
 _BALANCES_HEADER = "項目 銀行帳號 幣別 存款餘額(元)"
-_BALANCE = re.compile(r"^(\S+) (\d+\*+\d+) ([A-Z]{3}) (-?[\d,]+\.\d\d)$", re.ASCII)
-_AMOUNT = re.compile(r"-?[\d,]+\.\d\d", re.ASCII)
-_ROC_DATE = re.compile(r"\d{3}/\d\d/\d\d", re.ASCII)
+_BALANCE = re.compile(rf"^(\S+) ({MASKED_ACCOUNT}) ({CURRENCY}) ({CENTS})$", re.ASCII)
+# Two decimals: other numbers on a row, such as the other side's bank code, are not amounts.
+_AMOUNT = token(CENTS)
+_ROC_DATE = token(ROC_DATE)
 _COLUMNS = ("交易日期", "摘要", "提款", "存款", "轉入帳戶/備註", "對方帳號", "餘額")
 
 
 class EsunDepositParser(StatementParser):
     name = "esun.deposit"
-    version = "1"
+    version = "3"
     institution = "esun"
     # 玉山銀行2026年09月綜合對帳單; the card bill comes from the same address.
     sender_domains = ("esunbank.com",)
@@ -44,46 +58,43 @@ class EsunDepositParser(StatementParser):
         period = find(_PERIOD, texts[:1], "statement period")
         start, end = iso_date(period.group(1)), iso_date(period.group(2))
 
-        balances = _balances(texts)
-        lines = _lines(document, len(texts))
-        unknown = set(lines) - {number for number, _ in balances}
-        if unknown:
-            raise LayoutError(f"lines for accounts the balances do not list: {sorted(unknown)}")
-
-        accounts = []
-        for (number, currency), (name, closing) in balances.items():
-            own = lines.get(number, [])
-            if own and sum(1 for n, _ in balances if n == number) > 1:
-                # A foreign currency account holding several currencies would need the table's currency.
-                raise LayoutError(f"lines of {number}, which holds several currencies")
-            reconciliation = reconcile_account(None, closing, own, "存款餘額")
-            accounts.append(DepositAccount(number, name, currency, closing, own, reconciliation))
-        return Parsed(DepositStatement(self.institution, start, end, accounts))
+        accounts = _balances(texts)
+        for number, lines in _lines(document, len(texts)).items():
+            match accounts.numbered(number):
+                case []:
+                    raise LayoutError(f"lines for {number}, which the balances do not list")
+                case [account]:
+                    account.lines = lines
+                case _:
+                    # A foreign currency account holding several currencies would need the table's currency.
+                    raise LayoutError(f"lines of {number}, which holds several currencies")
+        # No opening balance: each account is checked from before its first line.
+        return Parsed(accounts.statement(self.institution, start, end, "存款餘額"))
 
 
-def _balances(texts: Sequence[str]) -> dict[tuple[str, str], tuple[str, Decimal]]:
+def _balances(texts: Sequence[str]) -> Accounts:
     """Each account and currency the 存款 section lists, with its name and balance, in order."""
     for text in texts:
         rows = text.splitlines()
         if _BALANCES_HEADER not in rows:
             continue
-        found: dict[tuple[str, str], tuple[str, Decimal]] = {}
+        accounts = Accounts()
         for row in rows[rows.index(_BALANCES_HEADER) + 1 :]:
             match = _BALANCE.match(row)
             if not match:
                 break
             name, number, currency, balance = match.groups()
-            found[(number, currency)] = (name, amount(balance))
-        if not found:
+            accounts.add(number, currency, name, amount(balance))
+        if not accounts:
             raise LayoutError("the deposit section lists no account")
-        return found
+        return accounts
     raise LayoutError("deposit section not found")
 
 
-def _lines(document: Document, pages: int) -> dict[str, list[DepositLine]]:
+def _lines(document: Document, pages: int) -> dict[str, list[Entry]]:
     """Every account's lines, in printed order. A 銀行帳號 row starts an account's table, a header row
     says where its columns are, and each row after it that starts with a date is a line."""
-    by_account: dict[str, list[DepositLine]] = {}
+    by_account: dict[str, list[Entry]] = {}
     number = ""
     columns: dict[str, Word] = {}
     for page in range(pages):
@@ -98,27 +109,25 @@ def _lines(document: Document, pages: int) -> dict[str, list[DepositLine]]:
     return by_account
 
 
-def _line(row: list[Word], columns: dict[str, Word]) -> DepositLine:
+def _line(row: list[Word], columns: dict[str, Word]) -> Entry:
     when, rest = row[0], row[1:]
     amounts = [word for word in rest if _AMOUNT.fullmatch(word.text)]
-    if len(amounts) != 2:
-        raise LayoutError(f"{when.text}: expected an amount and a balance, found {[w.text for w in amounts]}")
-    moved, balance = sorted(amounts, key=lambda w: w.x1)
     # Amounts are right-aligned under their column's heading.
-    withdrawal, deposit = columns["提款"], columns["存款"]
-    out = abs(moved.x1 - withdrawal.x1) < abs(moved.x1 - deposit.x1)
-    value = amount(moved.text)
+    withdrawal = columns["提款"]
+    value, balance = amount_and_balance(amounts, withdrawal, columns["存款"], when.text)
 
     text = [word for word in rest if word not in amounts]
     description = [word.text for word in text if word.x1 <= withdrawal.x0]
     notes = [word for word in text if word.x1 > withdrawal.x0]
     # 對方帳號 (bank code and account) starts left of its heading; 轉入帳戶/備註 well right of its own.
     split = (columns["轉入帳戶/備註"].x0 + columns["對方帳號"].x0) / 2
-    return DepositLine(
+    text_description = clean(" ".join(description))
+    return Entry(
         date=roc_date(when.text),
-        description=clean(" ".join(description)),
-        amount=-value if out else value,
+        description=text_description,
+        amount=value,
+        kind=deposit_kind(text_description),
         memo=clean(" ".join(word.text for word in notes if word.x0 < split)),
         counterparty=" ".join(word.text for word in notes if word.x0 >= split),
-        balance=amount(balance.text),
+        balance=balance,
     )

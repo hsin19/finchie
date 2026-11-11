@@ -3,13 +3,15 @@
 from datetime import date
 
 import pytest
+from fakes import FakeParser
 from pdfs import email_with
 
 from finchie_parser.documents import read_mail
 from finchie_parser.mail_filter import LABEL, MAILBOX_PLACEHOLDER, gmail_filter, gmail_query
 from finchie_parser.parsers import PARSERS, StatementParser
+from finchie_parser.parsers.base import registry
 from finchie_parser.passwords import Identity, MissingDetailError
-from finchie_parser.pipeline import claimants
+from finchie_parser.selection import claimants
 
 # Synthetic details (ADR 0006).
 IDENTITY = Identity(national_id="a123456789", birth_date=date(2000, 1, 2))
@@ -73,7 +75,7 @@ def test_each_banks_password_rule(parser: str, passwords: list[str]) -> None:
 def test_a_rule_without_its_detail_names_the_variable() -> None:
     with pytest.raises(MissingDetailError) as error:
         by_name("taishin.credit_card").passwords(Identity(national_id="A123456789"))
-    assert error.value.variable == "PARSER_IDENTITY__BIRTH_DATE"
+    assert error.value.detail == "birth_date"
 
 
 def test_the_gmail_filter_forwards_every_claim_to_the_placeholder() -> None:
@@ -91,3 +93,47 @@ def test_the_gmail_filter_searches_a_claims_domain_with_its_subject_terms_togeth
         gmail_query(PARSERS[:2])
         == '(from:(esunbank.com) subject:("信用卡電子帳單")) OR (from:(esunbank.com) subject:("綜合對帳單"))'
     )
+
+
+# Each parser's statement as the bank names the attachment.
+STATEMENT_NAMES = [
+    ("esun.credit_card", "ESUN_Estatement_202609.pdf"),
+    ("esun.deposit", "玉山銀行綜合對帳單.pdf"),
+    ("taishin.credit_card", "TSB_Creditcard_Estatement_11510.pdf"),
+    ("taishin.deposit", "電子對帳單.pdf"),
+    ("cathay.credit_card", "信用卡電子帳單消費明細_11511.pdf"),
+    ("cathay.deposit", "國泰世華電子存摺.pdf"),
+    ("hsbc.credit_card", "eStatement_202610.pdf"),
+    ("fubon.deposit", "銀行對帳單.pdf"),
+    ("nextbank.deposit", "NEXTBANK_綜合對帳單_2026_9.pdf"),
+    ("ctbc.deposit", "CTBC_Bank_Estatement_11510.pdf"),
+    ("skis.securities", "新光證券115年07月證券月對帳單.pdf"),
+]
+
+
+@pytest.mark.parametrize(("parser", "filename"), STATEMENT_NAMES)
+def test_each_parser_knows_its_statement_by_the_name_the_bank_gives_it(parser: str, filename: str) -> None:
+    assert by_name(parser).matches_filename(filename)
+    assert not by_name(parser).matches_filename("PaymentSlip.pdf")
+
+
+def test_every_parser_is_tested_for_its_statements_name() -> None:
+    assert {parser for parser, _ in STATEMENT_NAMES} == {parser.name for parser in PARSERS}
+
+
+def test_the_registry_refuses_two_parsers_of_one_name() -> None:
+    with pytest.raises(ValueError, match="registered twice"):
+        registry(FakeParser(), FakeParser())
+
+
+def test_the_registry_refuses_a_parser_without_its_metadata() -> None:
+    class Nameless(FakeParser):
+        text_marker = ""
+
+    class Unversioned(FakeParser):
+        version = "seven"
+
+    with pytest.raises(TypeError, match="text_marker"):
+        registry(Nameless())
+    with pytest.raises(ValueError, match="version"):
+        registry(Unversioned())

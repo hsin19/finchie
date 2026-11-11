@@ -60,11 +60,19 @@ paths:
           explode: true
           schema:
             type: array
-            items: { $ref: "#/components/schemas/DocumentState" }
+            items: { $ref: "#/components/schemas/DocumentStatus" }
         - name: q
           in: query
           description: Case-insensitive substring of the filename
           schema: { type: string }
+        - name: id
+          in: query
+          description: Only these documents, wherever they fall in the list (for refreshing ones already shown)
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: integer, format: int64 }
       responses:
         "200":
           description: One page of documents, and how many match in each state
@@ -432,6 +440,67 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
 
+  /api/net-worth:
+    get:
+      operationId: getNetWorth
+      summary: What the owner has less what they owe, in NT$, on a day
+      description: |
+        Every account's worth on the day added up, assets and liabilities (ADR 0022), overall and by kind;
+        accounts without a worth are counted, not guessed. Each account's newest balance on or before the
+        day, at each unit's newest price at the end of that day in Taipei (ADR 0023). `completeAsOf` is the
+        newest day every account had reported by; after it the figure is an estimate, and `behind` names
+        the accounts that have not reported since.
+      parameters:
+        - name: "on"
+          in: query
+          description: The day, Taipei's today when left out
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: The net worth
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NetWorth" }
+
+  /api/net-worth/history:
+    get:
+      operationId: getNetWorthHistory
+      summary: Net worth over time, by day or by month end
+      description: |
+        As /api/net-worth for each day from `from` to `to` (Taipei's today when left out), every day or
+        the last day of each month and `to` itself; at most 1000 points.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: step
+          in: query
+          schema: { $ref: "#/components/schemas/HistoryStep" }
+      responses:
+        "200":
+          description: The series, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NetWorthPoint" }
+        "400": { $ref: "#/components/responses/Problem" }
+
+  /api/settings:
+    get:
+      operationId: getSettings
+      summary: The deployment's settings the web app shows or obeys
+      responses:
+        "200":
+          description: The settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+
   /api/mail-filters.xml:
     get:
       operationId: getMailFilters
@@ -625,19 +694,22 @@ components:
 
     DocumentStatus:
       type: string
-      enum: [pending, parsed, needs_review, duplicate, failed]
+      enum: [pending, parsed, needs_review, duplicate, failed, skipped]
       description: |
         pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
         transactions don't add up to the statement. duplicate: the same statement came from
-        another document. failed: the parser could not read it (see `error`).
+        another document (`duplicateOf`). failed: it could not be parsed (`failure`, `error`).
+        skipped: no parser handles it, so there is nothing to fix or retry.
 
-    DocumentState:
+    DocumentFailure:
       type: string
-      enum: [pending, parsed, needs_review, duplicate, failed, skipped]
+      enum: [unsupported, locked, unreadable, layout, unavailable, invalid_response, other]
       description: |
-        A document's status as the web app shows it: a failure because no parser handles the file
-        (`Unimplemented`) is skipped, since there is nothing to fix or retry; failed is every other
-        failure.
+        Why a document could not be parsed: what has to change first. unsupported: no parser
+        handles it (the document is skipped). locked: its PDF needs a password the parser lacks.
+        unreadable: it is no e-mail, or cannot be read as one. layout: its layout is not the one
+        the parser knows. unavailable: the parser could not be reached in time; the backend tries
+        again by itself. invalid_response: the parser broke its contract. other: anything else.
 
     DocumentPage:
       type: object
@@ -655,7 +727,7 @@ components:
       type: object
       required: [state, count]
       properties:
-        state: { $ref: "#/components/schemas/DocumentState" }
+        state: { $ref: "#/components/schemas/DocumentStatus" }
         count: { type: integer }
 
     Document:
@@ -669,7 +741,14 @@ components:
         sha256: { type: string, description: Hex }
         receivedAt: { type: string, format: date-time }
         status: { $ref: "#/components/schemas/DocumentStatus" }
-        error: { type: string }
+        failure:
+          allOf: [{ $ref: "#/components/schemas/DocumentFailure" }]
+          description: Why it failed or was skipped; absent otherwise
+        error: { type: string, description: "The details of a failure, for reading" }
+        duplicateOf:
+          type: integer
+          format: int64
+          description: The document holding the statement this one repeats, when a duplicate
         parser: { type: string }
         parserVersion: { type: string }
         warnings:
@@ -715,7 +794,7 @@ components:
 
     Statement:
       type: object
-      required: [id, documentId, institution, closingDate, dueDate, currency, totalDue, reconciliation, transactionCount]
+      required: [id, documentId, institution, closingDate, dueDate, currency, totalDue, balanced, checks, transactionCount]
       properties:
         id: { type: integer, format: int64 }
         documentId: { type: integer, format: int64 }
@@ -724,13 +803,22 @@ components:
         dueDate: { type: string, format: date }
         currency: { type: string, example: TWD }
         totalDue: { $ref: "#/components/schemas/Decimal" }
-        reconciliation: { $ref: "#/components/schemas/Reconciliation" }
+        balanced: { type: boolean, description: "Every check balances" }
+        checks:
+          type: array
+          description: Every figure the bill prints that its lines are checked against, in its order (ADR 0021)
+          items: { $ref: "#/components/schemas/Check" }
         transactionCount: { type: integer }
         paidOn: { type: string, format: date, description: "When a deposit account or a later bill showed it paid (ADR 0016); absent while that is not known" }
 
     AccountKind:
       type: string
-      enum: [credit_card, deposit, securities, exchange, points]
+      enum: [credit_card, deposit, securities, exchange, points, loan]
+
+    AccountSide:
+      type: string
+      enum: [asset, liability]
+      description: "A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)"
 
     AccountContinuity:
       type: string
@@ -739,12 +827,13 @@ components:
 
     Account:
       type: object
-      required: [id, institution, kind, number, balances, continuity, gaps, expiries]
+      required: [id, institution, kind, side, number, balances, continuity, gaps, expiries]
       properties:
         id: { type: integer, format: int64 }
         institution: { type: string, example: esun }
         kind: { $ref: "#/components/schemas/AccountKind" }
-        number: { type: string, description: "As printed, usually masked; empty for a card bill", example: "1234567***890" }
+        side: { $ref: "#/components/schemas/AccountSide" }
+        number: { type: string, description: "As printed, usually masked; empty for a bank's card or points account", example: "1234567***890" }
         label: { type: string, nullable: true, description: The source's name for it, example: 臺幣活存 }
         name: { type: string, nullable: true, description: The owner's name for it }
         fullNumber: { type: string, description: "Its full number, where the owner gave one (ADR 0016)" }
@@ -985,14 +1074,15 @@ components:
           description: "應收付: received positive, paid negative; zero for a buy paid in advance"
         prepaid: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "預繳金, for a buy paid in advance" }
 
-    Reconciliation:
+    Check:
       type: object
-      required: [balanced, computed, stated, statedLabel]
+      required: [name, unit, computed, stated, balanced]
       properties:
-        balanced: { type: boolean }
+        name: { type: string, description: "The statement's own label for the figure, e.g. 本期新增款項" }
+        unit: { type: string, description: "What both are in, as printed; empty when the statement prints none" }
         computed: { $ref: "#/components/schemas/Decimal" }
         stated: { $ref: "#/components/schemas/Decimal" }
-        statedLabel: { type: string }
+        balanced: { type: boolean }
 
     TransactionSort:
       type: string
@@ -1006,7 +1096,7 @@ components:
 
     Transaction:
       type: object
-      required: [id, statementId, institution, transactionDate, description, kind, amount]
+      required: [id, statementId, institution, transactionDate, description, kind, amount, flow, unit, accountKind]
       properties:
         id: { type: integer, format: int64 }
         statementId: { type: integer, format: int64 }
@@ -1129,6 +1219,57 @@ components:
         cardLast4: { type: string, description: Absent for rows not tied to a card, such as payments }
         count: { type: integer }
         amount: { $ref: "#/components/schemas/Decimal" }
+
+    NetWorth:
+      type: object
+      required: ["on", assets, liabilities, net, byKind, unvalued, behind]
+      properties:
+        "on": { type: string, format: date }
+        assets: { $ref: "#/components/schemas/Decimal" }
+        liabilities: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "Negative" }
+        net: { $ref: "#/components/schemas/Decimal" }
+        byKind:
+          type: array
+          items: { $ref: "#/components/schemas/KindWorth" }
+        unvalued: { type: integer, description: "Accounts without a worth on the day, left out" }
+        completeAsOf: { type: string, format: date, description: "The newest day every account had reported by; absent when none has" }
+        behind:
+          type: array
+          description: Accounts whose newest report is older than the day
+          items: { type: integer, format: int64 }
+
+    HistoryStep:
+      type: string
+      enum: [day, month]
+      default: month
+      description: Every day, or the last day of each month
+
+    NetWorthPoint:
+      type: object
+      required: ["on", assets, liabilities, net, unvalued, complete]
+      properties:
+        "on": { type: string, format: date }
+        assets: { $ref: "#/components/schemas/Decimal" }
+        liabilities: { $ref: "#/components/schemas/Decimal" }
+        net: { $ref: "#/components/schemas/Decimal" }
+        unvalued: { type: integer }
+        complete: { type: boolean, description: "Every account had reported by the day: the figure is exact" }
+
+    KindWorth:
+      type: object
+      required: [kind, worth, unvalued]
+      properties:
+        kind: { $ref: "#/components/schemas/AccountKind" }
+        worth: { $ref: "#/components/schemas/Decimal" }
+        unvalued: { type: integer, description: "Accounts of the kind without a worth, left out of it" }
+
+    Settings:
+      type: object
+      required: [maxUploadBytes, sourceIntervalHours, baseCurrency]
+      properties:
+        maxUploadBytes: { type: integer, format: int64, description: The largest file an upload may be (BACKEND_MAX_UPLOAD_MB) }
+        sourceIntervalHours: { type: integer, description: "How often rates, closes, and exchanges are read" }
+        baseCurrency: { type: string, description: "What every worth is in, e.g. TWD" }
 
     Problem:
       type: object

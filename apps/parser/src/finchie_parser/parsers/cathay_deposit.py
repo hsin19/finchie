@@ -11,36 +11,37 @@ details (交易資訊) half a row below.
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositAccount, DepositKind, DepositLine, DepositStatement
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import Parsed, StatementParser, find, reconcile_account, rows_of
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.deposit import Accounts, Entry, amount_and_balance
+from finchie_parser.parsers.kinds import deposit_kind
+from finchie_parser.parsers.layout import rows_of
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document, Word
-from finchie_parser.text import amount, clean, iso_date
+from finchie_parser.text import AMOUNT, ISO_DATE, clean, find, iso_date, token
 
 _ACCOUNT = re.compile(r"帳號 \| (\d[\d-]+) 類別 \| (\S+)")
 _PAGE_ACCOUNT = re.compile(r"帳號：(\d[\d-]+)")
-_LINE_NO = re.compile(r"\d{1,2}", re.ASCII)
-_DATE = re.compile(r"\d{4}/\d\d/\d\d", re.ASCII)
-_AMOUNT = re.compile(r"-?[\d,]+(?:\.\d+)?", re.ASCII)
+_LINE_NO = token(r"\d{1,2}")
+_DATE = token(ISO_DATE)
+_AMOUNT = token(AMOUNT)
 _COUNTERPARTY = re.compile(r"^\((\d{3})\)(\d[\d*]+)(.*)$")
 _COLUMNS = ("行次", "日期", "提出", "存入", "餘額")
 _SUBROW_REACH = 10.0
-_INTEREST = frozenset({"存款息"})
 
 
 @dataclass
 class _Entry:
     top: float
-    line: DepositLine
+    line: Entry
 
 
 class CathayDepositParser(StatementParser):
     name = "cathay.deposit"
-    version = "1"
+    version = "3"
     institution = "cathay"
     # 【國泰世華銀行】電子存摺, from service@pxbillrc01.cathaybk.com.tw.
     sender_domains = ("cathaybk.com.tw",)
@@ -54,13 +55,13 @@ class CathayDepositParser(StatementParser):
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
         texts = document.page_texts()
-        if "臺幣存款" not in texts[0]:
+        if not texts or "臺幣存款" not in texts[0]:
             raise LayoutError("currency not found on passbook cover")
         currency = "TWD"
         header = find(_ACCOUNT, texts[:1], "account number and type")
         number, account_name = header.group(1), clean(header.group(2))
 
-        lines: list[DepositLine] = []
+        lines: list[Entry] = []
         for page in range(1, len(texts)):
             for page_number in _PAGE_ACCOUNT.findall(texts[page]):
                 if page_number != number:
@@ -70,16 +71,17 @@ class CathayDepositParser(StatementParser):
             raise LayoutError("passbook has no transactions")
 
         first, last = lines[0], lines[-1]
-        assert first.balance is not None
-        assert last.balance is not None
-        opening = first.balance - first.amount
-        closing = last.balance
-        reconciliation = reconcile_account(opening, closing, lines, "餘額")
-        account = DepositAccount(number, account_name, currency, closing, lines, reconciliation, opening)
-        return Parsed(DepositStatement(self.institution, first.date, last.date, [account]))
+        if first.balance is None or last.balance is None:
+            raise LayoutError("a passbook line without its balance")
+        accounts = Accounts()
+        # The passbook prints no balance brought forward: the one before its first line is it.
+        account = accounts.add(number, currency, account_name, last.balance)
+        account.opening = first.balance - first.amount
+        account.lines = lines
+        return Parsed(accounts.statement(self.institution, first.date, last.date, "餘額"))
 
 
-def _read_page(words: Sequence[Word]) -> list[DepositLine]:
+def _read_page(words: Sequence[Word]) -> list[Entry]:
     columns: dict[str, Word] = {}
     info_x0: float | None = None
     entries: list[_Entry] = []
@@ -115,21 +117,8 @@ def _read_page(words: Sequence[Word]) -> list[DepositLine]:
 def _main_row(row: list[Word], columns: dict[str, Word]) -> _Entry:
     when = row[1]
     amounts = [w for w in row[2:] if _AMOUNT.fullmatch(w.text)]
-    if len(amounts) != 2:
-        raise LayoutError(f"{when.text}: expected an amount and a balance, found {[w.text for w in amounts]}")
-    moved, balance = sorted(amounts, key=lambda w: w.x1)
-    withdrawal, deposit = columns["提出"], columns["存入"]
-    out = abs(moved.x1 - withdrawal.x1) < abs(moved.x1 - deposit.x1)
-    value = amount(moved.text)
-    return _Entry(
-        top=row[0].top,
-        line=DepositLine(
-            date=iso_date(when.text),
-            description="",
-            amount=-value if out else value,
-            balance=amount(balance.text),
-        ),
-    )
+    value, balance = amount_and_balance(amounts, columns["提出"], columns["存入"], when.text)
+    return _Entry(top=row[0].top, line=Entry(date=iso_date(when.text), description="", amount=value, balance=balance))
 
 
 def _attach_subrows(entries: list[_Entry], subrows: list[tuple[float, list[Word]]], split_x: float) -> None:
@@ -164,12 +153,10 @@ def _attach_subrows(entries: list[_Entry], subrows: list[tuple[float, list[Word]
                     memos.append(right)
 
         description = " ".join(descriptions)
-        entry.line = DepositLine(
-            date=entry.line.date,
+        entry.line = replace(
+            entry.line,
             description=description,
-            amount=entry.line.amount,
-            kind=DepositKind.INTEREST if description in _INTEREST else DepositKind.OTHER,
+            kind=deposit_kind(description),
             memo=" ".join(memos),
             counterparty=counterparty,
-            balance=entry.line.balance,
         )

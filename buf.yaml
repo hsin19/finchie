@@ -9,3 +9,7 @@ lint:
 breaking:
   use:
     - FILE
+  # A major version is retired by deleting its package, on purpose and in the release that brings the
+  # next (ADR 0021); every other incompatible change within a version is still caught.
+  except:
+    - FILE_NO_DELETE

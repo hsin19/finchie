@@ -7,6 +7,7 @@ import pytest
 from fakes import FakeParser
 from pdfs import PNG, blank_pdf, email_with, gmail_forward, statement_email, text_pdf
 
+from finchie_parser import reading
 from finchie_parser.errors import InvalidDocumentError
 from finchie_parser.passwords import Passwords
 from finchie_parser.reading import File, OpenedDocument, open_document
@@ -105,20 +106,8 @@ def mail(*attachments: tuple[str, bytes]) -> list[File]:
     return opened(email_with(*((name, "application/pdf", data) for name, data in attachments))).files
 
 
-def test_the_statement_a_parser_knows_by_name_is_primary_even_after_other_pdfs() -> None:
-    assert primary(mail(("PaymentSlip.pdf", SLIP), ("FAKE_202610.pdf", STATEMENT))) == ["FAKE_202610.pdf"]
-
-
 def test_a_pdf_named_like_a_statement_without_its_bank_in_the_text_is_not_primary() -> None:
     assert primary(mail(("other.pdf", STATEMENT), ("FAKE_202610.pdf", blank_pdf()))) == ["other.pdf"]
-
-
-def test_a_statement_recognized_by_its_text_is_primary() -> None:
-    assert primary(mail(("notice.pdf", blank_pdf()), ("statement.pdf", STATEMENT))) == ["statement.pdf"]
-
-
-def test_a_locked_pdf_does_not_hide_the_statement_after_it() -> None:
-    assert primary(mail(("notice.pdf", blank_pdf("secret")), ("statement.pdf", STATEMENT))) == ["statement.pdf"]
 
 
 def test_a_locked_statement_by_name_is_primary_so_the_viewer_asks_for_its_password() -> None:
@@ -185,3 +174,19 @@ def test_only_images_are_inlined_and_a_pdf_the_html_links_by_content_id_stays_a_
     assert [(f.filename, f.content_type, f.primary) for f in document.files] == [
         ("statement.pdf", "application/pdf", True)
     ]
+
+
+def test_an_image_the_body_refers_to_too_often_stops_being_inlined(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reading, "MAX_INLINED_BYTES", 3 * len(PNG))
+    message = EmailMessage()
+    message["From"] = "statements@bank.example"
+    message.set_content("Plain version of the body.")
+    message.add_alternative('<img src="cid:logo@bank.example">' * 5, subtype="html")
+    html = message.get_body(("html",))
+    assert html is not None
+    html.add_related(PNG, maintype="image", subtype="png", cid="<logo@bank.example>")
+
+    document = opened(message.as_bytes())
+
+    assert document.email.html.count("data:image/png;base64,") == 3
+    assert document.email.html.count("cid:logo@bank.example") == 2

@@ -1,58 +1,64 @@
-"""Internal model -> generated proto messages."""
+"""Internal model -> generated proto messages, field by field. Every enum value has its proto value, and every
+field of the model reaches the wire (test_convert.py checks both)."""
 
 from datetime import date
 from decimal import Decimal
+from typing import assert_never
 
 from google.protobuf import timestamp_pb2
 from google.type import date_pb2, decimal_pb2
 
-from finchie.parser.v1 import parser_pb2 as pb
+from finchie.parser.v2 import parser_pb2 as pb
 from finchie_parser.model import (
-    DepositAccount,
-    DepositKind,
+    AccountKind,
+    AccountReport,
+    Balance,
+    CardBill,
+    CardLine,
+    Check,
     DepositLine,
-    DepositStatement,
-    Kind,
+    Expiry,
+    Line,
+    LineKind,
     ParseResult,
-    PointsKind,
-    PointsProgram,
-    Reconciliation,
-    SecuritiesStatement,
-    SecuritiesTrade,
     Statement,
-    TradeSide,
-    Transaction,
+    Trade,
 )
 from finchie_parser.reading import OpenedDocument
 
-_KINDS = {
-    Kind.PURCHASE: pb.TRANSACTION_KIND_PURCHASE,
-    Kind.FOREIGN_TRANSACTION_FEE: pb.TRANSACTION_KIND_FOREIGN_TRANSACTION_FEE,
-    Kind.ANNUAL_FEE: pb.TRANSACTION_KIND_ANNUAL_FEE,
-    Kind.REFUND: pb.TRANSACTION_KIND_REFUND,
-    Kind.REBATE: pb.TRANSACTION_KIND_REBATE,
-    Kind.PAYMENT: pb.TRANSACTION_KIND_PAYMENT,
+_ACCOUNT_KINDS = {
+    AccountKind.CREDIT_CARD: pb.ACCOUNT_KIND_CREDIT_CARD,
+    AccountKind.DEPOSIT: pb.ACCOUNT_KIND_DEPOSIT,
+    AccountKind.SECURITIES: pb.ACCOUNT_KIND_SECURITIES,
+    AccountKind.POINTS: pb.ACCOUNT_KIND_POINTS,
+    AccountKind.LOAN: pb.ACCOUNT_KIND_LOAN,
 }
 
-
-_DEPOSIT_KINDS = {
-    DepositKind.OTHER: pb.DEPOSIT_LINE_KIND_OTHER,
-    DepositKind.INTEREST: pb.DEPOSIT_LINE_KIND_INTEREST,
-    DepositKind.FEE: pb.DEPOSIT_LINE_KIND_FEE,
+_LINE_KINDS = {
+    LineKind.PURCHASE: pb.LINE_KIND_PURCHASE,
+    LineKind.FOREIGN_TRANSACTION_FEE: pb.LINE_KIND_FOREIGN_TRANSACTION_FEE,
+    LineKind.ANNUAL_FEE: pb.LINE_KIND_ANNUAL_FEE,
+    LineKind.REFUND: pb.LINE_KIND_REFUND,
+    LineKind.REBATE: pb.LINE_KIND_REBATE,
+    LineKind.PAYMENT: pb.LINE_KIND_PAYMENT,
+    LineKind.INTEREST: pb.LINE_KIND_INTEREST,
+    LineKind.FEE: pb.LINE_KIND_FEE,
+    LineKind.OTHER: pb.LINE_KIND_OTHER,
+    LineKind.BUY: pb.LINE_KIND_BUY,
+    LineKind.SELL: pb.LINE_KIND_SELL,
+    LineKind.EARN: pb.LINE_KIND_EARN,
+    LineKind.ADJUST: pb.LINE_KIND_ADJUST,
+    LineKind.REDEEM: pb.LINE_KIND_REDEEM,
 }
 
 
 def to_response(result: ParseResult) -> pb.ParseDocumentResponse:
-    response = pb.ParseDocumentResponse(
-        parser=result.parser, parser_version=result.parser_version, warnings=result.warnings
+    return pb.ParseDocumentResponse(
+        parser=result.parser,
+        parser_version=result.parser_version,
+        statement=_statement(result.statement),
+        warnings=result.warnings,
     )
-    if isinstance(result.statement, DepositStatement):
-        response.deposit_statement.CopyFrom(_deposit_statement(result.statement))
-    elif isinstance(result.statement, SecuritiesStatement):
-        response.securities_statement.CopyFrom(_securities_statement(result.statement))
-    else:
-        response.statement.CopyFrom(_statement(result.statement))
-    return response
 
 
 def to_open_response(opened: OpenedDocument) -> pb.OpenDocumentResponse:
@@ -64,87 +70,104 @@ def to_open_response(opened: OpenedDocument) -> pb.OpenDocumentResponse:
             for f in opened.files
         ]
     )
-    if (mail := opened.email) is not None:
-        response.email.CopyFrom(
-            pb.Email(sender=mail.sender, recipient=mail.recipient, subject=mail.subject, html=mail.html, text=mail.text)
-        )
-        if mail.date is not None:
-            stamp = timestamp_pb2.Timestamp()
-            stamp.FromDatetime(mail.date)
-            response.email.date.CopyFrom(stamp)
+    mail = opened.email
+    response.email.CopyFrom(
+        pb.Email(sender=mail.sender, recipient=mail.recipient, subject=mail.subject, html=mail.html, text=mail.text)
+    )
+    if mail.date is not None:
+        stamp = timestamp_pb2.Timestamp()
+        stamp.FromDatetime(mail.date)
+        response.email.date.CopyFrom(stamp)
     return response
 
 
 def _statement(statement: Statement) -> pb.Statement:
-    reconciliation = statement.reconciliation
-    return pb.Statement(
+    message = pb.Statement(
         institution=statement.institution,
         closing_date=_date(statement.closing_date),
-        due_date=_date(statement.due_date),
-        currency=statement.currency,
-        total_due=_decimal(statement.total_due),
-        transactions=[_transaction(tx) for tx in statement.transactions],
-        reconciliation=_reconciliation(reconciliation),
-        points=[_points_program(program) for program in statement.points],
+        accounts=[_account(account) for account in statement.accounts],
+        checks=[_check(check) for check in statement.checks],
+    )
+    if statement.period_start is not None:
+        message.period_start.CopyFrom(_date(statement.period_start))
+    if statement.card_bill is not None:
+        message.card_bill.CopyFrom(_card_bill(statement.card_bill))
+    return message
+
+
+def _card_bill(bill: CardBill) -> pb.CardBill:
+    return pb.CardBill(due_date=_date(bill.due_date), currency=bill.currency, total_due=_decimal(bill.total_due))
+
+
+def _account(account: AccountReport) -> pb.AccountReport:
+    return pb.AccountReport(
+        kind=_ACCOUNT_KINDS[account.kind],
+        number=account.number,
+        name=account.name,
+        balances=[_balance(balance) for balance in account.balances],
+        lines=[_line(line) for line in account.lines],
+        expiries=[_expiry(expiry) for expiry in account.expiries],
     )
 
 
-_POINTS_KINDS = {
-    PointsKind.EARN: pb.POINTS_LINE_KIND_EARN,
-    PointsKind.ADJUST: pb.POINTS_LINE_KIND_ADJUST,
-    PointsKind.REDEEM: pb.POINTS_LINE_KIND_REDEEM,
-}
+def _balance(balance: Balance) -> pb.Balance:
+    return pb.Balance(unit=balance.unit, as_of=_date(balance.as_of), amount=_decimal(balance.amount))
 
 
-def _points_program(program: PointsProgram) -> pb.PointsProgram:
-    return pb.PointsProgram(
-        name=program.name,
-        closing=_decimal(program.closing),
-        expiries=[pb.PointsExpiry(amount=_decimal(e.amount), by=_date(e.by)) for e in program.expiries],
-        lines=[
-            pb.PointsLine(label=line.label, kind=_POINTS_KINDS[line.kind], amount=_decimal(line.amount))
-            for line in program.lines
-        ],
+def _expiry(expiry: Expiry) -> pb.Expiry:
+    return pb.Expiry(unit=expiry.unit, amount=_decimal(expiry.amount), by=_date(expiry.by))
+
+
+def _check(check: Check) -> pb.Check:
+    return pb.Check(
+        name=check.name,
+        unit=check.unit,
+        computed=_decimal(check.computed),
+        stated=_decimal(check.stated),
+        balanced=check.balanced,
     )
 
 
-def _reconciliation(reconciliation: Reconciliation) -> pb.Reconciliation:
-    return pb.Reconciliation(
-        balanced=reconciliation.balanced,
-        computed=_decimal(reconciliation.computed),
-        stated=_decimal(reconciliation.stated),
-        stated_label=reconciliation.stated_label,
+def _line(line: Line) -> pb.Line:
+    message = pb.Line(
+        date=_date(line.date),
+        unit=line.unit,
+        amount=_decimal(line.amount),
+        kind=_LINE_KINDS[line.kind],
+        description=line.description,
     )
+    match line.detail:
+        case CardLine() as card:
+            message.card.CopyFrom(_card_line(card))
+        case DepositLine() as deposit:
+            message.deposit.CopyFrom(_deposit_line(deposit))
+        case Trade() as trade:
+            message.trade.CopyFrom(_trade(trade))
+        case None:
+            pass
+        case unknown:
+            assert_never(unknown)
+    return message
 
 
-def _deposit_statement(statement: DepositStatement) -> pb.DepositStatement:
-    return pb.DepositStatement(
-        institution=statement.institution,
-        period_start=_date(statement.period_start),
-        period_end=_date(statement.period_end),
-        accounts=[_deposit_account(account) for account in statement.accounts],
-    )
+def _card_line(card: CardLine) -> pb.CardLine:
+    message = pb.CardLine(original_currency=card.original_currency, country=card.country, card_last4=card.card_last4)
+    if card.posting_date is not None:
+        message.posting_date.CopyFrom(_date(card.posting_date))
+    if card.original_amount is not None:
+        message.original_amount.CopyFrom(_decimal(card.original_amount))
+    return message
 
 
-def _securities_statement(statement: SecuritiesStatement) -> pb.SecuritiesStatement:
-    return pb.SecuritiesStatement(
-        institution=statement.institution,
-        account_number=statement.account_number,
-        period_start=_date(statement.period_start),
-        period_end=_date(statement.period_end),
-        holdings_date=_date(statement.holdings_date),
-        holdings=[pb.SecuritiesHolding(name=h.name, shares=_decimal(h.shares)) for h in statement.holdings],
-        trades=[_securities_trade(trade) for trade in statement.trades],
-        reconciliation=_reconciliation(statement.reconciliation),
-    )
+def _deposit_line(deposit: DepositLine) -> pb.DepositLine:
+    message = pb.DepositLine(memo=deposit.memo, counterparty=deposit.counterparty)
+    if deposit.balance is not None:
+        message.balance.CopyFrom(_decimal(deposit.balance))
+    return message
 
 
-def _securities_trade(trade: SecuritiesTrade) -> pb.SecuritiesTrade:
-    message = pb.SecuritiesTrade(
-        date=_date(trade.date),
-        name=trade.name,
-        side=pb.TRADE_SIDE_BUY if trade.side is TradeSide.BUY else pb.TRADE_SIDE_SELL,
-        shares=_decimal(trade.shares),
+def _trade(trade: Trade) -> pb.Trade:
+    message = pb.Trade(
         price=_decimal(trade.price),
         category=trade.category,
         amount=_decimal(trade.amount),
@@ -154,52 +177,6 @@ def _securities_trade(trade: SecuritiesTrade) -> pb.SecuritiesTrade:
     )
     if trade.prepaid is not None:
         message.prepaid.CopyFrom(_decimal(trade.prepaid))
-    return message
-
-
-def _deposit_account(account: DepositAccount) -> pb.DepositAccount:
-    message = pb.DepositAccount(
-        number=account.number,
-        name=account.name,
-        currency=account.currency,
-        closing_balance=_decimal(account.closing_balance),
-        lines=[_deposit_line(line) for line in account.lines],
-    )
-    if account.opening_balance is not None:
-        message.opening_balance.CopyFrom(_decimal(account.opening_balance))
-    if account.reconciliation is not None:
-        message.reconciliation.CopyFrom(_reconciliation(account.reconciliation))
-    return message
-
-
-def _deposit_line(line: DepositLine) -> pb.DepositLine:
-    message = pb.DepositLine(
-        date=_date(line.date),
-        description=line.description,
-        memo=line.memo,
-        counterparty=line.counterparty,
-        amount=_decimal(line.amount),
-        kind=_DEPOSIT_KINDS[line.kind],
-    )
-    if line.balance is not None:
-        message.balance.CopyFrom(_decimal(line.balance))
-    return message
-
-
-def _transaction(tx: Transaction) -> pb.Transaction:
-    message = pb.Transaction(
-        transaction_date=_date(tx.transaction_date),
-        description=tx.description,
-        kind=_KINDS[tx.kind],
-        amount=_decimal(tx.amount),
-        original_currency=tx.original_currency,
-        country=tx.country,
-        card_last4=tx.card_last4,
-    )
-    if tx.posting_date is not None:
-        message.posting_date.CopyFrom(_date(tx.posting_date))
-    if tx.original_amount is not None:
-        message.original_amount.CopyFrom(_decimal(tx.original_amount))
     return message
 
 

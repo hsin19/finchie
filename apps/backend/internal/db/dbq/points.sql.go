@@ -8,6 +8,7 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -28,7 +29,7 @@ RETURNING id
 `
 
 type CreateOwnerAccountParams struct {
-	Kind  string
+	Kind  domain.AccountKind
 	Label *string
 }
 
@@ -43,12 +44,12 @@ func (q *Queries) CreateOwnerAccount(ctx context.Context, arg CreateOwnerAccount
 }
 
 const getAccountSource = `-- name: GetAccountSource :one
-SELECT institution, kind FROM accounts WHERE id = $1 AND kind <> 'credit_card'
+SELECT institution, kind FROM accounts WHERE id = $1
 `
 
 type GetAccountSourceRow struct {
 	Institution string
-	Kind        string
+	Kind        domain.AccountKind
 }
 
 func (q *Queries) GetAccountSource(ctx context.Context, id int64) (GetAccountSourceRow, error) {
@@ -126,6 +127,7 @@ SELECT r.account_id, u.symbol AS unit, r.amount, r.lapses_by
 FROM reported r
 JOIN units u ON u.id = r.unit_id
 WHERE r.amount > 0 AND r.lapses_by >= (now() AT TIME ZONE 'Asia/Taipei')::date
+  AND ($1::bigint IS NULL OR r.account_id = $1::bigint)
 ORDER BY r.account_id, r.lapses_by, u.symbol
 `
 
@@ -138,9 +140,9 @@ type LatestExpiriesRow struct {
 
 // What will lapse of each account's units, by their newest report: the newest statement that reports the
 // unit at all, so one that prints nothing lapsing says nothing will; and the owner's for an account they
-// keep (ADR 0019). Amounts of 0 and dates gone by in Taipei are left out.
-func (q *Queries) LatestExpiries(ctx context.Context) ([]LatestExpiriesRow, error) {
-	rows, err := q.db.Query(ctx, latestExpiries)
+// keep (ADR 0019). Amounts of 0 and dates gone by in Taipei are left out. Of one account, or with none, of all.
+func (q *Queries) LatestExpiries(ctx context.Context, accountID *int64) ([]LatestExpiriesRow, error) {
+	rows, err := q.db.Query(ctx, latestExpiries, accountID)
 	if err != nil {
 		return nil, err
 	}

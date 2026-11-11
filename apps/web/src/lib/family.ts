@@ -8,7 +8,7 @@ import type {
 import {
     kindOrder,
     kinds,
-} from "#lib/labels.js";
+} from "#lib/kinds.js";
 import {
     formatAmount,
     sign,

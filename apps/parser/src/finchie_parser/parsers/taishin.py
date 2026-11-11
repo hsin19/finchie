@@ -1,26 +1,19 @@
 import re
-from decimal import Decimal
 
-from finchie_parser.model import Kind, PointsExpiry, PointsProgram, Reconciliation, Statement, Transaction
+from finchie_parser.model import Expiry, Line, LineKind
 from finchie_parser.ocr import Ocr
-from finchie_parser.parsers.base import (
-    Parsed,
-    StatementParser,
-    adjusted,
-    earned,
-    find,
-    points_program,
-    sum_new_charges,
-    used,
-)
+from finchie_parser.parsers.base import Parsed, StatementParser
+from finchie_parser.parsers.card import card_bill, card_line, check, new_charges
+from finchie_parser.parsers.kinds import card_kind
+from finchie_parser.parsers.points import Program, adjusted, earned, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
-from finchie_parser.text import amount, clean, roc_date
+from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ROC_DATE, amount, clean, find, roc_date
 
-_CLOSING = re.compile(r"^帳單結帳日 (\d{3}/\d\d/\d\d)$", re.ASCII)
-_DUE = re.compile(r"^繳款截止日 (\d{3}/\d\d/\d\d)$", re.ASCII)
-_NEW_CHARGES = re.compile(r"^\+本期新增款項 (-?[\d,]+)$", re.ASCII)
-_TOTAL_DUE = re.compile(r"^=本期累計應繳金額 (-?[\d,]+)$", re.ASCII)
+_CLOSING = re.compile(rf"^帳單結帳日 ({ROC_DATE})$", re.ASCII)
+_DUE = re.compile(rf"^繳款截止日 ({ROC_DATE})$", re.ASCII)
+_NEW_CHARGES = re.compile(rf"^\+本期新增款項 ({INTEGER})$", re.ASCII)
+_TOTAL_DUE = re.compile(rf"^=本期累計應繳金額 ({INTEGER})$", re.ASCII)
 _CARD = re.compile(r"\(卡號末四碼:(\d{4})\)", re.ASCII)
 # "<date> <posted> <description> <amount>" then either "<MMDD> <country> <currency> <foreign amount>"
 # for foreign-currency lines or just "<country>". Long descriptions wrap: the row then has an empty
@@ -29,8 +22,8 @@ _CARD = re.compile(r"\(卡號末四碼:(\d{4})\)", re.ASCII)
 # otherwise a line the pattern does not fully fit can still match with the amount cut out of a
 # decimal ("-27.03" read as 3), which is worse than not matching at all.
 _ROW = re.compile(
-    r"^(?P<date>\d{3}/\d\d/\d\d) (?P<posted>\d{3}/\d\d/\d\d) (?:(?P<desc>.*?) )?(?P<amt>-?[\d,]+)"
-    r"(?: \d{4} (?P<fxcountry>[A-Z]{2}) (?P<cur>[A-Z]{3}) (?P<orig>-?[\d,]+(?:\.\d+)?)| (?P<country>[A-Z]{2}))?$",
+    rf"^(?P<date>{ROC_DATE}) (?P<posted>{ROC_DATE}) (?:(?P<desc>.*?) )?(?P<amt>{INTEGER})"
+    rf"(?: \d{{4}} (?P<fxcountry>[A-Z]{{2}}) (?P<cur>{CURRENCY}) (?P<orig>{AMOUNT})| (?P<country>[A-Z]{{2}}))?$",
     re.ASCII,
 )
 # 信用卡點數 (ADR 0019): a row per figure, a column per program, "**" where the card earns none of it:
@@ -44,12 +37,12 @@ _POINTS_NAME = "台新Point(信用卡)"
 _MILES_NAME = "亞洲萬里通里數"
 # "台新Point(信用卡)點數到期提醒：您有0點將於\n116/01/31到期", "【大集大利點數到期提醒】 您有0點將於…": the
 # first column's. Only after its heading, so that a promotion worded alike elsewhere on the bill is not it.
-_POINTS_EXPIRING = re.compile(r"到期提醒[：:】]?\s*您有(?P<n>[\d,]+)點將於\s*(?P<date>\d{3}/\d\d/\d\d)到期")
+_POINTS_EXPIRING = re.compile(rf"到期提醒[：:】]?\s*您有(?P<n>[\d,]+)點將於\s*(?P<date>{ROC_DATE})到期")
 
 
 class TaishinParser(StatementParser):
     name = "taishin.credit_card"
-    version = "6"
+    version = "8"
     institution = "taishin"
     # 台新信用卡電子帳單 2026年10月; the combined (deposit) statement, 台新銀行綜合對帳單 2026年9月份,
     # comes from the same address.
@@ -68,12 +61,12 @@ class TaishinParser(StatementParser):
         texts = document.page_texts()
         closing = roc_date(find(_CLOSING, texts, "帳單結帳日").group(1))
         due = roc_date(find(_DUE, texts, "繳款截止日").group(1))
-        new_charges = amount(find(_NEW_CHARGES, texts, "本期新增款項").group(1))
+        stated_new_charges = amount(find(_NEW_CHARGES, texts, "本期新增款項").group(1))
         total_due = amount(find(_TOTAL_DUE, texts, "本期累計應繳金額").group(1))
 
         # (page index, line): a wrapped description never continues across a page break.
         lines = [(page, line) for page, text in enumerate(texts) for line in text.splitlines() if line.strip()]
-        transactions: list[Transaction] = []
+        transactions: list[Line] = []
         card = ""
         i = 0
         while i < len(lines):
@@ -90,52 +83,36 @@ class TaishinParser(StatementParser):
                         i += 1
                 value = amount(match["amt"])
                 description = clean(description)
-                kind = _kind(description, value)
+                # Payments are told by their words: 扣繳, 自動扣款, and older ones (ADR 0013).
+                kind = card_kind(description, value)
                 transactions.append(
-                    Transaction(
-                        transaction_date=roc_date(match["date"]),
+                    card_line(
+                        roc_date(match["date"]),
+                        description,
+                        kind,
+                        value,
                         posting_date=roc_date(match["posted"]),
-                        description=description,
-                        kind=kind,
-                        amount=value,
                         original_amount=amount(match["orig"]) if match["orig"] else None,
                         original_currency=match["cur"] or "",
                         country=match["fxcountry"] or match["country"] or "",
-                        card_last4="" if kind is Kind.PAYMENT else card,
+                        card_last4="" if kind is LineKind.PAYMENT else card,
                     )
                 )
             i += 1
 
-        warnings: list[str] = []
-        statement = Statement(
-            institution=self.institution,
-            closing_date=closing,
-            due_date=due,
-            currency="TWD",
+        statement = card_bill(
+            self.institution,
+            closing=closing,
+            due=due,
             total_due=total_due,
-            transactions=transactions,
-            reconciliation=Reconciliation(sum_new_charges(transactions), new_charges, "本期新增款項"),
-            points=_points(texts, warnings),
+            lines=transactions,
+            checks=[check("本期新增款項", new_charges(transactions), stated_new_charges)],
+            programs=_points(texts),
         )
-        return Parsed(statement, warnings)
+        return Parsed(statement)
 
 
-def _kind(description: str, value: Decimal) -> Kind:
-    if "國外交易服務費" in description:
-        return Kind.FOREIGN_TRANSACTION_FEE
-    if "年費" in description:
-        return Kind.ANNUAL_FEE
-    # Older bills word it 台新自動扣款, and before that 您的付款已收到,謝謝您!.
-    if value < 0 and any(word in description for word in ("扣繳", "繳款", "自動扣款", "付款已收到")):
-        return Kind.PAYMENT
-    if "折抵" in description:
-        return Kind.REBATE
-    if value < 0:
-        return Kind.REFUND
-    return Kind.PURCHASE
-
-
-def _points(texts: list[str], warnings: list[str]) -> list[PointsProgram]:
+def _points(texts: list[str]) -> list[Program]:
     """Each column of the points table with a figure in it, as a program of its own."""
     rows: dict[str, tuple[str, str]] = {}
     first_name = _POINTS_NAME
@@ -155,21 +132,20 @@ def _points(texts: list[str], warnings: list[str]) -> list[PointsProgram]:
         figures = {label: values[column] for label, values in rows.items()}
         if any(value == "**" for value in figures.values()):
             continue
-        expiries = []
+        expiries: list[Expiry] = []
         if column == 0 and expiring:
-            expiries.append(PointsExpiry(amount(expiring["n"]), roc_date(expiring["date"])))
+            expiries.append(Expiry(name, amount(expiring["n"]), roc_date(expiring["date"])))
         programs.append(
             points_program(
                 name,
                 opening=amount(figures["上期結餘點數/里數"]),
-                lines=(
+                moves=(
                     earned("新增回饋", amount(figures["新增回饋"])),
                     adjusted("活動回饋/調整", amount(figures["活動回饋/調整"])),
                     used("本期使用點數/里數", amount(figures["本期使用點數/里數"])),
                 ),
                 closing=amount(figures["本期結餘回饋"]),
                 expiries=expiries,
-                warnings=warnings,
             )
         )
     return programs

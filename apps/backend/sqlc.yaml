@@ -9,3 +9,20 @@ sql:
         out: internal/db/dbq
         sql_package: pgx/v5
         emit_pointers_for_null_types: true
+        # Columns that hold one of the domain's kinds carry its type, so a kind is never a bare string.
+        overrides:
+          - column: accounts.kind
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: AccountKind}
+          - column: statements.kind
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: AccountKind}
+          - column: units.kind
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: UnitKind}
+          - column: transactions.kind
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: LineKind}
+          - column: documents.status
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: DocumentStatus}
+          - column: documents.failure
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: Failure, pointer: true}
+            nullable: true
+          - column: prices.source
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: PriceSource}

@@ -1,12 +1,14 @@
+import { listen } from "#lib/keys.js";
 import {
-    type KeyHandlers,
-    listen,
-} from "#lib/keys.js";
+    type KeyOf,
+    type ScopeName,
+} from "#lib/shortcuts.js";
 
 /**
- * Shortcuts for as long as the calling component is mounted. Keys are KeyboardEvent.key values.
- * Pages call it plainly; the layout passes `global`, and a page's handler for the same key wins.
+ * A scope's shortcuts (shortcuts.ts) for as long as the calling component is mounted: only keys the
+ * keymap lists for it, so the help dialog always says what a key does. The layout binds "global"; a
+ * page's handler for the same key wins.
  */
-export function onKeys(handlers: KeyHandlers, options: { global?: boolean; } = {}): void {
-    $effect(() => listen(window, handlers, options));
+export function onKeys<S extends ScopeName>(scope: S, handlers: Partial<Record<KeyOf<S>, (event: KeyboardEvent) => void>>): void {
+    $effect(() => listen(window, handlers as Record<string, (event: KeyboardEvent) => void>, { global: scope === "global" }));
 }

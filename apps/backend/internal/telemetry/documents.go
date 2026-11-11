@@ -9,13 +9,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 )
 
-// statuses are always reported, zero included, so an alert sees 0 rather than no series at all.
-var statuses = []string{"pending", "parsed", "needs_review", "duplicate", "failed", "skipped"}
-
-// ObserveDocuments reports finchie.documents{status}: uploaded documents by status as the web app
-// shows them ("skipped" is a failure no parser handles), read from the database at each collection.
+// ObserveDocuments reports finchie.documents{status}: uploaded documents by status, read from the database
+// at each collection. Every status is reported, zero included, so an alert sees 0 rather than no series.
 // A deployment can alert while any is failed or needs_review: a statement the mailbox brought in
 // that nobody has looked at (ADR 0010).
 func ObserveDocuments(pool *pgxpool.Pool, meter metric.Meter) error {
@@ -30,12 +28,12 @@ func ObserveDocuments(pool *pgxpool.Pool, meter metric.Meter) error {
 		if err != nil {
 			return fmt.Errorf("count documents: %w", err)
 		}
-		counts := map[string]int64{}
+		counts := map[domain.DocumentStatus]int64{}
 		for _, row := range rows {
 			counts[row.Status] = int64(row.Documents)
 		}
-		for _, status := range statuses {
-			observer.ObserveInt64(gauge, counts[status], metric.WithAttributes(attribute.String("status", status)))
+		for _, status := range domain.DocumentStatuses {
+			observer.ObserveInt64(gauge, counts[status], metric.WithAttributes(attribute.String("status", string(status))))
 		}
 		return nil
 	}, gauge)

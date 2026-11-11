@@ -72,7 +72,7 @@ docker compose up -d    # local Postgres for `task backend:run`
 - The parser stays stateless: no database, no files written outside temp space, no network calls. Anything stateful belongs in the backend.
 - gRPC status codes carry the retry decision (ADR 0005). A parser that cannot handle a document returns `UNIMPLEMENTED`; a wrong password is `FAILED_PRECONDITION`.
 - Each bank parser reconciles its own statements. Never "fix" a mismatch by adjusting numbers; report it.
-- Python: type hints everywhere, ruff for lint and format, pytest. Test names describe behavior (`test_taishin_splits_wrapped_merchant_lines`).
+- Python: type hints everywhere, checked by mypy (strict); ruff for lint and format, pytest. Test names describe behavior (`test_taishin_splits_wrapped_merchant_lines`).
 - Go: `gofmt`, golangci-lint, errors wrapped with `%w`, `context.Context` first. SQL lives in `.sql` files for sqlc, not in Go strings.
 - Schema changes are new goose migrations; never edit an applied one.
 - Web (SvelteKit 3, Svelte 5 runes): see [`apps/web/README.md`](apps/web/README.md) for its pitfalls. Format with dprint (`task web:fmt`), not Prettier. Amounts go through `#lib/money.js`, never `Number` arithmetic. Every filter belongs in the URL.

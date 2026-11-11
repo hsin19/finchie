@@ -2,47 +2,12 @@ package ingest
 
 import (
 	"context"
-	"fmt"
+	"slices"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 )
-
-// Kinds of unit, as stored in units.kind (ADR 0020), by the kind of account that holds them (UnitKind).
-const (
-	UnitMoney    = "money"
-	UnitSecurity = "security"
-	UnitPoints   = "points"
-)
-
-// UnitKind is the kind of the units an account of a kind holds: a securities account securities, a points
-// account points, and every other money.
-func UnitKind(accountKind string) string {
-	switch accountKind {
-	case KindSecurities:
-		return UnitSecurity
-	case KindPoints:
-		return UnitPoints
-	default:
-		return UnitMoney
-	}
-}
-
-// Units finds the units of a kind with these symbols, creating those no source has reported before, by
-// symbol.
-func Units(ctx context.Context, queries *dbq.Queries, kind string, symbols ...string) (map[string]int64, error) {
-	ids := make(map[string]int64, len(symbols))
-	if len(symbols) == 0 {
-		return ids, nil
-	}
-	rows, err := queries.EnsureUnits(ctx, dbq.EnsureUnitsParams{Kind: kind, Symbols: symbols})
-	if err != nil {
-		return nil, fmt.Errorf("units: %w", err)
-	}
-	for _, r := range rows {
-		ids[r.Symbol] = r.ID
-	}
-	return ids, nil
-}
 
 // The rows a statement reports of an account, each with its unit's symbol until the unit is found when
 // stored.
@@ -61,7 +26,7 @@ type (
 	}
 )
 
-// unitIDs finds the units of everything an account reports.
+// unitIDs finds, or creates, the units of everything an account reports (ADR 0020).
 func (a storedAccount) unitIDs(ctx context.Context, queries *dbq.Queries) (map[string]int64, error) {
 	var symbols []string
 	for _, l := range a.lines {
@@ -73,5 +38,21 @@ func (a storedAccount) unitIDs(ctx context.Context, queries *dbq.Queries) (map[s
 	for _, e := range a.expiries {
 		symbols = append(symbols, e.unit)
 	}
-	return Units(ctx, queries, UnitKind(a.account.Kind), symbols...)
+	return ledger.Units(ctx, queries, a.account.Kind.UnitKind(), symbols...)
+}
+
+// unitID is the unit of a symbol the account reports, among its units.
+func (a storedAccount) unitID(units map[string]int64, symbol string) int64 {
+	return units[domain.Symbol(a.account.Kind.UnitKind(), symbol)]
+}
+
+// balanceUnits are the units the account reports a balance in, each once, in order.
+func (a storedAccount) balanceUnits() []string {
+	var units []string
+	for _, b := range a.balances {
+		if !slices.Contains(units, b.unit) {
+			units = append(units, b.unit)
+		}
+	}
+	return units
 }

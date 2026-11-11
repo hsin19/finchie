@@ -1,4 +1,8 @@
-"""Read an upload as the e-mail the bank sent: unwrapped from a forward, with its PDFs (ADR 0014)."""
+"""Read an upload as the e-mail the bank sent: unwrapped from a forward, with its PDFs (ADR 0014).
+
+Whoever can upload chooses what the parser spends its time and memory on (ADR 0010), so an e-mail with more
+parts than MAX_PARTS, or forwards nested deeper than MAX_NESTING, is refused before anything reads it.
+"""
 
 import email
 import email.policy
@@ -7,12 +11,15 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from email.utils import parseaddr
 
 from finchie_parser.errors import InvalidDocumentError
 
 PDF = "application/pdf"
+# Far more than any bank's e-mail has, forwarded or not.
+MAX_PARTS = 200
+MAX_NESTING = 5
 
 
 @dataclass(frozen=True)
@@ -37,18 +44,21 @@ class Mail:
         return parseaddr(self.sender)[1].rpartition("@")[2].lower()
 
     def pdfs(self) -> list[Attachment]:
-        attachments = []
-        for part in self.content.walk():
-            if part.is_multipart():
-                continue
-            name = part.get_filename() or ""
-            # Banks send PDFs as application/octet-stream as often as application/pdf.
-            if part.get_content_type() != PDF and not name.lower().endswith(".pdf"):
-                continue
-            data = part.get_payload(decode=True)
-            if isinstance(data, bytes) and data.startswith(b"%PDF"):
-                attachments.append(Attachment(name or "attachment.pdf", data))
-        return attachments
+        """Every part that is a PDF (`pdf_data`), in order: the PDFs parsing and previews choose from."""
+        return [
+            Attachment(part.get_filename() or "attachment.pdf", data)
+            for part in self.content.walk()
+            if (data := pdf_data(part)) is not None
+        ]
+
+
+def pdf_data(part: EmailMessage) -> bytes | None:
+    """The part's bytes if they are a PDF. By the bytes alone: banks send PDFs as application/octet-stream
+    as often as application/pdf, and a type or a name can claim a PDF the bytes are not."""
+    if part.is_multipart():
+        return None
+    data = part.get_payload(decode=True)
+    return data if isinstance(data, bytes) and data.startswith(b"%PDF") else None
 
 
 def read_mail(content: bytes) -> Mail:
@@ -59,7 +69,25 @@ def read_mail(content: bytes) -> Mail:
     message = email.message_from_bytes(content, policy=email.policy.default)
     if not isinstance(message, EmailMessage) or not message.keys():
         raise InvalidDocumentError("not an e-mail message")
+    _check_size(message)
     return unwrap(message)
+
+
+def _check_size(message: EmailMessage) -> None:
+    """Refuses an e-mail past MAX_PARTS or MAX_NESTING, walking it without recursion."""
+    parts = 0
+    stack: list[tuple[EmailMessage, int]] = [(message, 0)]
+    while stack:
+        part, depth = stack.pop()
+        parts += 1
+        if parts > MAX_PARTS:
+            raise InvalidDocumentError(f"an e-mail of more than {MAX_PARTS} parts")
+        if part.get_content_type() == "message/rfc822":
+            depth += 1
+            if depth > MAX_NESTING:
+                raise InvalidDocumentError(f"messages nested more than {MAX_NESTING} deep")
+        if part.is_multipart():
+            stack.extend((subpart, depth) for subpart in part.get_payload() if isinstance(subpart, EmailMessage))
 
 
 def unwrap(message: EmailMessage) -> Mail:
@@ -157,12 +185,12 @@ def _plain_text(message: EmailMessage) -> str:
     return ""
 
 
-def is_attachment(part: EmailMessage) -> bool:
+def is_attachment(part: MIMEPart) -> bool:
     # Python's is_attachment() counts only "Content-Disposition: attachment"; a named part marked inline is a file too.
     return part.is_attachment() or bool(part.get_filename())
 
 
-def find_body(message: EmailMessage) -> EmailMessage | None:
+def find_body(message: MIMEPart) -> MIMEPart | None:
     """HTML, else plain text, searched for as `EmailMessage.get_body` does, but never a file."""
     candidates = list(body_candidates(message))
     for subtype in ("html", "plain"):
@@ -171,7 +199,7 @@ def find_body(message: EmailMessage) -> EmailMessage | None:
     return None
 
 
-def body_candidates(part: EmailMessage) -> Iterator[EmailMessage]:
+def body_candidates(part: MIMEPart) -> Iterator[MIMEPart]:
     if is_attachment(part):
         return
     if part.get_content_maintype() == "text":
@@ -186,9 +214,9 @@ def body_candidates(part: EmailMessage) -> Iterator[EmailMessage]:
             yield from body_candidates(subpart)
 
 
-def text_of(part: EmailMessage) -> str:
+def text_of(part: MIMEPart) -> str:
     try:
-        return part.get_content()
+        return str(part.get_content())
     except LookupError:
         # A charset Python does not know: most of the text is still readable as UTF-8.
         payload = part.get_payload(decode=True)

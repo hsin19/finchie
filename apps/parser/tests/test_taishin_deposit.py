@@ -6,10 +6,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from fakes import FakeDocument
+from fakes import FakeDocument, deposit, deposit_detail, row
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import DepositKind, DepositStatement
+from finchie_parser.model import Balance, Check, LineKind, Statement
 from finchie_parser.parsers.taishin_deposit import TaishinDepositParser
 from finchie_parser.pdf import Word
 
@@ -17,10 +17,6 @@ PAGE_1 = """台 新 銀 行 綜 合 對 帳 單 2026年09月
 資料期間：2026/09/01~2026/09/30"""
 
 SAVINGS, RICHART, DOLLARS = "123456****7890", "654321****0987", "11111****222"
-
-
-def row(top: float, *words: tuple[str, float, float]) -> list[Word]:
-    return [Word(text, x0, x1, top) for text, x0, x1 in words]
 
 
 SUMMARIES = [
@@ -39,6 +35,12 @@ SUMMARIES = [
     ),
     *row(491, ("31.420", 362, 386)),
     *row(508, ("合計", 47, 65), ("$330", 486, 494)),
+    # The same account's yen: a summary row of its own.
+    *row(523, ("JPY", 366, 382)),
+    *row(
+        530, ("外幣活存", 56, 90), (DOLLARS, 108, 160), ("$1,000", 420, 445), ("$64", 481, 499), ("Richart", 513, 538)
+    ),
+    *row(537, ("0.2050", 362, 386)),
 ]
 TWD_HEADINGS = [
     ("帳號", 75, 92),
@@ -87,55 +89,81 @@ FX_PAGE = [
         ("$0.60", 357, 377),
         ("$10.50", 427, 446),
     ),
+    *row(
+        92,
+        (DOLLARS, 57, 109),
+        ("2026/09/15", 124, 163),
+        ("外幣轉入", 175, 213),
+        ("JPY", 231, 247),
+        ("$1,000", 357, 377),
+        ("$1,000", 427, 446),
+    ),
 ]
 
 
-def parse(pages: dict[int, list[Word]]) -> DepositStatement:
-    document = FakeDocument([PAGE_1, "", ""], words=pages)
-    statement = TaishinDepositParser().parse(document, ocr=None).statement
-    assert isinstance(statement, DepositStatement)
+def parse(pages: dict[int, list[Word]]) -> Statement:
+    document = FakeDocument([PAGE_1], words=pages)
+    statement = deposit(TaishinDepositParser().parse(document, ocr=None))
     return statement
 
 
-def full() -> DepositStatement:
+def full() -> Statement:
     return parse({1: SUMMARIES + TWD_LINES, 2: FX_PAGE})
 
 
 def test_taishin_deposit_reads_every_account_from_the_summaries() -> None:
     statement = full()
-    assert (statement.period_start, statement.period_end) == (date(2026, 9, 1), date(2026, 9, 30))
-    assert [(a.name, a.number, a.currency, a.closing_balance) for a in statement.accounts] == [
-        ("新臺幣活存", SAVINGS, "TWD", Decimal(5000)),
-        ("新臺幣活存 Richart", RICHART, "TWD", Decimal(12000)),
-        # The original currency's balance, not its NT$ worth.
-        ("外幣活存 Richart", DOLLARS, "USD", Decimal("10.50")),
+    assert (statement.period_start, statement.closing_date) == (date(2026, 9, 1), date(2026, 9, 30))
+    end = date(2026, 9, 30)
+    assert [(a.name, a.number, a.balances) for a in statement.accounts] == [
+        ("新臺幣活存", SAVINGS, [Balance("TWD", end, Decimal(5000))]),
+        ("新臺幣活存 Richart", RICHART, [Balance("TWD", end, Decimal(12000))]),
+        # The original currencies' balances, not their NT$ worth.
+        ("外幣活存 Richart", DOLLARS, [Balance("USD", end, Decimal("10.50")), Balance("JPY", end, Decimal(1000))]),
+    ]
+
+
+def test_taishin_deposit_reports_an_account_in_two_currencies_once_with_the_lines_of_both() -> None:
+    dollars = full().accounts[2]
+    assert [(line.unit, line.description, line.amount) for line in dollars.lines] == [
+        ("USD", "INTEREST", Decimal("0.50")),
+        ("JPY", "外幣轉入", Decimal(1000)),
     ]
 
 
 def test_taishin_deposit_tells_withdrawals_from_deposits_and_marks_interest() -> None:
     lines = full().accounts[1].lines
-    assert [(line.date, line.description, line.amount, line.kind, line.memo) for line in lines] == [
-        (date(2026, 9, 22), "媒體轉帳", Decimal(-3000), DepositKind.OTHER, "台新卡費"),
-        (date(2026, 9, 30), "存款息", Decimal(3000), DepositKind.INTEREST, ""),
+    assert [(line.date, line.description, line.amount, line.kind, deposit_detail(line).memo) for line in lines] == [
+        (date(2026, 9, 22), "媒體轉帳", Decimal(-3000), LineKind.OTHER, "台新卡費"),
+        (date(2026, 9, 30), "存款息", Decimal(3000), LineKind.INTEREST, ""),
     ]
 
 
 def test_taishin_deposit_nets_a_line_with_amounts_in_both_columns_across_a_page_break() -> None:
-    (interest,) = full().accounts[2].lines
-    assert (interest.amount, interest.kind, interest.balance) == (
+    interest = full().accounts[2].lines[0]
+    assert (interest.amount, interest.kind, deposit_detail(interest).balance) == (
         Decimal("0.50"),
-        DepositKind.INTEREST,
+        LineKind.INTEREST,
         Decimal("10.50"),
     )
 
 
-def test_taishin_deposit_reconciles_each_account_and_leaves_one_without_lines_alone() -> None:
-    savings, richart, dollars = full().accounts
-    assert savings.reconciliation is None
-    assert richart.reconciliation is not None
-    assert richart.reconciliation.balanced
-    assert dollars.reconciliation is not None
-    assert dollars.reconciliation.balanced
+def test_taishin_deposit_checks_each_account_and_currency_and_leaves_one_without_lines_alone() -> None:
+    statement = full()
+    assert statement.checks == [
+        Check(f"新臺幣活存 Richart {RICHART} TWD 帳戶餘額", "TWD", Decimal(12000), Decimal(12000)),
+        Check(f"外幣活存 Richart {DOLLARS} USD 帳戶餘額", "USD", Decimal("10.50"), Decimal("10.50")),
+        Check(f"外幣活存 Richart {DOLLARS} JPY 帳戶餘額", "JPY", Decimal(1000), Decimal(1000)),
+    ]
+    assert statement.balanced
+
+
+def test_taishin_deposit_flags_only_the_currency_whose_lines_do_not_add_up() -> None:
+    # The yen balance the summary prints is not where the yen lines lead.
+    summaries = [Word("$1,100", w.x0, w.x1, w.top) if (w.text, w.top) == ("$1,000", 530) else w for w in SUMMARIES]
+    statement = parse({1: summaries + TWD_LINES, 2: FX_PAGE})
+    assert [(c.unit, c.balanced) for c in statement.checks] == [("TWD", True), ("USD", True), ("JPY", False)]
+    assert not statement.balanced
 
 
 def test_taishin_deposit_refuses_lines_of_an_account_the_summaries_do_not_list() -> None:

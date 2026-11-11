@@ -144,8 +144,10 @@ func (g *Bitget) unwrap(request *http.Request, into any) error {
 	if reply.Code != "00000" {
 		return fmt.Errorf("bitget: GET %s: %s (code %s)", request.URL.Path, reply.Msg, reply.Code)
 	}
+	// A snapshot is the whole account or nothing (Exchange): a reply that says nothing of a wallet would
+	// read as its coins sold.
 	if len(reply.Data) == 0 || string(reply.Data) == "null" {
-		return nil
+		return fmt.Errorf("bitget: GET %s: no data", request.URL.Path)
 	}
 	if err := json.Unmarshal(reply.Data, into); err != nil {
 		return fmt.Errorf("bitget: GET %s: decode: %w", request.URL.Path, err)

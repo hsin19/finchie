@@ -1,4 +1,6 @@
-from finchie_parser.parsers.base import Parsed, StatementParser
+"""Every bank parser, in the order they are tried."""
+
+from finchie_parser.parsers.base import Parsed, StatementParser, registry
 from finchie_parser.parsers.cathay import CathayParser
 from finchie_parser.parsers.cathay_deposit import CathayDepositParser
 from finchie_parser.parsers.ctbc_deposit import CtbcDepositParser
@@ -11,7 +13,7 @@ from finchie_parser.parsers.skis_securities import SkisSecuritiesParser
 from finchie_parser.parsers.taishin import TaishinParser
 from finchie_parser.parsers.taishin_deposit import TaishinDepositParser
 
-PARSERS: tuple[StatementParser, ...] = (
+PARSERS: tuple[StatementParser, ...] = registry(
     EsunParser(),
     EsunDepositParser(),
     TaishinParser(),

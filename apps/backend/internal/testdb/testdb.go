@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,9 @@ var (
 	once    sync.Once
 	pool    *pgxpool.Pool
 	initErr error
+	// The container's connection string, for databases of a test's own.
+	dsn     string
+	freshID atomic.Int64
 )
 
 // Pool returns a migrated database shared by the package's tests, emptied before each test.
@@ -56,7 +60,7 @@ func start() (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run container: %w", err)
 	}
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
+	dsn, err = container.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		return nil, fmt.Errorf("connection string: %w", err)
 	}
@@ -76,6 +80,27 @@ func start() (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("keep the seeds: %w", err)
 	}
 	return p, nil
+}
+
+// Empty returns a database of the test's own with no schema at all, for a test that migrates it itself.
+func Empty(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	shared := Pool(t)
+	name := fmt.Sprintf("empty_%d", freshID.Add(1))
+	if _, err := shared.Exec(t.Context(), "CREATE DATABASE "+name); err != nil {
+		t.Fatalf("create database: %v", err)
+	}
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse connection string: %v", err)
+	}
+	config.ConnConfig.Database = name
+	p, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(p.Close)
+	return p
 }
 
 func waitForPing(ctx context.Context, p *pgxpool.Pool) error {

@@ -28,8 +28,10 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/config"
 	"github.com/hsin19/finchie/apps/backend/internal/db"
 	"github.com/hsin19/finchie/apps/backend/internal/exchanges"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
+	"github.com/hsin19/finchie/apps/backend/internal/jobs"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 	"github.com/hsin19/finchie/apps/backend/internal/quotes"
 	"github.com/hsin19/finchie/apps/backend/internal/rates"
 	"github.com/hsin19/finchie/apps/backend/internal/telemetry"
@@ -93,7 +95,7 @@ func run() error {
 	if err := db.Migrate(ctx, pool); err != nil {
 		return err
 	}
-	linked, err := ingest.Relink(ctx, pool)
+	linked, err := ledger.RelinkAll(ctx, pool)
 	if err != nil {
 		return err
 	}
@@ -105,12 +107,19 @@ func run() error {
 		return err
 	}
 
-	// The parser is internal and stateless (ADR 0002): plaintext on the private network. A request
-	// carries a whole document; an opened one comes back no larger (ADR 0012).
+	// The parser is internal and stateless (ADR 0002): plaintext on the private network, with its token
+	// where the deployment sets one. A request carries a whole document; an opened one comes back no
+	// larger (ADR 0012).
 	messageLimit := int(cfg.MaxUploadBytes()) + 1<<20
-	limit := grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(messageLimit), grpc.MaxCallRecvMsgSize(messageLimit))
-	conn, err := grpc.NewClient(cfg.ParserAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), limit,
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
+	options := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(messageLimit), grpc.MaxCallRecvMsgSize(messageLimit)),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	}
+	if cfg.ParserToken != "" {
+		options = append(options, grpc.WithPerRPCCredentials(parserToken(cfg.ParserToken)))
+	}
+	conn, err := grpc.NewClient(cfg.ParserAddr, options...)
 	if err != nil {
 		return fmt.Errorf("parser client: %w", err)
 	}
@@ -121,17 +130,21 @@ func run() error {
 	}()
 
 	workers := river.NewWorkers()
-	parser := parserv1.NewParserServiceClient(conn)
+	parser := parserv2.NewParserServiceClient(conn)
 	river.AddWorker(workers, ingest.NewWorker(pool, parser, cfg.ParseTimeout))
+	river.AddWorker(workers, ingest.NewRetryWorker(pool, parser))
 	river.AddWorker(workers, rates.NewWorker(pool, &http.Client{Timeout: 30 * time.Second}, rates.Feeds))
 	river.AddWorker(workers, quotes.NewWorker(pool, &http.Client{Timeout: 2 * time.Minute}, quotes.Feeds))
 	exchangeAPIs := configuredExchanges(cfg, &http.Client{Timeout: 30 * time.Second})
 	// Registered without any exchange too: a job queued before its keys were removed finds a worker.
 	river.AddWorker(workers, exchanges.NewWorker(pool, exchangeAPIs, time.Now))
-	jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Queues:       map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: cfg.ParseConcurrency}},
+	queue, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Queues: map[string]river.QueueConfig{
+			jobs.Parse:   {MaxWorkers: cfg.ParseConcurrency},
+			jobs.Sources: {MaxWorkers: jobs.SourcesWorkers},
+		},
 		Workers:      workers,
-		PeriodicJobs: append([]*river.PeriodicJob{rates.Periodic(), quotes.Periodic()}, exchanges.Periodic(exchangeAPIs)...),
+		PeriodicJobs: append([]*river.PeriodicJob{rates.Periodic(), quotes.Periodic(), ingest.RetryPeriodic()}, exchanges.Periodic(exchangeAPIs)...),
 		Logger:       logger,
 		// Without it, the signal that cancels the context passed to Start cancels running jobs too.
 		SoftStopTimeout: jobStopTimeout,
@@ -144,13 +157,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("job client: %w", err)
 	}
-	if err := jobs.Start(ctx); err != nil {
+	if err := queue.Start(ctx); err != nil {
 		return fmt.Errorf("start jobs: %w", err)
 	}
 
 	e := echo.New()
 	e.Logger = logger
-	e.Use(telemetry.Route(), middleware.Recover(), middleware.RequestLogger(), middleware.BodyLimit(cfg.MaxUploadBytes()+1<<20))
+	e.Use(telemetry.Route(), middleware.Recover(), telemetry.AccessLog(), middleware.BodyLimit(cfg.MaxUploadBytes()+1<<20))
 	if cfg.AccessEnabled() {
 		e.Use(access.New(ctx, cfg.AccessTeamDomain, cfg.AccessAudience).Middleware(telemetry.HealthPath))
 		slog.Info("requests must come through Cloudflare Access", "team", cfg.AccessTeamDomain)
@@ -164,7 +177,7 @@ func run() error {
 		}
 		return c.String(http.StatusOK, "ok")
 	})
-	api.Register(e, api.NewServer(pool, jobs, parser, cfg.MaxUploadBytes(), cfg.MailboxAddress))
+	api.Register(e, api.NewServer(pool, queue, parser, cfg.MaxUploadBytes(), cfg.MailboxAddress))
 	web.Register(e)
 
 	slog.Info("listening", "addr", cfg.HTTPAddr, "parser", cfg.ParserAddr)
@@ -174,7 +187,7 @@ func run() error {
 	// and their retries be recorded.
 	stopCtx, cancel := context.WithTimeout(context.Background(), jobStopTimeout+5*time.Second)
 	defer cancel()
-	if err := jobs.Stop(stopCtx); err != nil {
+	if err := queue.Stop(stopCtx); err != nil {
 		slog.Warn("jobs did not stop cleanly", "error", err)
 	}
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
@@ -207,3 +220,13 @@ func newStdoutHandler(format string) slog.Handler {
 	}
 	return slog.NewJSONHandler(os.Stdout, nil)
 }
+
+// parserToken is sent with every call to the parser, which serves only callers that send its token.
+type parserToken string
+
+func (t parserToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + string(t)}, nil
+}
+
+// RequireTransportSecurity is false: the parser is on the private network, in plaintext (ADR 0002).
+func (parserToken) RequireTransportSecurity() bool { return false }

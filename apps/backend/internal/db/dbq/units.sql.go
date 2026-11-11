@@ -8,14 +8,17 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const clearOwnerPrices = `-- name: ClearOwnerPrices :exec
-DELETE FROM prices WHERE unit_id = $1 AND source = 'owner'
+UPDATE prices SET withdrawn_at = now()
+WHERE unit_id = $1 AND source = 'owner' AND withdrawn_at IS NULL
 `
 
-// The owner's prices of a unit, all of them: the value they gave is withdrawn.
+// Withdraws the owner's prices of a unit: kept, so what it was worth on a day stays known, but none counts
+// as its newest any more (newest_prices).
 func (q *Queries) ClearOwnerPrices(ctx context.Context, unitID int64) error {
 	_, err := q.db.Exec(ctx, clearOwnerPrices, unitID)
 	return err
@@ -68,7 +71,7 @@ SELECT id, kind, symbol FROM units WHERE id = $1
 
 type GetUnitRow struct {
 	ID     int64
-	Kind   string
+	Kind   domain.UnitKind
 	Symbol string
 }
 
@@ -88,7 +91,7 @@ ORDER BY kind, symbol
 
 type ListUnitsRow struct {
 	ID     int64
-	Kind   string
+	Kind   domain.UnitKind
 	Symbol string
 	Code   *string
 }
@@ -171,7 +174,7 @@ JOIN units q ON q.kind = 'money' AND q.symbol = r.quote
 WHERE u.id <> q.id
 ON CONFLICT (unit_id, source, ((as_of AT TIME ZONE 'Asia/Taipei')::date))
 DO UPDATE SET as_of = EXCLUDED.as_of, amount = EXCLUDED.amount, quote_unit_id = EXCLUDED.quote_unit_id,
-              quote_amount = EXCLUDED.quote_amount
+              quote_amount = EXCLUDED.quote_amount, withdrawn_at = NULL
 `
 
 type UpsertPricesParams struct {

@@ -1,7 +1,7 @@
 import type {
     Account,
     Balance,
-    Statement,
+    Position,
 } from "#lib/api/client.js";
 import {
     describe,
@@ -9,6 +9,8 @@ import {
     it,
 } from "vitest";
 import {
+    accountPage,
+    accountsHref,
     accountSort,
     accountStatus,
     daysAgo,
@@ -19,14 +21,14 @@ import {
     lapsesSoon,
     leftOut,
     listedBalances,
+    readAccountsView,
     shownNumber,
+    shownPositions,
     sortAccounts,
-    totalWorth,
-    unpaidBills,
 } from "./accounts.js";
 
 function account(id: number, worth?: string): Account {
-    return { id, institution: "esun", kind: "deposit", number: String(id), balances: [], continuity: "checked", gaps: [], expiries: [], worth };
+    return { id, institution: "esun", kind: "deposit", side: "asset", number: String(id), balances: [], continuity: "checked", gaps: [], expiries: [], worth };
 }
 
 describe("accounts", () => {
@@ -43,31 +45,9 @@ describe("accounts", () => {
         expect(sortAccounts(accounts, accountSort("balance")).map(a => a.id)).toEqual([3, 1, 5, 4, 2]);
     });
 
-    it("adds up worths exactly and counts the accounts without one", () => {
-        expect(totalWorth(accounts)).toEqual({ total: "15824.5", missing: 1 });
-    });
-
-    it("owes each bank's newest bill that is not seen paid and owes something", () => {
-        const bill = (id: number, institution: string, closingDate: string, totalDue: string, paidOn?: string): Statement => ({
-            id,
-            documentId: id,
-            institution,
-            closingDate,
-            dueDate: closingDate,
-            currency: "TWD",
-            totalDue,
-            reconciliation: { balanced: true, computed: "0", stated: "0", statedLabel: "" },
-            transactionCount: 0,
-            paidOn,
-        });
-        const bills = [
-            bill(1, "esun", "2026-09-07", "6350", "2026-09-22"),
-            bill(2, "esun", "2026-10-07", "780"),
-            bill(3, "taishin", "2026-10-07", "32646", "2026-10-22"),
-            bill(4, "cathay", "2026-09-01", "500"),
-            bill(5, "cathay", "2026-10-01", "0"),
-        ];
-        expect(unpaidBills(bills).map(b => b.id)).toEqual([2]);
+    it("puts the largest debt first among liabilities", () => {
+        const cards = [account(1, "-500"), account(2, "-23104"), account(3)];
+        expect(sortAccounts(cards, "balance").map(a => a.id)).toEqual([2, 1, 3]);
     });
 });
 
@@ -94,6 +74,7 @@ describe("small accounts and balances", () => {
         id: 1,
         institution: "nextbank",
         kind: "deposit",
+        side: "asset",
         number: "1",
         balances,
         continuity: "checked",
@@ -161,16 +142,16 @@ describe("lapsing points", () => {
 
 describe("describePrice", () => {
     it("says what one unit comes to in NT$, where the price came from, and when it held", () => {
-        expect(describePrice("USD", { asOf: "2026-11-06T16:00:00Z", source: "fawaz", quote: "TWD", quoted: "32.8538370571241164", twd: "32.8538370571241164" }))
+        expect(describePrice("USD", { asOf: "2026-11-06T16:00:00Z", source: "fawaz", quote: "TWD", quoted: "32.8538370571241164", twd: "32.8538370571241164" }, "TWD"))
             .toBe("1 USD ≈ NT$32.85 · 匯率 2026-11-07");
-        expect(describePrice("範例電子", { asOf: "2026-11-06T05:30:00Z", source: "twse", quote: "TWD", quoted: "50.5", twd: "50.5" }))
+        expect(describePrice("範例電子", { asOf: "2026-11-06T05:30:00Z", source: "twse", quote: "TWD", quoted: "50.5", twd: "50.5" }, "TWD"))
             .toBe("1 範例電子 ≈ NT$50.50 · 證交所收盤 2026-11-06 13:30");
     });
 
     it("goes through the quote unit, or says it has no price in NT$", () => {
-        expect(describePrice("BGB", { asOf: "2026-11-09T06:00:00Z", source: "bitget", quote: "USDT", quoted: "0.85", twd: "27.9325" }))
+        expect(describePrice("BGB", { asOf: "2026-11-09T06:00:00Z", source: "bitget", quote: "USDT", quoted: "0.85", twd: "27.9325" }, "TWD"))
             .toBe("1 BGB = 0.85 USDT ≈ NT$27.93 · Bitget 2026-11-09 14:00");
-        expect(describePrice("哩程", { asOf: "2026-11-09T06:00:00Z", source: "owner", quote: "EUR", quoted: "0.01" }))
+        expect(describePrice("哩程", { asOf: "2026-11-09T06:00:00Z", source: "owner", quote: "EUR", quoted: "0.01" }, "TWD"))
             .toBe("1 哩程 = 0.01 EUR（EUR 沒有新臺幣價格） · 自訂 2026-11-09 14:00");
     });
 });
@@ -218,5 +199,45 @@ describe("accountStatus", () => {
 
     it("says how long ago in words", () => {
         expect([daysAgo(0), daysAgo(1), daysAgo(41)]).toEqual(["今天", "昨天", "41 天前"]);
+    });
+});
+
+describe("accounts URL", () => {
+    it("reads back as the view it links to", () => {
+        for (const view of [{ sort: "bank", all: true }, { sort: "balance", all: false }, { sort: "balance", all: true }] as const) {
+            expect(readAccountsView(new URL(accountsHref(view), "https://finchie.test").searchParams)).toEqual(view);
+        }
+        expect(accountsHref({ sort: "balance", all: false })).toBe("/accounts");
+    });
+});
+
+describe("accountPage", () => {
+    it("shows each kind its own parts", () => {
+        expect(accountPage({ kind: "deposit", institution: "esun" })).toMatchObject({ headline: "balances", lines: { trade: false }, history: "statements", form: false });
+        expect(accountPage({ kind: "securities", institution: "skis" })).toMatchObject({ headline: "worth", positions: true, lines: { trade: true } });
+        expect(accountPage({ kind: "exchange", institution: "max" })).toMatchObject({ headline: "worth", holdings: true, lines: undefined, history: "days" });
+        expect(accountPage({ kind: "points", institution: "esun" })).toMatchObject({ expiring: true, gaps: expect.stringContaining("過期") });
+    });
+
+    it("shows a card account's bill lines, and why its balances are not joined up", () => {
+        expect(accountPage({ kind: "credit_card", institution: "hsbc" })).toMatchObject({ lines: { trade: false }, form: false, unchecked: expect.stringContaining("每期帳單") });
+    });
+
+    it("lets the owner keep a loan, its principal by hand", () => {
+        expect(accountPage({ kind: "loan", institution: "owner" })).toMatchObject({ form: true, lines: undefined, expiring: false });
+    });
+
+    it("gives an account the owner keeps a form and no lines", () => {
+        expect(accountPage({ kind: "points", institution: "owner" })).toMatchObject({ expiring: true, lines: undefined, form: true });
+    });
+});
+
+describe("shownPositions", () => {
+    const position = (unit: string, shares: string, realized?: string) => ({ unit, shares, realized }) as Position;
+
+    it("lists what is held, then what was sold out with a known gain or loss", () => {
+        const shown = shownPositions([position("A", "0", "120"), position("B", "100"), position("C", "0"), position("D", "0", "0")]);
+        expect(shown.map(p => p.unit)).toEqual(["B", "A"]);
+        expect(shownPositions(undefined)).toEqual([]);
     });
 });

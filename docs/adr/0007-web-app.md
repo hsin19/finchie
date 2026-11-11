@@ -40,7 +40,7 @@ Dark only, monospace everywhere, one amber accent. Pages read like a shell: the 
 
 Square brackets mean one thing: a key you can press (`[a] 全部帳單`), the key in amber and its label in plain text. Statuses, toggles, and filters don't use them; a selected filter shows by its amber outline.
 
-Single-key shortcuts drive every page (`o` `s` `t` `u` to switch pages, `/` to search, `j` `k` `Enter` in lists, `?` for help, `⌘K` for a command palette). Phones get a bottom tab bar and lists grouped by day instead of tables.
+Single-key shortcuts drive every page (`o` `s` `t` `u` to switch pages, `/` to search, `j` `k` `Enter` in lists, `?` for help, `⌘K` for a command palette). (Now `o` `s` `t` `a` `d` switch pages, and `/` searches the page's own list or, without one, the transactions. One table, `apps/web/src/lib/shortcuts.ts`, drives every handler and the help dialog, so the keys are listed there and nowhere else.) Phones get a bottom tab bar and lists grouped by day instead of tables.
 
 ## Alternatives considered
 

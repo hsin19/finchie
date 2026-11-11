@@ -33,7 +33,7 @@ class RapidOcr:
     SCALE = 3.0
 
     def __init__(self) -> None:
-        self._engine = None
+        self._engine: Any = None
         self._lock = threading.Lock()
 
     def read_column(self, document: Document, page_index: int, left: float, right: float) -> list[OcrLine]:

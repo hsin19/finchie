@@ -40,6 +40,11 @@ export function shortDate(date: string): string {
     return date.slice(5);
 }
 
+/** "2026-10-08" → "10/08" */
+export function slashDate(date: string): string {
+    return shortDate(date).replace("-", "/");
+}
+
 export function weekday(date: string): string {
     return WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }
@@ -53,6 +58,11 @@ export function thisMonth(): Month {
     return monthOf(today());
 }
 
+/** The time of day, in local time: "17:18:03". */
+export function timeOfDay(now = new Date()): string {
+    return now.toLocaleTimeString("en-GB", { hour12: false });
+}
+
 /** A timestamp in local time: "11/05 17:18". */
 export function shortDateTime(iso: string): string {
     const d = new Date(iso);
@@ -60,8 +70,9 @@ export function shortDateTime(iso: string): string {
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** "512 B", "12 KB", "1.5 MB", "32 MB". */
 export function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, "")} MB`;
 }

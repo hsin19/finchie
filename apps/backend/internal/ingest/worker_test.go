@@ -16,31 +16,43 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
-// fakeParser answers ParseDocument; the worker never calls the embedded (nil) OpenDocument.
+// fakeParser answers ParseDocument and DescribeParsers; the worker never calls the embedded (nil)
+// OpenDocument.
 type fakeParser struct {
-	parserv1.ParserServiceClient
-	response *parserv1.ParseDocumentResponse
+	parserv2.ParserServiceClient
+	response *parserv2.ParseDocumentResponse
 	err      error
-	requests []*parserv1.ParseDocumentRequest
+	requests []*parserv2.ParseDocumentRequest
+	// What DescribeParsers says: the parser of response at its version, and this instance.
+	instance string
 }
 
-func (f *fakeParser) ParseDocument(_ context.Context, in *parserv1.ParseDocumentRequest, _ ...grpc.CallOption) (*parserv1.ParseDocumentResponse, error) {
+func (f *fakeParser) DescribeParsers(context.Context, *parserv2.DescribeParsersRequest, ...grpc.CallOption) (*parserv2.DescribeParsersResponse, error) {
+	described := &parserv2.DescribeParsersResponse{Instance: f.instance}
+	if f.response != nil {
+		described.Parsers = []*parserv2.ParserVersion{{Name: f.response.GetParser(), Version: f.response.GetParserVersion()}}
+	}
+	return described, nil
+}
+
+func (f *fakeParser) ParseDocument(_ context.Context, in *parserv2.ParseDocumentRequest, _ ...grpc.CallOption) (*parserv2.ParseDocumentResponse, error) {
 	f.requests = append(f.requests, in)
 	return f.response, f.err
 }
 
-func parsed(statement *parserv1.Statement, warnings ...string) *fakeParser {
-	return &fakeParser{response: &parserv1.ParseDocumentResponse{
+func parsed(statement *parserv2.Statement, warnings ...string) *fakeParser {
+	return &fakeParser{instance: "a", response: &parserv2.ParseDocumentResponse{
 		Parser: "hsbc.credit_card", ParserVersion: "1", Statement: statement, Warnings: warnings,
 	}}
 }
 
 func failing(code codes.Code) *fakeParser {
-	return &fakeParser{err: status.Error(code, "parser says no")}
+	return &fakeParser{instance: "a", err: status.Error(code, "parser says no")}
 }
 
 func addDocument(t *testing.T, pool *pgxpool.Pool, name string) int64 {
@@ -90,11 +102,11 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 
 	request := parser.requests[0]
-	if request.GetDocumentId() != "1" || request.GetFilename() != "october.eml" || string(request.GetContent()) != "raw october.eml" {
+	if request.GetDocumentId() != "1" || string(request.GetContent()) != "raw october.eml" {
 		t.Fatalf("request = %v", request)
 	}
 	doc := document(t, pool, id)
-	if doc.Status != StatusParsed || *doc.Parser != "hsbc.credit_card" || doc.Warnings[0] != "minor OCR doubt" || !doc.ParsedAt.Valid {
+	if doc.Status != domain.Parsed || *doc.Parser != "hsbc.credit_card" || doc.Warnings[0] != "minor OCR doubt" || !doc.ParsedAt.Valid {
 		t.Fatalf("document = %+v", doc)
 	}
 	rows, err := dbq.New(pool).ListTransactions(t.Context(), 1)
@@ -109,9 +121,9 @@ func TestWorkerStoresAParsedStatement(t *testing.T) {
 	}
 }
 
-func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
+func TestABillsLinesAndWhatItOwesGoToItsBanksCardAccount(t *testing.T) {
 	pool := testdb.Pool(t)
-	store := func(name string, statement *parserv1.Statement) {
+	store := func(name string, statement *parserv2.Statement) {
 		t.Helper()
 		if err := NewWorker(pool, parsed(statement), time.Minute).Work(t.Context(), job(addDocument(t, pool, name), 1, 6)); err != nil {
 			t.Fatal(err)
@@ -124,11 +136,11 @@ func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
 	if err := pool.QueryRow(t.Context(), "SELECT id, kind, number FROM accounts WHERE institution = 'hsbc'").Scan(&account, &kind, &number); err != nil {
 		t.Fatal(err)
 	}
-	if kind != KindCreditCard || number != "" {
+	if kind != string(domain.CreditCard) || number != "" {
 		t.Fatalf("account = %s %q", kind, number)
 	}
 	var lines int
-	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions t JOIN units u ON u.id = t.unit_id WHERE t.account_id = $1 AND u.symbol = 'TWD' AND u.kind = 'money' AND t.status = 'active'", account).Scan(&lines); err != nil || lines != 2 {
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM transactions t JOIN units u ON u.id = t.unit_id WHERE t.account_id = $1 AND u.symbol = 'TWD' AND u.kind = 'money'", account).Scan(&lines); err != nil || lines != 2 {
 		t.Fatalf("lines in the account = %d (%v)", lines, err)
 	}
 
@@ -138,9 +150,13 @@ func TestABillsLinesGoToItsBanksCardAccountWhichHoldsNoBalance(t *testing.T) {
 	other := sampleStatement(true)
 	other.Institution = "taishin"
 	store("taishin.eml", other)
-	// One account per bank, and no balance: what a bill says is owed stays on the bill (ADR 0013).
-	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 0 {
+	// One account per bank, a liability whose balance on each closing date is what that bill owes (ADR 0022).
+	if countRows(t, pool, "accounts") != 2 || countRows(t, pool, "balances") != 3 {
 		t.Fatalf("accounts = %d, balances = %d", countRows(t, pool, "accounts"), countRows(t, pool, "balances"))
+	}
+	var owed string
+	if err := pool.QueryRow(t.Context(), "SELECT amount::text FROM balances WHERE account_id = $1 ORDER BY as_of DESC LIMIT 1", account).Scan(&owed); err != nil || owed != "-40010" {
+		t.Fatalf("newest balance = %s (%v), want the bill's total due as printed", owed, err)
 	}
 }
 
@@ -163,7 +179,7 @@ func TestWorkerFlagsAStatementThatDoesNotReconcile(t *testing.T) {
 	if err := NewWorker(pool, parsed(sampleStatement(false)), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
-	if got := document(t, pool, id).Status; got != StatusNeedsReview {
+	if got := document(t, pool, id).Status; got != domain.NeedsReview {
 		t.Fatalf("status = %s", got)
 	}
 	if countRows(t, pool, "statements") != 1 {
@@ -182,7 +198,7 @@ func TestWorkerMarksASecondCopyOfAStatementAsDuplicate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if doc := document(t, pool, pdf); doc.Status != StatusDuplicate || doc.Error == nil {
+	if doc := document(t, pool, pdf); doc.Status != domain.Duplicate || doc.DuplicateOf == nil || *doc.DuplicateOf != email {
 		t.Fatalf("second copy = %+v", doc)
 	}
 	if countRows(t, pool, "statements") != 1 || countRows(t, pool, "transactions") != 2 {
@@ -199,7 +215,7 @@ func TestReparsingReplacesThePreviousResult(t *testing.T) {
 	before := statementOf(t, pool, id)
 
 	fixed := sampleStatement(true)
-	fixed.Transactions = fixed.Transactions[:1]
+	fixed.Accounts[0].Lines = fixed.Accounts[0].Lines[:1]
 	if err := NewWorker(pool, parsed(fixed), time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +258,7 @@ func TestPermanentParserErrorsFailTheDocumentWithoutRetry(t *testing.T) {
 		t.Fatalf("err = %v, want a cancelled job", err)
 	}
 	doc := document(t, pool, id)
-	if doc.Status != StatusFailed || doc.Error == nil || *doc.Error != "FailedPrecondition: parser says no" {
+	if doc.Status != domain.Failed || doc.Failure == nil || *doc.Failure != domain.Locked || doc.Error == nil || *doc.Error != "parser says no" {
 		t.Fatalf("document = %+v", doc)
 	}
 }
@@ -257,15 +273,16 @@ func TestTransientParserErrorsRetryUntilAttemptsRunOut(t *testing.T) {
 	if err == nil || errors.As(err, &cancel) {
 		t.Fatalf("first attempt: err = %v, want a plain error so River retries", err)
 	}
-	if got := document(t, pool, id).Status; got != StatusPending {
+	if got := document(t, pool, id).Status; got != domain.Pending {
 		t.Fatalf("status after a retryable failure = %s", got)
 	}
 
 	if err := worker.Work(t.Context(), job(id, 6, 6)); !errors.As(err, &cancel) {
 		t.Fatalf("last attempt: err = %v, want a cancelled job", err)
 	}
-	if got := document(t, pool, id).Status; got != StatusFailed {
-		t.Fatalf("status after the last attempt = %s", got)
+	// Failed for now, for Retry to take up again: the parser being out of reach says nothing of the document.
+	if doc := document(t, pool, id); doc.Status != domain.Failed || doc.Failure == nil || *doc.Failure != domain.Unavailable {
+		t.Fatalf("after the last attempt = %+v", doc)
 	}
 }
 
@@ -274,7 +291,7 @@ func TestStoreErrorsFailTheDocumentOnTheLastAttempt(t *testing.T) {
 	id := addDocument(t, pool, "rejected.eml")
 	statement := sampleStatement(true)
 	// Valid for the parser contract, but Postgres rejects it: currency is CHAR(3).
-	statement.Currency = "TWDX"
+	statement.CardBill.Currency = "TWDX"
 	worker := NewWorker(pool, parsed(statement), time.Minute)
 
 	err := worker.Work(t.Context(), job(id, 1, 6))
@@ -282,14 +299,14 @@ func TestStoreErrorsFailTheDocumentOnTheLastAttempt(t *testing.T) {
 	if err == nil || errors.As(err, &cancel) {
 		t.Fatalf("first attempt: err = %v, want a plain error so River retries", err)
 	}
-	if got := document(t, pool, id).Status; got != StatusPending {
+	if got := document(t, pool, id).Status; got != domain.Pending {
 		t.Fatalf("status after the first attempt = %s", got)
 	}
 
 	if err := worker.Work(t.Context(), job(id, 6, 6)); !errors.As(err, &cancel) {
 		t.Fatalf("last attempt: err = %v, want a cancelled job", err)
 	}
-	if doc := document(t, pool, id); doc.Status != StatusFailed || doc.Error == nil || *doc.Error == "" {
+	if doc := document(t, pool, id); doc.Status != domain.Failed || doc.Error == nil || *doc.Error == "" {
 		t.Fatalf("document after the last attempt = %+v", doc)
 	}
 	if countRows(t, pool, "statements") != 0 {
@@ -301,7 +318,7 @@ func TestWorkerFailsAResponseWithANonFiniteAmount(t *testing.T) {
 	pool := testdb.Pool(t)
 	id := addDocument(t, pool, "nan.eml")
 	statement := sampleStatement(true)
-	statement.Transactions[0].Amount.Value = "NaN"
+	statement.Accounts[0].Lines[0].Amount.Value = "NaN"
 
 	err := NewWorker(pool, parsed(statement), time.Minute).Work(t.Context(), job(id, 1, 6))
 
@@ -309,7 +326,7 @@ func TestWorkerFailsAResponseWithANonFiniteAmount(t *testing.T) {
 	if !errors.As(err, &cancel) {
 		t.Fatalf("err = %v, want a cancelled job", err)
 	}
-	if doc := document(t, pool, id); doc.Status != StatusFailed || doc.Error == nil {
+	if doc := document(t, pool, id); doc.Status != domain.Failed || doc.Error == nil {
 		t.Fatalf("document = %+v", doc)
 	}
 	if countRows(t, pool, "statements") != 0 {
@@ -324,7 +341,7 @@ type stoppingParser struct {
 	stop context.CancelFunc
 }
 
-func (p stoppingParser) ParseDocument(ctx context.Context, in *parserv1.ParseDocumentRequest, opts ...grpc.CallOption) (*parserv1.ParseDocumentResponse, error) {
+func (p stoppingParser) ParseDocument(ctx context.Context, in *parserv2.ParseDocumentRequest, opts ...grpc.CallOption) (*parserv2.ParseDocumentResponse, error) {
 	p.stop()
 	return p.fakeParser.ParseDocument(ctx, in, opts...)
 }
@@ -341,7 +358,7 @@ func TestAParseCancelledOnShutdownIsRetried(t *testing.T) {
 	if err == nil || errors.As(err, &cancel) {
 		t.Fatalf("err = %v, want a plain error so River retries", err)
 	}
-	if doc := document(t, pool, id); doc.Status != StatusPending || doc.Error != nil {
+	if doc := document(t, pool, id); doc.Status != domain.Pending || doc.Error != nil {
 		t.Fatalf("document = %+v, want it left pending for the next attempt", doc)
 	}
 }

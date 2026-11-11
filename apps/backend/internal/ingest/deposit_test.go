@@ -8,50 +8,34 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
 
 // sampleDeposit is synthetic (ADR 0006): a combined statement with an NT$ account that has lines and a
 // US$ account that only has a balance.
-func sampleDeposit() *parserv1.DepositStatement {
-	return &parserv1.DepositStatement{
-		Institution: "esun",
-		PeriodStart: &date.Date{Year: 2026, Month: 9, Day: 1},
-		PeriodEnd:   &date.Date{Year: 2026, Month: 9, Day: 30},
-		Accounts: []*parserv1.DepositAccount{
-			{
-				Number: "1234567***890", Name: "臺幣活存", Currency: "TWD",
-				OpeningBalance: &decimal.Decimal{Value: "1000"},
-				ClosingBalance: &decimal.Decimal{Value: "51000"},
-				Lines: []*parserv1.DepositLine{
-					{
-						Date: &date.Date{Year: 2026, Month: 9, Day: 5}, Description: "薪資", Memo: "範例公司",
-						Counterparty: "812 0000000000***123", Amount: &decimal.Decimal{Value: "60000"},
-						Balance: &decimal.Decimal{Value: "61000"}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-					},
-					{
-						Date: &date.Date{Year: 2026, Month: 9, Day: 10}, Description: "卡款扣繳",
-						Amount: &decimal.Decimal{Value: "-10000"}, Balance: &decimal.Decimal{Value: "51000"},
-						Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-					},
-				},
-				Reconciliation: &parserv1.Reconciliation{
-					Balanced: true, Computed: &decimal.Decimal{Value: "51000"}, Stated: &decimal.Decimal{Value: "51000"}, StatedLabel: "存款餘額",
-				},
-			},
-			{Number: "7654321***098", Name: "外幣活存", Currency: "USD", ClosingBalance: &decimal.Decimal{Value: "12.34"}},
-		},
-	}
+func sampleDeposit() *parserv2.Statement {
+	s := pt.Deposit("esun", pt.Day(9, 1), pt.Day(9, 30),
+		pt.DepositAccount("1234567***890", "臺幣活存",
+			[]*parserv2.Balance{pt.Balance("TWD", pt.Day(8, 31), "1000"), pt.Balance("TWD", pt.Day(9, 30), "51000")},
+			pt.DepositLine(pt.Day(9, 5), "薪資", "TWD", "60000", "61000", pt.Memo("範例公司"), pt.Counterparty("812 0000000000***123")),
+			pt.DepositLine(pt.Day(9, 10), "卡款扣繳", "TWD", "-10000", "51000"),
+		),
+		pt.DepositAccount("7654321***098", "外幣活存", []*parserv2.Balance{pt.Balance("USD", pt.Day(9, 30), "12.34")}),
+	)
+	s.Checks = []*parserv2.Check{pt.Check("臺幣活存 1234567***890 存款餘額", "TWD", "51000", "51000")}
+	return s
 }
 
-func storeDeposit(t *testing.T, pool *pgxpool.Pool, name string, statement *parserv1.DepositStatement) int64 {
+func storeDeposit(t *testing.T, pool *pgxpool.Pool, name string, statement *parserv2.Statement) int64 {
 	t.Helper()
 	id := addDocument(t, pool, name)
-	parser := &fakeParser{response: &parserv1.ParseDocumentResponse{Parser: "esun.deposit", ParserVersion: "1", DepositStatement: statement}}
+	parser := &fakeParser{response: pt.Response("esun.deposit", statement)}
 	if err := NewWorker(pool, parser, time.Minute).Work(t.Context(), job(id, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +45,7 @@ func storeDeposit(t *testing.T, pool *pgxpool.Pool, name string, statement *pars
 func TestADepositStatementIsStoredInTheAccountsItCovers(t *testing.T) {
 	pool := testdb.Pool(t)
 	id := storeDeposit(t, pool, "september.eml", sampleDeposit())
-	if got := document(t, pool, id).Status; got != StatusParsed {
+	if got := document(t, pool, id).Status; got != domain.Parsed {
 		t.Fatalf("status = %s", got)
 	}
 	ctx := t.Context()
@@ -71,7 +55,7 @@ func TestADepositStatementIsStoredInTheAccountsItCovers(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT kind, period_start, closing_date FROM statements").Scan(&kind, &periodStart, &closing); err != nil {
 		t.Fatal(err)
 	}
-	if kind != KindDeposit || periodStart.Format(time.DateOnly) != "2026-09-01" || closing.Format(time.DateOnly) != "2026-09-30" {
+	if kind != string(domain.Deposit) || periodStart.Format(time.DateOnly) != "2026-09-01" || closing.Format(time.DateOnly) != "2026-09-30" {
 		t.Fatalf("statement = %s %s..%s", kind, periodStart, closing)
 	}
 
@@ -128,12 +112,12 @@ func TestABanksCardBillAndDepositStatementClosingTheSameDayAreBothStored(t *test
 	pool := testdb.Pool(t)
 	bill := sampleStatement(true)
 	bill.Institution = "esun"
-	bill.ClosingDate = &date.Date{Year: 2026, Month: 9, Day: 30}
+	bill.ClosingDate = pt.Day(9, 30)
 	if err := NewWorker(pool, parsed(bill), time.Minute).Work(t.Context(), job(addDocument(t, pool, "bill.eml"), 1, 6)); err != nil {
 		t.Fatal(err)
 	}
 	id := storeDeposit(t, pool, "deposit.eml", sampleDeposit())
-	if got := document(t, pool, id).Status; got != StatusParsed {
+	if got := document(t, pool, id).Status; got != domain.Parsed {
 		t.Fatalf("deposit statement = %s, want parsed beside the bill", got)
 	}
 	if countRows(t, pool, "statements") != 2 {
@@ -142,37 +126,24 @@ func TestABanksCardBillAndDepositStatementClosingTheSameDayAreBothStored(t *test
 }
 
 // passbook is a synthetic (ADR 0006) on-demand export of one NT$ account, as Cathay's e-passbook is:
-// its period runs from its first line to its last.
-func passbook(from, to *date.Date, opening, closing string, lines ...*parserv1.DepositLine) *parserv1.DepositStatement {
-	return &parserv1.DepositStatement{
-		Institution: "cathay",
-		PeriodStart: from,
-		PeriodEnd:   to,
-		Accounts: []*parserv1.DepositAccount{{
-			Number: "123-45-678901-2", Name: "數位存款帳戶", Currency: "TWD",
-			OpeningBalance: &decimal.Decimal{Value: opening},
-			ClosingBalance: &decimal.Decimal{Value: closing},
-			Lines:          lines,
-			Reconciliation: &parserv1.Reconciliation{
-				Balanced: true, Computed: &decimal.Decimal{Value: closing}, Stated: &decimal.Decimal{Value: closing}, StatedLabel: "餘額",
-			},
-		}},
-	}
+// its period runs from its first line to its last, its opening balance on the day before.
+func passbook(from, to *date.Date, opening, closing string, lines ...*parserv2.Line) *parserv2.Statement {
+	before := time.Date(int(from.GetYear()), time.Month(from.GetMonth()), int(from.GetDay())-1, 0, 0, 0, 0, time.UTC)
+	dayBefore := &date.Date{Year: int32(before.Year()), Month: int32(before.Month()), Day: int32(before.Day())} //nolint:gosec // a date
+	s := pt.Deposit("cathay", from, to, pt.DepositAccount("123-45-678901-2", "數位存款帳戶",
+		[]*parserv2.Balance{pt.Balance("TWD", dayBefore, opening), pt.Balance("TWD", to, closing)}, lines...))
+	s.Checks = []*parserv2.Check{pt.Check("餘額", "TWD", closing, closing)}
+	return s
 }
 
-func on2026(month, day int32) *date.Date {
-	return &date.Date{Year: 2026, Month: month, Day: day}
-}
+func on2026(month, day int32) *date.Date { return pt.Day(month, day) }
 
-func passbookLine(month, day int32, description, amount, balance string) *parserv1.DepositLine {
-	return &parserv1.DepositLine{
-		Date: on2026(month, day), Description: description, Amount: &decimal.Decimal{Value: amount},
-		Balance: &decimal.Decimal{Value: balance}, Kind: parserv1.DepositLineKind_DEPOSIT_LINE_KIND_OTHER,
-	}
+func passbookLine(month, day int32, description, amount, balance string) *parserv2.Line {
+	return pt.DepositLine(on2026(month, day), description, "TWD", amount, balance)
 }
 
 // May to October: 10,000 before it; -500 → 9,500; +1,000 → 10,500; -200 → 10,300.
-func mayToOctober() *parserv1.DepositStatement {
+func mayToOctober() *parserv2.Statement {
 	return passbook(on2026(5, 19), on2026(10, 29), "10000", "10300",
 		passbookLine(5, 19, "五月卡款", "-500", "9500"),
 		passbookLine(6, 19, "六月轉入(舊)", "1000", "10500"),
@@ -182,7 +153,7 @@ func mayToOctober() *parserv1.DepositStatement {
 
 // June to November, sharing June to October with the export above: +1,000 → 10,500; -200 → 10,300;
 // +3,000 → 13,300.
-func juneToNovember() *parserv1.DepositStatement {
+func juneToNovember() *parserv2.Statement {
 	return passbook(on2026(6, 19), on2026(11, 19), "9500", "13300",
 		passbookLine(6, 19, "六月轉入(新)", "1000", "10500"),
 		passbookLine(10, 29, "十月轉出(新)", "-200", "10300"),
@@ -221,7 +192,7 @@ func checkLedger(t *testing.T, pool *pgxpool.Pool, wantLines, wantBalances strin
 	if got := scan("SELECT as_of, amount::text FROM balances ORDER BY as_of, id"); got != wantBalances {
 		t.Fatalf("balances = %q, want %q", got, wantBalances)
 	}
-	gaps, err := dbq.New(pool).AccountGaps(ctx, nil)
+	gaps, err := ledger.Gaps(ctx, dbq.New(pool), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,13 +212,13 @@ func TestOverlappingExportsKeepTheSharedDaysOfTheOneClosingLater(t *testing.T) {
 	pool := testdb.Pool(t)
 	older := storeDeposit(t, pool, "may-oct.eml", mayToOctober())
 	newer := storeDeposit(t, pool, "jun-nov.eml", juneToNovember())
-	if document(t, pool, older).Status != StatusParsed || document(t, pool, newer).Status != StatusParsed {
+	if document(t, pool, older).Status != domain.Parsed || document(t, pool, newer).Status != domain.Parsed {
 		t.Fatal("both overlapping exports must be parsed")
 	}
 	checkLedger(t, pool, sharedLines, sharedBalances)
 
 	// Re-parsing the export closing earlier changes nothing.
-	parser := &fakeParser{response: &parserv1.ParseDocumentResponse{Parser: "cathay.deposit", ParserVersion: "1", DepositStatement: mayToOctober()}}
+	parser := &fakeParser{response: pt.Response("cathay.deposit", mayToOctober())}
 	if err := NewWorker(pool, parser, time.Minute).Work(t.Context(), job(older, 1, 6)); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +232,7 @@ func TestOverlappingExportsKeepTheSharedDaysOfTheOneClosingLater(t *testing.T) {
 		passbookLine(10, 29, "十月轉出(全)", "-200", "10300"),
 		passbookLine(11, 19, "十一月薪資", "3000", "13300"),
 	))
-	if got := document(t, pool, whole).Status; got != StatusParsed {
+	if got := document(t, pool, whole).Status; got != domain.Parsed {
 		t.Fatalf("status = %s, want parsed for a wider period ending on the same day", got)
 	}
 	checkLedger(t, pool,
@@ -281,11 +252,10 @@ func TestAdjoiningStatementsKeepEachOthersBalancesWhicheverArrivesFirst(t *testi
 	pool := testdb.Pool(t)
 	september := sampleDeposit()
 	october := sampleDeposit()
-	october.PeriodStart, october.PeriodEnd = &date.Date{Year: 2026, Month: 10, Day: 1}, &date.Date{Year: 2026, Month: 10, Day: 31}
+	october.PeriodStart, october.ClosingDate = pt.Day(10, 1), pt.Day(10, 31)
 	october.Accounts = october.Accounts[:1]
-	october.Accounts[0].OpeningBalance = &decimal.Decimal{Value: "51000"}
+	october.Accounts[0].Balances = []*parserv2.Balance{pt.Balance("TWD", pt.Day(9, 30), "51000"), pt.Balance("TWD", pt.Day(10, 31), "51000")}
 	october.Accounts[0].Lines = nil
-	october.Accounts[0].ClosingBalance = &decimal.Decimal{Value: "51000"}
 
 	// The older one arrives last, as a backfill does: October's opening balance, on September's last
 	// day, is October's and stays.
@@ -303,53 +273,55 @@ func TestAdjoiningStatementsKeepEachOthersBalancesWhicheverArrivesFirst(t *testi
 	}
 }
 
-func TestAnAccountWhoseLinesDoNotAddUpPutsTheStatementUpForReviewAndSaysWhich(t *testing.T) {
+func TestAnAccountWhoseLinesDoNotAddUpPutsTheStatementUpForReviewWithTheCheckThatFailed(t *testing.T) {
 	pool := testdb.Pool(t)
 	statement := sampleDeposit()
-	statement.Accounts[0].Reconciliation = &parserv1.Reconciliation{
-		Balanced: false, Computed: &decimal.Decimal{Value: "51000"}, Stated: &decimal.Decimal{Value: "50000"}, StatedLabel: "存款餘額",
-	}
+	statement.Checks[0] = pt.Check("臺幣活存 1234567***890 存款餘額", "TWD", "51000", "50000")
 	doc := document(t, pool, storeDeposit(t, pool, "off.eml", statement))
-	if doc.Status != StatusNeedsReview || len(doc.Warnings) != 1 ||
-		doc.Warnings[0] != "臺幣活存 1234567***890 TWD: the lines come to 51000, 存款餘額 is 50000" {
+	if doc.Status != domain.NeedsReview || len(doc.Warnings) != 0 {
 		t.Fatalf("document = %s %q", doc.Status, doc.Warnings)
+	}
+	var name, computed, stated string
+	var balanced bool
+	if err := pool.QueryRow(t.Context(), "SELECT name, computed::text, stated::text, balanced FROM statement_checks").Scan(&name, &computed, &stated, &balanced); err != nil {
+		t.Fatal(err)
+	}
+	if name != "臺幣活存 1234567***890 存款餘額" || computed != "51000" || stated != "50000" || balanced {
+		t.Fatalf("check = %s %s %s %v", name, computed, stated, balanced)
 	}
 }
 
 func TestConvertRejectsDepositStatementsThatBreakTheContract(t *testing.T) {
-	cases := map[string]func(*parserv1.DepositStatement){
-		"missing period end":       func(d *parserv1.DepositStatement) { d.PeriodEnd = nil },
-		"no accounts":              func(d *parserv1.DepositStatement) { d.Accounts = nil },
-		"account without a number": func(d *parserv1.DepositStatement) { d.Accounts[0].Number = "" },
-		"same account and currency twice": func(d *parserv1.DepositStatement) {
-			d.Accounts[1].Number, d.Accounts[1].Currency = d.Accounts[0].Number, d.Accounts[0].Currency
+	cases := map[string]func(*parserv2.Statement){
+		"missing closing date":         func(d *parserv2.Statement) { d.ClosingDate = nil },
+		"no accounts":                  func(d *parserv2.Statement) { d.Accounts = nil },
+		"account without a number":     func(d *parserv2.Statement) { d.Accounts[0].Number = "" },
+		"same account twice":           func(d *parserv2.Statement) { d.Accounts[1].Number = d.Accounts[0].Number },
+		"a balance without its unit":   func(d *parserv2.Statement) { d.Accounts[1].Balances[0].Unit = "" },
+		"a balance without its amount": func(d *parserv2.Statement) { d.Accounts[1].Balances[0].Amount = nil },
+		"unspecified kind": func(d *parserv2.Statement) {
+			d.Accounts[0].Lines[0].Kind = parserv2.LineKind_LINE_KIND_UNSPECIFIED
 		},
-		"missing closing balance": func(d *parserv1.DepositStatement) { d.Accounts[1].ClosingBalance = nil },
-		"unspecified kind": func(d *parserv1.DepositStatement) {
-			d.Accounts[0].Lines[0].Kind = parserv1.DepositLineKind_DEPOSIT_LINE_KIND_UNSPECIFIED
+		"a purchase on a deposit account": func(d *parserv2.Statement) {
+			d.Accounts[0].Lines[0].Kind = parserv2.LineKind_LINE_KIND_PURCHASE
 		},
-		"unparsable running balance": func(d *parserv1.DepositStatement) {
-			d.Accounts[0].Lines[0].Balance = &decimal.Decimal{Value: "61,000"}
+		"unparsable running balance": func(d *parserv2.Statement) {
+			d.Accounts[0].Lines[0].GetDeposit().Balance = pt.Dec("61,000")
 		},
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
 			d := sampleDeposit()
 			breakIt(d)
-			if _, err := convertDeposit(1, d); !errors.Is(err, ErrInvalidResponse) {
+			if _, err := convertResponse(1, pt.Response("esun.deposit", d)); !errors.Is(err, ErrInvalidResponse) {
 				t.Fatalf("err = %v, want ErrInvalidResponse", err)
 			}
 		})
 	}
 }
 
-func TestAResponseMustCarryExactlyOneStatement(t *testing.T) {
-	for name, response := range map[string]*parserv1.ParseDocumentResponse{
-		"neither": {},
-		"both":    {Statement: sampleStatement(true), DepositStatement: sampleDeposit()},
-	} {
-		if _, err := convertResponse(1, response); !errors.Is(err, ErrInvalidResponse) {
-			t.Errorf("%s: err = %v", name, err)
-		}
+func TestAResponseMustCarryAStatement(t *testing.T) {
+	if _, err := convertResponse(1, &parserv2.ParseDocumentResponse{Parser: "esun.deposit"}); !errors.Is(err, ErrInvalidResponse) {
+		t.Fatalf("err = %v", err)
 	}
 }

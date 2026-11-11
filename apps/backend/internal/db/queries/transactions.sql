@@ -1,5 +1,5 @@
--- Search filters: a NULL argument means "no filter". SearchTransactions and TransactionTotals must
--- apply the same ones. With @fold, a line with a parent (a linked fee or refund) is not a row of its
+-- Search filters: a NULL argument means "no filter". The ones every view of the lines shares are
+-- line_matches (migration 00017). With @fold, a line with a parent (a linked fee or refund) is not a row of its
 -- own: it is one of its parent's children, and the parent's amounts count it (ADR 0009).
 -- A link (ADR 0016) is one row too: the line its money went to (another account's inflow, a card bill's
 -- payment line) is listed under the outflow it came from whenever that outflow matches as well. A view
@@ -12,20 +12,16 @@ WITH matched AS (
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
     WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
-      AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
-      AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
-      AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
-      AND (sqlc.narg(closing_to)::date IS NULL OR s.closing_date <= sqlc.narg(closing_to)::date)
       AND (sqlc.narg(kinds)::text[] IS NULL OR t.kind = ANY (sqlc.narg(kinds)::text[]))
       AND (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
       AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 = sqlc.narg(card_last4)::text)
       AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)
-      AND (NOT @overseas::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-      AND (sqlc.narg(account_kind)::text IS NULL OR a.kind = sqlc.narg(account_kind)::text)
-      -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
-      AND (NOT @hide_transfers::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-      AND (sqlc.narg(query)::text IS NULL
-           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower(sqlc.narg(query)::text)) > 0)
+      AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
+                       t.description, t.memo,
+                       from_date => sqlc.narg(from_date)::date, to_date => sqlc.narg(to_date)::date,
+                       closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
+                       overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
+                       hide_transfers => @hide_transfers::boolean, query => sqlc.narg(query)::text)
 )
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
@@ -33,7 +29,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
-       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -89,7 +85,7 @@ WITH lines AS (
                AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM sqlc.narg(card_last4)::text)
                AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)) AS pick_match,
            t.amount + coalesce(kids.amount, 0) AS amount,
-           CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END AS flow,
+           owner_flow(a.kind, t.amount + coalesce(kids.amount, 0)) AS flow,
            (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer,
            -- Shares or points, not money: neither spent nor received (ADR 0017, ADR 0019).
            a.kind IN ('securities', 'points') AS shares
@@ -101,15 +97,12 @@ WITH lines AS (
                        FROM transactions c
                        WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
     WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
-      AND (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
-      AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
-      AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
-      AND (sqlc.narg(closing_to)::date IS NULL OR s.closing_date <= sqlc.narg(closing_to)::date)
-      AND (NOT @overseas::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-      AND (sqlc.narg(account_kind)::text IS NULL OR a.kind = sqlc.narg(account_kind)::text)
-      AND (NOT @hide_transfers::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-      AND (sqlc.narg(query)::text IS NULL
-           OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower(sqlc.narg(query)::text)) > 0)
+      AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
+                       t.description, t.memo,
+                       from_date => sqlc.narg(from_date)::date, to_date => sqlc.narg(to_date)::date,
+                       closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
+                       overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
+                       hide_transfers => @hide_transfers::boolean, query => sqlc.narg(query)::text)
 ),
 marked AS (
     SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
@@ -136,23 +129,19 @@ ORDER BY kind, institution, card_last4, account_id, unit;
 SELECT t.kind,
        count(*)::integer AS row_count,
        sum(t.amount)::numeric AS amount,
-       sum(CASE WHEN a.kind = 'credit_card' THEN -t.amount ELSE t.amount END)::numeric AS flow
+       sum(owner_flow(a.kind, t.amount))::numeric AS flow
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
-WHERE (sqlc.narg(from_date)::date IS NULL OR t.transaction_date >= sqlc.narg(from_date)::date)
-  AND (sqlc.narg(to_date)::date IS NULL OR t.transaction_date <= sqlc.narg(to_date)::date)
-  AND (sqlc.narg(closing_from)::date IS NULL OR s.closing_date >= sqlc.narg(closing_from)::date)
-  AND (sqlc.narg(closing_to)::date IS NULL OR s.closing_date <= sqlc.narg(closing_to)::date)
-  AND (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
+WHERE (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
   AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM sqlc.narg(card_last4)::text)
   AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)
-  AND (NOT @overseas::boolean OR t.original_currency IS NOT NULL OR t.country <> 'TW')
-  AND (sqlc.narg(account_kind)::text IS NULL OR a.kind = sqlc.narg(account_kind)::text)
-  -- A transfer between the owner's lines, or a card bill's payment line, is neither spent nor received.
-  AND (NOT @hide_transfers::boolean OR (t.counterpart_id IS NULL AND t.kind <> 'payment'))
-  AND (sqlc.narg(query)::text IS NULL
-       OR strpos(lower(t.description || ' ' || coalesce(t.memo, '')), lower(sqlc.narg(query)::text)) > 0)
+  AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
+      t.description, t.memo,
+      from_date => sqlc.narg(from_date)::date, to_date => sqlc.narg(to_date)::date,
+      closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
+      overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
+      hide_transfers => @hide_transfers::boolean, query => sqlc.narg(query)::text)
 GROUP BY t.kind
 ORDER BY t.kind;
 
@@ -165,7 +154,7 @@ SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, 
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
-       (CASE WHEN a.kind = 'credit_card' THEN -(t.amount + coalesce(kids.amount, 0)) ELSE t.amount END)::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -207,12 +196,12 @@ ORDER BY t.transaction_date, t.id;
 SELECT pg_advisory_xact_lock(4243711);
 
 -- name: LinkLines :many
--- The lines a link can start or end at.
+-- The lines of these kinds, which a parent link can start or end at.
 SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.card_last4
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
-WHERE t.kind IN ('purchase', 'foreign_transaction_fee', 'refund')
+WHERE t.kind = ANY (@kinds::text[])
 ORDER BY t.id;
 
 -- name: ClearParents :exec

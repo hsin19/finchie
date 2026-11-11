@@ -1,10 +1,11 @@
 <script lang="ts">
 import {
     statuses,
-    tone,
-} from "#lib/labels.js";
+    type TagStatus,
+} from "#lib/statuses.js";
+import { tone } from "#lib/tone.js";
 
-let { status, label = false }: { status: keyof typeof statuses; label?: boolean; } = $props();
+let { status, label = false }: { status: TagStatus; label?: boolean; } = $props();
 const s = $derived(statuses[status]);
 </script>
 

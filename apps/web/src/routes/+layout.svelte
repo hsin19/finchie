@@ -1,20 +1,30 @@
 <script lang="ts">
 import "./layout.css";
-import { LEDGER } from "#lib/api/client.js";
+import {
+    api,
+    LEDGER,
+    unwrap,
+} from "#lib/api/client.js";
 import {
     commandLine,
     commandText,
 } from "#lib/command.js";
 import CommandPalette, { type Command } from "#lib/components/CommandPalette.svelte";
 import HelpDialog from "#lib/components/HelpDialog.svelte";
+import { shortDateTime } from "#lib/dates.js";
 import {
-    type Month,
-    shortDateTime,
-} from "#lib/dates.js";
-import { shownCount } from "#lib/documents.js";
+    pendingKey,
+    shownCount,
+} from "#lib/documents.js";
 import { onKeys } from "#lib/keys.svelte.js";
-import { carriedQueries } from "#lib/nav.js";
+import {
+    carriedLinks,
+    entityKey,
+    monthHref,
+} from "#lib/nav.js";
 import { poll } from "#lib/poll.js";
+import { focusSearch } from "#lib/search.svelte.js";
+import type { KeyOf } from "#lib/shortcuts.js";
 import { version } from "$app/env";
 import {
     goto,
@@ -26,24 +36,32 @@ import {
     resolve,
 } from "$app/paths";
 import { page } from "$app/state";
+import type { ResolvedPathname } from "$app/types";
 import type { LayoutProps } from "./$types";
 
 let { data, children }: LayoutProps = $props();
 let help = $state(false);
 
-// While the parser works, keep refreshing: every page shows document status.
-const polling = poll(() => void invalidate(LEDGER), { hidden: document.hidden });
-$effect(() => polling.update(data.documents.filter(d => d.status === "pending").map(d => d.id).join()));
+// While the parser works, look at what is still pending, and reload the ledger once that changes: a
+// document finished (or a new one came in by mail). A look that fails is tried again later; it never
+// takes the page down.
+const polling = poll(async () => {
+    const { items } = unwrap(await api().GET("/api/documents", { params: { query: { state: ["pending"], limit: 500 } } }));
+    const pending = pendingKey(items);
+    if (pending !== pendingKey(data.pending)) await invalidate(LEDGER);
+    return pending;
+}, { hidden: document.hidden });
+$effect(() => polling.update(pendingKey(data.pending)));
 $effect(() => () => polling.stop());
 
 let palette = $state(false);
 
 // Switching between statements and transactions keeps the selected month; the overview has none.
-const carried = $derived(carriedQueries(page.route.id, page.url.searchParams));
-const nav = $derived([
+const carried = $derived(carriedLinks(page.route.id, page.url.searchParams));
+const nav: { key: KeyOf<"global">; label: string; href: ResolvedPathname; current: boolean; }[] = $derived([
     { key: "o", label: "總覽", href: resolve("/"), current: page.route.id === "/" },
-    { key: "s", label: "帳單", href: resolve(`/statements${carried.statements}`), current: /^\/statements/.test(page.route.id ?? "") },
-    { key: "t", label: "交易", href: resolve(`/transactions${carried.transactions}`), current: page.route.id === "/transactions" },
+    { key: "s", label: "帳單", href: carried.statements, current: /^\/statements/.test(page.route.id ?? "") },
+    { key: "t", label: "交易", href: carried.transactions, current: page.route.id === "/transactions" },
     { key: "a", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? "") },
     { key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? "") },
 ]);
@@ -51,14 +69,6 @@ const nav = $derived([
 const documents = $derived(nav[nav.length - 1]);
 
 const prompt = $derived(commandLine(page.url.pathname, page.url.searchParams, (page.data as { command?: string; }).command));
-
-// "Switch month": on the transactions page it keeps the other filters; elsewhere it opens that
-// month's statements.
-function monthHref(m: Month) {
-    if (page.route.id !== "/transactions") return resolve(`/statements?m=${m}`);
-    const rest = [...page.url.searchParams].filter(([key]) => key !== "m" && key !== "page");
-    return resolve(`/transactions?${new URLSearchParams([["m", m], ...rest]).toString()}`);
-}
 
 const lastUpload = $derived(data.documents[0]);
 const parser = $derived(data.documents.find(d => d.parserVersion)?.parserVersion);
@@ -69,31 +79,34 @@ const commands: Command[] = $derived([
         id: `month-${m}`,
         label: `period ${m}`,
         hint: "切換月份",
-        run: () => void goto(monthHref(m)),
+        run: () => void goto(monthHref(page.route.id, page.url.searchParams, m)),
     })),
     { id: "refresh", label: "重新載入資料", hint: "refresh", run: () => void refreshAll() },
     { id: "help", label: "快捷鍵說明", hint: "[?]", run: () => (help = true) },
 ]);
 
-async function searchTransactions() {
-    await goto(resolve(`/transactions${carried.transactions}`));
-    document.getElementById("q")?.focus();
+// The page's own search box if it has one, else the transactions'.
+async function search() {
+    if (focusSearch()) return;
+    await goto(carried.transactions);
+    focusSearch();
 }
 
-function go(key: string) {
+// Looked up when pressed: the links change with the page.
+function go(key: KeyOf<"global">) {
     const item = nav.find(i => i.key === key);
     if (item) void goto(item.href);
 }
 
-onKeys({
+onKeys("global", {
     "o": () => go("o"),
     "s": () => go("s"),
     "t": () => go("t"),
     "a": () => go("a"),
     "d": () => go("d"),
-    "/": () => void searchTransactions(),
+    "/": () => void search(),
     "?": () => (help = !help),
-}, { global: true });
+});
 
 function onkeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -131,11 +144,14 @@ function onkeydown(event: KeyboardEvent) {
             href={documents.href}
             aria-current={documents.current ? "page" : undefined}
             class="hidden rounded-[4px] border px-3 py-2 text-ink hover:bg-accent/10 hover:text-ink md:block {documents.current ? 'border-accent bg-accent/10' : 'border-accent'}"
-        ><span class="text-accent">[d]</span> 文件</a>
+        ><span class="text-accent">[{documents.key}]</span> {documents.label}</a>
     </header>
 
     <main class="flex grow flex-col gap-3">
-        {@render children()}
+        <!-- A page shows one entity: another id remounts it, so no draft or message carries over (entityKey). -->
+        {#key entityKey(page.params)}
+            {@render children()}
+        {/key}
     </main>
 
     <footer class="hidden flex-wrap gap-x-5 gap-y-1 border-t border-dashed border-line pt-2.5 text-[12px] text-mute md:flex">

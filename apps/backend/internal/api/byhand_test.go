@@ -9,10 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
-	gdate "google.golang.org/genproto/googleapis/type/date"
-	"google.golang.org/genproto/googleapis/type/decimal"
 
-	parserv1 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v1"
+	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
+	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 )
 
 func send(t *testing.T, e *echo.Echo, method, path, body string) *httptest.ResponseRecorder {
@@ -169,14 +168,8 @@ func TestNoTwoAccountsHaveOneNameAndOneWithoutAPrintedNumberTakesAnyAsItsOwn(t *
 // storeDollars stores a deposit statement holding US$10 in 7777777***777.
 func storeDollars(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	store(t, pool, "dollars", &parserv1.ParseDocumentResponse{Parser: "esun.deposit", DepositStatement: &parserv1.DepositStatement{
-		Institution: "esun",
-		PeriodStart: &gdate.Date{Year: 2026, Month: 10, Day: 1},
-		PeriodEnd:   &gdate.Date{Year: 2026, Month: 10, Day: 31},
-		Accounts: []*parserv1.DepositAccount{{
-			Number: "7777777***777", Name: "外幣活存", Currency: "USD", ClosingBalance: &decimal.Decimal{Value: "10"},
-		}},
-	}})
+	store(t, pool, "dollars", pt.Response("esun.deposit", pt.Deposit("esun", pt.Day(10, 1), pt.Day(10, 31),
+		pt.DepositAccount("7777777***777", "外幣活存", []*parserv2.Balance{pt.Balance("USD", pt.Day(10, 31), "10")}))))
 }
 
 func pointsOf(t *testing.T, e *echo.Echo) Account {

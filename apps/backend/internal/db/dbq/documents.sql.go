@@ -8,25 +8,23 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const documentCounts = `-- name: DocumentCounts :many
-SELECT (CASE WHEN status = 'failed' AND error LIKE 'Unimplemented%' THEN 'skipped' ELSE status END)::text AS status,
-       count(*)::integer AS documents
+SELECT status, count(*)::integer AS documents
 FROM documents
 WHERE $1::text IS NULL OR strpos(lower(filename), lower($1::text)) > 0
-GROUP BY 1
+GROUP BY status
 `
 
 type DocumentCountsRow struct {
-	Status    string
+	Status    domain.DocumentStatus
 	Documents int32
 }
 
-// Documents by status as the web app shows it: a failure because no parser handles the file is
-// "skipped", since there is nothing to fix or retry.
-// With a query, only documents whose filename holds it.
+// Documents by status; with a query, only documents whose filename holds it.
 func (q *Queries) DocumentCounts(ctx context.Context, query *string) ([]DocumentCountsRow, error) {
 	rows, err := q.db.Query(ctx, documentCounts, query)
 	if err != nil {
@@ -50,27 +48,38 @@ func (q *Queries) DocumentCounts(ctx context.Context, query *string) ([]Document
 const finishDocument = `-- name: FinishDocument :exec
 UPDATE documents
 SET status         = $1,
-    error          = $2,
-    parser         = $3,
-    parser_version = $4,
-    warnings       = $5,
+    failure        = $2,
+    error          = $3,
+    duplicate_of   = $4,
+    parser_instance = $5,
+    parser         = $6,
+    parser_version = $7,
+    warnings       = $8,
     parsed_at      = now()
-WHERE id = $6
+WHERE id = $9
 `
 
 type FinishDocumentParams struct {
-	Status        string
-	Error         *string
-	Parser        *string
-	ParserVersion *string
-	Warnings      []string
-	ID            int64
+	Status         domain.DocumentStatus
+	Failure        *domain.Failure
+	Error          *string
+	DuplicateOf    *int64
+	ParserInstance *string
+	Parser         *string
+	ParserVersion  *string
+	Warnings       []string
+	ID             int64
 }
 
+// What became of parsing it (ADR 0005): a failure when it failed or was skipped, the document holding its
+// statement when a duplicate.
 func (q *Queries) FinishDocument(ctx context.Context, arg FinishDocumentParams) error {
 	_, err := q.db.Exec(ctx, finishDocument,
 		arg.Status,
+		arg.Failure,
 		arg.Error,
+		arg.DuplicateOf,
+		arg.ParserInstance,
 		arg.Parser,
 		arg.ParserVersion,
 		arg.Warnings,
@@ -81,7 +90,7 @@ func (q *Queries) FinishDocument(ctx context.Context, arg FinishDocumentParams) 
 
 const getDocument = `-- name: GetDocument :one
 SELECT d.id, d.sha256, d.filename, d.content_type, octet_length(d.content)::integer AS size_bytes, d.received_at,
-       d.status, d.error, d.parser, d.parser_version, d.warnings, d.parsed_at,
+       d.status, d.failure, d.error, d.duplicate_of, d.parser, d.parser_version, d.warnings, d.parsed_at,
        s.kind AS statement_kind,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS line_count,
        (SELECT count(DISTINCT b.account_id) FROM balances b WHERE b.statement_id = s.id)::integer AS account_count
@@ -97,13 +106,15 @@ type GetDocumentRow struct {
 	ContentType   string
 	SizeBytes     int32
 	ReceivedAt    pgtype.Timestamptz
-	Status        string
+	Status        domain.DocumentStatus
+	Failure       *domain.Failure
 	Error         *string
+	DuplicateOf   *int64
 	Parser        *string
 	ParserVersion *string
 	Warnings      []string
 	ParsedAt      pgtype.Timestamptz
-	StatementKind *string
+	StatementKind domain.AccountKind
 	LineCount     int32
 	AccountCount  int32
 }
@@ -120,7 +131,9 @@ func (q *Queries) GetDocument(ctx context.Context, id int64) (GetDocumentRow, er
 		&i.SizeBytes,
 		&i.ReceivedAt,
 		&i.Status,
+		&i.Failure,
 		&i.Error,
+		&i.DuplicateOf,
 		&i.Parser,
 		&i.ParserVersion,
 		&i.Warnings,
@@ -153,7 +166,7 @@ func (q *Queries) GetDocumentContent(ctx context.Context, id int64) (GetDocument
 
 const listDocuments = `-- name: ListDocuments :many
 SELECT d.id, d.sha256, d.filename, d.content_type, octet_length(d.content)::integer AS size_bytes, d.received_at,
-       d.status, d.error, d.parser, d.parser_version, d.warnings, d.parsed_at,
+       d.status, d.failure, d.error, d.duplicate_of, d.parser, d.parser_version, d.warnings, d.parsed_at,
        s.kind AS statement_kind,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS line_count,
        (SELECT count(DISTINCT b.account_id) FROM balances b WHERE b.statement_id = s.id)::integer AS account_count
@@ -161,17 +174,17 @@ FROM documents d
 LEFT JOIN statements s ON s.document_id = d.id
 WHERE ($1::bigint IS NULL
        OR (d.received_at, d.id) < (SELECT b.received_at, b.id FROM documents b WHERE b.id = $1::bigint))
-  AND ($2::text[] IS NULL
-       OR (CASE WHEN d.status = 'failed' AND d.error LIKE 'Unimplemented%' THEN 'skipped' ELSE d.status END)
-          = ANY ($2::text[]))
-  AND ($3::text IS NULL OR strpos(lower(d.filename), lower($3::text)) > 0)
+  AND ($2::text[] IS NULL OR d.status = ANY ($2::text[]))
+  AND ($3::bigint[] IS NULL OR d.id = ANY ($3::bigint[]))
+  AND ($4::text IS NULL OR strpos(lower(d.filename), lower($4::text)) > 0)
 ORDER BY d.received_at DESC, d.id DESC
-LIMIT $4
+LIMIT $5
 `
 
 type ListDocumentsParams struct {
 	Before   *int64
 	States   []string
+	Ids      []int64
 	Query    *string
 	RowLimit int32
 }
@@ -183,23 +196,25 @@ type ListDocumentsRow struct {
 	ContentType   string
 	SizeBytes     int32
 	ReceivedAt    pgtype.Timestamptz
-	Status        string
+	Status        domain.DocumentStatus
+	Failure       *domain.Failure
 	Error         *string
+	DuplicateOf   *int64
 	Parser        *string
 	ParserVersion *string
 	Warnings      []string
 	ParsedAt      pgtype.Timestamptz
-	StatementKind *string
+	StatementKind domain.AccountKind
 	LineCount     int32
 	AccountCount  int32
 }
 
-// The same columns as GetDocument, newest first. `before` continues the list after that document;
-// states are as DocumentCounts names them.
+// The same columns as GetDocument, newest first. `before` continues the list after that document.
 func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([]ListDocumentsRow, error) {
 	rows, err := q.db.Query(ctx, listDocuments,
 		arg.Before,
 		arg.States,
+		arg.Ids,
 		arg.Query,
 		arg.RowLimit,
 	)
@@ -218,7 +233,9 @@ func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([
 			&i.SizeBytes,
 			&i.ReceivedAt,
 			&i.Status,
+			&i.Failure,
 			&i.Error,
+			&i.DuplicateOf,
 			&i.Parser,
 			&i.ParserVersion,
 			&i.Warnings,
@@ -239,13 +256,81 @@ func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([
 
 const markDocumentPending = `-- name: MarkDocumentPending :exec
 UPDATE documents
-SET status = 'pending', error = NULL
+SET status = 'pending', failure = NULL, error = NULL, duplicate_of = NULL
 WHERE id = $1
 `
 
 func (q *Queries) MarkDocumentPending(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markDocumentPending, id)
 	return err
+}
+
+const outdatedDocuments = `-- name: OutdatedDocuments :many
+SELECT id
+FROM documents
+WHERE (status IN ('parsed', 'needs_review', 'duplicate')
+       AND coalesce(parser, '') || '@' || coalesce(parser_version, '') <> ALL ($1::text[]))
+   OR (status IN ('failed', 'skipped') AND failure <> 'unavailable'
+       AND parser_instance IS DISTINCT FROM $2::text)
+ORDER BY id
+`
+
+type OutdatedDocumentsParams struct {
+	Current  []string
+	Instance string
+}
+
+// Documents that parsing again may change (ADR 0005): one a parser of another version than today's read
+// (`current` holds "name@version" of each), and one that failed, other than for an unreachable parser,
+// under another instance than `instance`, since its configuration may have changed.
+func (q *Queries) OutdatedDocuments(ctx context.Context, arg OutdatedDocumentsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, outdatedDocuments, arg.Current, arg.Instance)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const stalledDocuments = `-- name: StalledDocuments :many
+SELECT id
+FROM documents
+WHERE status = 'pending' OR (status = 'failed' AND failure = 'unavailable')
+ORDER BY id
+`
+
+// Documents a parse job should be at work on and may not be: pending ones, whose job may have been lost
+// (a backend killed mid-job, a failure that could not be recorded), and ones that failed only because the
+// parser was out of reach.
+func (q *Queries) StalledDocuments(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, stalledDocuments)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertDocument = `-- name: UpsertDocument :one

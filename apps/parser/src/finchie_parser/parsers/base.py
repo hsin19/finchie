@@ -1,42 +1,34 @@
+"""The bank parser interface, and the registry's rules for it."""
+
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from decimal import Decimal
 from typing import ClassVar
 
 from finchie_parser.documents import Mail
-from finchie_parser.errors import LayoutError
-from finchie_parser.model import (
-    AnyStatement,
-    DepositLine,
-    Kind,
-    PointsExpiry,
-    PointsKind,
-    PointsLine,
-    PointsProgram,
-    Reconciliation,
-    Transaction,
-)
+from finchie_parser.model import Statement
 from finchie_parser.ocr import Ocr
 from finchie_parser.passwords import Identity
-from finchie_parser.pdf import Document, Word
+from finchie_parser.pdf import Document
 
 
 @dataclass
 class Parsed:
-    statement: AnyStatement
+    statement: Statement
     warnings: list[str] = field(default_factory=list)
 
 
 class StatementParser(ABC):
     """One kind of statement e-mail: it claims the e-mail, opens its PDF, and reads it (ADR 0014).
 
-    Parsers are stateless and shared across threads.
+    Parsers are stateless and shared across threads. `registry` checks the metadata below when the parsers
+    are registered.
     """
 
     name: ClassVar[str]
-    # Bump when the output for the same input can change, so the backend knows what to re-parse.
+    # Bump when the output for the same input can change, so the backend knows what to re-parse. That
+    # includes a change to the shared code under parsers/ that changes this parser's output.
     version: ClassVar[str]
     institution: ClassVar[str]
     # The e-mails it claims: from one of these domains or a subdomain of one, with every one of these
@@ -45,8 +37,11 @@ class StatementParser(ABC):
     subject_terms: ClassVar[tuple[str, ...]]
     # Its statement among the e-mail's attachments, tried before the others.
     filename_pattern: ClassVar[re.Pattern[str]]
-    # Text that only this bank's statements contain on the first page.
+    # Text on the first page that tells its statement from the other PDFs of the same e-mail, such as a
+    # payment slip. Only the parser that claims the e-mail looks, so it need not be unique across banks.
     text_marker: ClassVar[str]
+    # Whether it cannot read its statements without OCR (PARSER_OCR).
+    needs_ocr: ClassVar[bool] = False
 
     def claims(self, mail: Mail) -> bool:
         domain = mail.sender_domain
@@ -67,90 +62,41 @@ class StatementParser(ABC):
         one the owner chose (`Passwords.candidates`)."""
 
     @abstractmethod
-    def parse(self, document: Document, ocr: Ocr | None) -> Parsed: ...
+    def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
+        """The statement. `ocr` is None when OCR is turned off; never for a parser that `needs_ocr`."""
 
 
-def sum_new_charges(transactions: Iterable[Transaction]) -> Decimal:
-    return sum((tx.amount for tx in transactions if tx.kind is not Kind.PAYMENT), Decimal(0))
+_METADATA: dict[str, type | tuple[type, ...]] = {
+    "name": str,
+    "version": str,
+    "institution": str,
+    "sender_domains": tuple,
+    "subject_terms": tuple,
+    "filename_pattern": re.Pattern,
+    "text_marker": str,
+}
 
 
-def earned(label: str, value: Decimal) -> PointsLine:
-    return PointsLine(label, PointsKind.EARN, value)
+def registry(*parsers: StatementParser) -> tuple[StatementParser, ...]:
+    """The parsers, in the order they are tried, once their metadata is checked: every field set, versions
+    numbers, names unique, institutions lower case (they name PARSER_PDF_PASSWORDS__<INSTITUTION>)."""
+    for parser in parsers:
+        kind = type(parser).__name__
+        for attribute, expected in _METADATA.items():
+            value = getattr(parser, attribute, None)
+            if not isinstance(value, expected) or not (value.pattern if isinstance(value, re.Pattern) else value):
+                raise TypeError(f"{kind}.{attribute} must be a non-empty {expected}")
+        if not parser.version.isdigit():
+            raise ValueError(f"{kind}.version must be a number, not {parser.version!r}")
+        if parser.institution != parser.institution.lower() or not parser.institution.isidentifier():
+            raise ValueError(f"{kind}.institution must be a lower-case identifier, not {parser.institution!r}")
+        if not all(isinstance(item, str) and item for item in (*parser.sender_domains, *parser.subject_terms)):
+            raise TypeError(f"{kind}: sender domains and subject terms must be non-empty strings")
+    names = [parser.name for parser in parsers]
+    if duplicates := sorted({name for name in names if names.count(name) > 1}):
+        raise ValueError(f"parser names registered twice: {duplicates}")
+    return tuple(parsers)
 
 
-def adjusted(label: str, value: Decimal) -> PointsLine:
-    return PointsLine(label, PointsKind.ADJUST, value)
-
-
-def used(label: str, value: Decimal) -> PointsLine:
-    """Points used, taken by their size: one bank prints them positive, another negative (ADR 0019)."""
-    return PointsLine(label, PointsKind.REDEEM, -abs(value))
-
-
-def points_program(
-    name: str,
-    *,
-    opening: Decimal,
-    lines: Iterable[PointsLine],
-    closing: Decimal,
-    expiries: Sequence[PointsExpiry] = (),
-    warnings: list[str],
-) -> PointsProgram:
-    """A program as the bill prints it, checked: its opening and its lines must give its closing (ADR 0019).
-
-    Only columns with a figure are lines. When the figures do not add up, a warning says so and the
-    closing stays as printed (ADR 0005).
-    """
-    moved = [line for line in lines if line.amount != 0]
-    computed = opening + sum((line.amount for line in moved), Decimal(0))
-    if computed != closing:
-        warnings.append(f"{name}: opening {opening} plus added less used is {computed}, but the bill prints {closing}")
-    return PointsProgram(name, closing, list(expiries), moved)
-
-
-def find(pattern: re.Pattern[str], texts: Iterable[str], what: str) -> re.Match[str]:
-    for text in texts:
-        for line in text.splitlines():
-            if match := pattern.search(line):
-                return match
-    raise LayoutError(f"statement field not found: {what}")
-
-
-def reconcile_account(
-    opening: Decimal | None, closing: Decimal, lines: Sequence[DepositLine], closing_label: str
-) -> Reconciliation | None:
-    """Whether a deposit account's lines account for its closing balance (ADR 0013).
-
-    From the opening balance when printed, else from before the first line by its running balance, each
-    line is added in turn. A printed running balance that differs from the sum so far is reported, as the
-    first place the lines stop adding up; past the last line, the sum must be the closing balance. None
-    when there is nothing to start from.
-    """
-    if opening is not None:
-        running = opening
-    elif lines and lines[0].balance is not None:
-        running = lines[0].balance - lines[0].amount
-    else:
-        return None
-    for line in lines:
-        running += line.amount
-        if line.balance is not None and line.balance != running:
-            return Reconciliation(running, line.balance, f"{line.date.isoformat()} {line.description} 的餘額")
-    return Reconciliation(running, closing, closing_label)
-
-
-def rows_of(words: Iterable[Word], tolerance: float = 2.0) -> list[list[Word]]:
-    """Words grouped into printed rows, top to bottom, each left to right: words whose tops are within
-    `tolerance` points of a row's first word belong to it."""
-    rows: list[list[Word]] = []
-    for word in sorted(words, key=lambda w: (w.top, w.x0)):
-        if rows and abs(rows[-1][0].top - word.top) <= tolerance:
-            rows[-1].append(word)
-        else:
-            rows.append([word])
-    return [sorted(row, key=lambda w: w.x0) for row in rows]
-
-
-def nearest_column(word: Word, headings: dict[str, Word]) -> str:
-    """The heading whose right edge is nearest the word's: amounts are printed right-aligned."""
-    return min(headings, key=lambda name: abs(headings[name].x1 - word.x1))
+def institutions(parsers: Sequence[StatementParser]) -> frozenset[str]:
+    return frozenset(parser.institution for parser in parsers)

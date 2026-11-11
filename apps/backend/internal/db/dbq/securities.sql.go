@@ -8,6 +8,7 @@ package dbq
 import (
 	"context"
 
+	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -23,7 +24,7 @@ ORDER BY t.transaction_date, t.statement_id, t.line_no
 type AccountTradesRow struct {
 	Unit            string
 	TransactionDate pgtype.Date
-	Kind            string
+	Kind            domain.LineKind
 	Shares          pgtype.Numeric
 	Amount          pgtype.Numeric
 	Fee             pgtype.Numeric
