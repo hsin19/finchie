@@ -17,6 +17,8 @@ Keys: `o` `s` `t` `a` `d` switch pages, `/` searches (the page's own search box,
 
 A document opens in a new tab (`FileLink`, `openUrl` in `src/lib/documents.ts`): a PDF, or an e-mail a parser recognized (parsed, needs review, duplicate), as its statement PDF decrypted (`/api/documents/{id}/preview/pdf`); an e-mail that failed, was skipped, or is still parsing on `/documents/{id}`, to see what it is; anything else as the original download (`/api/documents/{id}/content`).
 
+The app installs to a home screen: `static/manifest.json`, the icons it names (made from `src/icon.svg` when the app is built, `icons.ts`), and the Apple tags in `src/app.html`. It is not for working offline, and has no service worker: one that kept the shell would serve the old app against a backend that has moved on, and the files that can be kept (`_app/immutable/`) are cached for a year already. The manifest is fetched with cookies (`crossorigin="use-credentials"`), or Cloudflare Access would answer with its login page. Installed, it stays open for days with no reload button, so it reloads the ledger when it comes back after five minutes out of sight, loads the page in full on the first navigation after a new release, and signs in again by itself once the Cloudflare Access session has ended.
+
 ## Development
 
 ```sh
@@ -36,6 +38,9 @@ Node 26 (`.node-version`); the pnpm version is pinned in `package.json`.
 | `src/routes/` | Pages. Data comes from universal `load` functions; filters live in the URL |
 | `src/routes/layout.css` | Design tokens (`@theme`) and the few custom utilities (`panel`, `label`, `control`) |
 | `src/lib/api/` | Generated types (`schema.d.ts`) and the `openapi-fetch` client |
+| `src/lib/api/session.ts` | What an API request does once the Cloudflare Access session has ended: a read reloads the page to sign in, once; a change reports it |
+| `src/lib/resume.ts` | When the app is back after long enough out of sight for the ledger to be reloaded |
+| `icons.ts` | The home screen icons: which there are, and the Vite plugin that serves them while developing and writes them into the build. `src/lib/install.test.ts` checks that the manifest, `src/app.html`, and the background colour agree with it |
 | `src/lib/money.ts` | Exact decimal arithmetic (an average included: `divide`) and formatting for amounts (ADR 0004) |
 | `src/lib/api/mutations.ts` | Every change the owner makes goes through `change()`: one way to report a failure, then the ledger reloads |
 | `src/lib/institutions.ts` | The banks, brokers, and exchanges: names, codes, chart colors, how a kind of statement gets here where the owner has a part in it |
@@ -57,6 +62,8 @@ Node 26 (`.node-version`); the pnpm version is pinned in `package.json`.
 
 ## Pitfalls (SvelteKit 3)
 
+- API requests do not follow redirects (`redirect: "manual"` in `api()`): the API has none, so one is Cloudflare Access asking to sign in, and `session.ts` handles it. An endpoint that redirects would be taken for a session that ended. A request made outside `api()` (the upload's `XMLHttpRequest`) fails like a network error instead.
+- The background colour is written in five places: `--color-ground`, the manifest, `theme-color` in `src/app.html`, `src/icon.svg`, and `icons.ts`. `install.test.ts` fails when they differ.
 - `#lib` is a package.json subpath import, so imports need the file extension: `#lib/money.js` (for `money.ts`), `#lib/components/Tag.svelte`.
 - `+page.ts` / `+layout.ts` may only export SvelteKit's names (`load`, `ssr`, …); shared constants go in `src/lib/`. Type loads with `satisfies PageLoad`, not `: PageLoad`, or `data` loses its types.
 - `svelte-check` reads proxy files that `svelte-kit sync` writes; run `pnpm typecheck`, which syncs first.

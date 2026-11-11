@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "Finchie",
+  "short_name": "Finchie",
+  "description": "Personal finance: bills, transactions, accounts, and net worth",
+  "lang": "zh-Hant",
+  "dir": "ltr",
+  "categories": ["finance"],
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
+  "icons": [
+    { "src": "pwa-192x192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "pwa-512x512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "maskable-icon-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "帳單", "url": "/statements" },
+    { "name": "交易", "url": "/transactions" },
+    { "name": "帳戶", "url": "/accounts" },
+    { "name": "文件", "url": "/documents" }
+  ]
+}

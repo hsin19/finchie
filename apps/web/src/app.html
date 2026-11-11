@@ -6,6 +6,18 @@
         <meta name="color-scheme" content="dark" />
         <meta name="theme-color" content="#0a0a0b" />
         <link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
+
+        <!-- Installed to the home screen. The manifest is behind Cloudflare Access like every other path
+             (ADR 0008), and a browser fetches a manifest without cookies unless told to send them. -->
+        <link rel="manifest" href="%sveltekit.assets%/manifest.json" crossorigin="use-credentials" />
+        <!-- iOS: its home screen icon (made at build time, icons.ts), and what makes an app of the page
+             should the manifest not load. -->
+        <link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon-180x180.png" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Finchie" />
+        <!-- The page runs under the status bar, in its own colour; +layout.svelte keeps clear of it. -->
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         %sveltekit.head%
     </head>
     <body data-sveltekit-preload-data="hover">

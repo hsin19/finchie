@@ -41,6 +41,8 @@
         line-height: 1.5;
         -webkit-font-smoothing: antialiased;
         font-variant-numeric: tabular-nums;
+        /* A second tap is a second tap, not a zoom; pinching still zooms. */
+        touch-action: manipulation;
     }
 
     a {

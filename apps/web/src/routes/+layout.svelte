@@ -23,10 +23,15 @@ import {
     monthHref,
 } from "#lib/nav.js";
 import { poll } from "#lib/poll.js";
+import {
+    absence,
+    RESUME_AFTER_MS,
+} from "#lib/resume.js";
 import { focusSearch } from "#lib/search.svelte.js";
 import type { KeyOf } from "#lib/shortcuts.js";
 import { version } from "$app/env";
 import {
+    beforeNavigate,
     goto,
     invalidate,
     refreshAll,
@@ -35,7 +40,10 @@ import {
     asset,
     resolve,
 } from "$app/paths";
-import { page } from "$app/state";
+import {
+    page,
+    updated,
+} from "$app/state";
 import type { ResolvedPathname } from "$app/types";
 import type { LayoutProps } from "./$types";
 
@@ -53,6 +61,21 @@ const polling = poll(async () => {
 }, { hidden: document.hidden });
 $effect(() => polling.update(pendingKey(data.pending)));
 $effect(() => () => polling.stop());
+
+// Installed to a home screen, the app stays open for days and has no reload button: back after a while, it
+// reloads the ledger. With the session gone meanwhile, that read is what signs in again (session.ts).
+const away = absence(RESUME_AFTER_MS, { hidden: document.hidden });
+function onvisibilitychange() {
+    polling.visible(!document.hidden);
+    if (away.change(document.hidden)) void invalidate(LEDGER);
+}
+
+// SvelteKit notices a new release by itself (on returning to the app, among others) and loads the page
+// in full when a navigation fails because of it. One that would succeed, to a page whose code is
+// already here, would keep the old app going against the new API: load that one in full as well.
+beforeNavigate(({ willUnload, to }) => {
+    if (updated.current && !willUnload && to?.url) location.href = to.url.href;
+});
 
 let palette = $state(false);
 
@@ -117,13 +140,17 @@ function onkeydown(event: KeyboardEvent) {
 </script>
 
 <svelte:window {onkeydown} />
-<svelte:document onvisibilitychange={() => polling.visible(!document.hidden)} />
+<svelte:document {onvisibilitychange} />
 
 <svelte:head>
     <title>{commandText(prompt)}</title>
 </svelte:head>
 
-<div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-3.5 pb-28 md:px-5 md:pt-5 md:pb-6">
+<!-- Installed on iOS, the page runs under the status bar (app.html): it starts below it, and this strip
+     keeps what scrolls past from showing through the clock. In a browser tab the inset is 0. -->
+<div class="fixed inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] bg-ground"></div>
+
+<div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-[calc(env(safe-area-inset-top)+0.875rem)] pb-28 md:px-5 md:pt-[calc(env(safe-area-inset-top)+1.25rem)] md:pb-6">
     <header class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-2.5 md:panel md:px-3.5 md:py-2.5">
         <div class="min-w-0 grow truncate text-[14px]">
             <a href={resolve("/")} aria-label="finchie" class="font-bold text-accent"><img src={asset("favicon.svg")} alt="" class="-mr-0.5 inline-block size-[18px] align-[-4px]" />inchie</a>

@@ -4,6 +4,10 @@ import type {
     components,
     paths,
 } from "./schema";
+import {
+    reloader,
+    withSession,
+} from "./session.js";
 
 // Generated from apps/backend/api/openapi.yaml by `task web:generate`.
 type Schemas = components["schemas"];
@@ -52,9 +56,14 @@ export const LEDGER = "app:ledger";
 export const TRANSACTIONS_PAGE_SIZE = 50;
 export const DOCUMENTS_PAGE_SIZE = 50;
 
-/** In a load function pass its `fetch`, so SvelteKit can track and replay the requests. */
+const signIn = reloader();
+
+/**
+ * In a load function pass its `fetch`, so SvelteKit can track and replay the requests. No redirect is
+ * followed: the API has none of its own, so one is Cloudflare Access asking to sign in (session.ts).
+ */
 export function api(fetchFn: typeof fetch = fetch) {
-    return createClient<paths>({ fetch: fetchFn });
+    return createClient<paths>({ fetch: withSession(fetchFn, signIn), redirect: "manual" });
 }
 
 export interface Result {
