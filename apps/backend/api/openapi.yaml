@@ -93,6 +93,21 @@ paths:
               schema: { $ref: "#/components/schemas/Document" }
         "404":
           $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteDocument
+      summary: Delete a document that holds nothing of the ledger, its original included
+      description: |
+        Only a document that failed, was skipped, or is a duplicate (`deletable`). Documents that are
+        duplicates of this one are parsed again, so that one of them holds the statement.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
 
   /api/documents/{id}/reparse:
     post:
@@ -732,7 +747,7 @@ components:
 
     Document:
       type: object
-      required: [id, filename, contentType, sizeBytes, sha256, receivedAt, status, warnings, lineCount, accountCount]
+      required: [id, filename, contentType, sizeBytes, sha256, receivedAt, status, warnings, lineCount, accountCount, deletable]
       properties:
         id: { type: integer, format: int64 }
         filename: { type: string }
@@ -760,6 +775,9 @@ components:
           description: The kind of statement it produced, if any; card bills only are listed by /api/statements
         lineCount: { type: integer, description: "Lines its statement holds, 0 without one" }
         accountCount: { type: integer, description: "Accounts its statement reported, 0 without one" }
+        deletable:
+          type: boolean
+          description: "Whether DELETE takes it: it failed, was skipped, or is a duplicate, and so holds nothing of the ledger"
 
     DocumentPreview:
       type: object

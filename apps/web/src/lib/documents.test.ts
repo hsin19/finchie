@@ -62,6 +62,7 @@ const doc = (status: Document["status"], more: Partial<Document> = {}): Document
     warnings: [],
     lineCount: 0,
     accountCount: 0,
+    deletable: false,
     ...more,
 });
 

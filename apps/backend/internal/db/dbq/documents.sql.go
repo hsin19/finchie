@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteDocument = `-- name: DeleteDocument :exec
+DELETE FROM documents
+WHERE id = $1
+`
+
+func (q *Queries) DeleteDocument(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteDocument, id)
+	return err
+}
+
 const documentCounts = `-- name: DocumentCounts :many
 SELECT status, count(*)::integer AS documents
 FROM documents
@@ -254,6 +264,21 @@ func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([
 	return items, nil
 }
 
+const lockDocument = `-- name: LockDocument :one
+SELECT status
+FROM documents
+WHERE id = $1
+FOR UPDATE
+`
+
+// Its status, and no parse or retry may change it until the transaction ends.
+func (q *Queries) LockDocument(ctx context.Context, id int64) (domain.DocumentStatus, error) {
+	row := q.db.QueryRow(ctx, lockDocument, id)
+	var status domain.DocumentStatus
+	err := row.Scan(&status)
+	return status, err
+}
+
 const markDocumentPending = `-- name: MarkDocumentPending :exec
 UPDATE documents
 SET status = 'pending', failure = NULL, error = NULL, duplicate_of = NULL
@@ -263,6 +288,34 @@ WHERE id = $1
 func (q *Queries) MarkDocumentPending(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markDocumentPending, id)
 	return err
+}
+
+const markDuplicatesPending = `-- name: MarkDuplicatesPending :many
+UPDATE documents
+SET status = 'pending', failure = NULL, error = NULL, duplicate_of = NULL
+WHERE duplicate_of = $1::bigint
+RETURNING id
+`
+
+// The documents that say this one holds their statement, to be parsed again: one of them will hold it.
+func (q *Queries) MarkDuplicatesPending(ctx context.Context, id int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, markDuplicatesPending, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const outdatedDocuments = `-- name: OutdatedDocuments :many

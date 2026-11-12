@@ -4,6 +4,8 @@ import {
     previewBodyUrl,
     previewFileUrl,
 } from "#lib/api/client.js";
+import { deleteDocument } from "#lib/api/mutations.js";
+import Dialog from "#lib/components/Dialog.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import {
     formatBytes,
@@ -28,6 +30,24 @@ const warnings = $derived(doc.status === "needs_review" && !statement ? [] : doc
 
 const reparse = new Reparse(() => doc.id);
 const parsing = $derived(reparse.requesting || doc.status === "pending");
+
+// Only a document that holds nothing of the ledger can be deleted (`deletable`): one uploaded by mistake,
+// one no parser takes, one that failed, a duplicate. Then the list, which no longer has it.
+let confirming = $state(false);
+let deleting = $state(false);
+let deleteError = $state<string>();
+
+function askToDelete() {
+    deleteError = undefined;
+    confirming = true;
+}
+
+async function remove() {
+    deleting = true;
+    const { error } = await deleteDocument(doc.id, resolve("/documents"));
+    deleting = false;
+    deleteError = error;
+}
 
 function open(index: number) {
     window.open(previewFileUrl(doc.id, index), "_blank", "noreferrer");
@@ -62,6 +82,7 @@ onKeys("document", {
         <a href={resolve("/documents")} class="text-dim hover:text-ink">← 全部文件</a>
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
         <a href={documentContentUrl(doc.id)} class="text-dim hover:text-ink" data-sveltekit-reload>下載原始檔 ↓</a>
+        {#if doc.deletable}<button type="button" class="text-dim hover:text-neg" onclick={askToDelete}>刪除</button>{/if}
     </span>
 </div>
 
@@ -153,3 +174,21 @@ onKeys("document", {
         ></iframe>
     </section>
 {/if}
+
+<Dialog bind:open={confirming} title="刪除文件">
+    <div class="flex items-center justify-between border-b border-line px-4 py-3">
+        <h2 class="label">DELETE · 刪除文件</h2>
+        <button type="button" class="text-mute" aria-label="關閉" onclick={() => (confirming = false)}><span class="text-accent">[esc]</span></button>
+    </div>
+    <div class="flex flex-col gap-2 p-4">
+        <p class="m-0 break-words">刪除 #{doc.id} {doc.filename}？原始檔一起刪掉，不能復原。</p>
+        {#if doc.status === "duplicate"}
+            <p class="m-0 text-dim">它重複的帳單{doc.duplicateOf ? `在 #${doc.duplicateOf}` : ""}，不受影響。</p>
+        {/if}
+        {#if deleteError}<p class="m-0 break-words text-neg">{deleteError}</p>{/if}
+        <div class="flex justify-end gap-2 pt-2">
+            <button type="button" class="control" onclick={() => (confirming = false)}>取消</button>
+            <button type="button" class="control border-neg text-neg" disabled={deleting} onclick={() => void remove()}>{deleting ? "刪除中…" : "刪除"}</button>
+        </div>
+    </div>
+</Dialog>

@@ -573,6 +573,9 @@ type Document struct {
 	AccountCount int    `json:"accountCount"`
 	ContentType  string `json:"contentType"`
 
+	// Deletable Whether DELETE takes it: it failed, was skipped, or is a duplicate, and so holds nothing of the ledger
+	Deletable bool `json:"deletable"`
+
 	// DuplicateOf The document holding the statement this one repeats, when a duplicate
 	DuplicateOf *int64 `json:"duplicateOf,omitempty"`
 
@@ -1239,6 +1242,9 @@ type ServerInterface interface {
 	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
 	// (POST /api/documents)
 	UploadDocument(ctx *echo.Context) error
+	// DeleteDocument Delete a document that holds nothing of the ledger, its original included
+	// (DELETE /api/documents/{id})
+	DeleteDocument(ctx *echo.Context, id Id) error
 
 	// (GET /api/documents/{id})
 	GetDocument(ctx *echo.Context, id Id) error
@@ -1453,6 +1459,22 @@ func (w *ServerInterfaceWrapper) UploadDocument(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.UploadDocument(ctx)
+	return err
+}
+
+// DeleteDocument converts echo context to params.
+func (w *ServerInterfaceWrapper) DeleteDocument(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.DeleteDocument(ctx, id)
 	return err
 }
 
@@ -1925,6 +1947,7 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 
 	router.GET(options.BaseURL+"/api/documents", wrapper.ListDocuments, options.OperationMiddlewares["listDocuments"]...)
 	router.POST(options.BaseURL+"/api/documents", wrapper.UploadDocument, options.OperationMiddlewares["uploadDocument"]...)
+	router.DELETE(options.BaseURL+"/api/documents/:id", wrapper.DeleteDocument, options.OperationMiddlewares["deleteDocument"]...)
 	router.GET(options.BaseURL+"/api/documents/:id", wrapper.GetDocument, options.OperationMiddlewares["getDocument"]...)
 	router.POST(options.BaseURL+"/api/documents/:id/reparse", wrapper.ReparseDocument, options.OperationMiddlewares["reparseDocument"]...)
 	router.GET(options.BaseURL+"/api/documents/:id/content", wrapper.GetDocumentContent, options.OperationMiddlewares["getDocumentContent"]...)
@@ -2299,6 +2322,50 @@ func (response UploadDocument415JSONResponse) VisitUploadDocumentResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(415)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteDocumentRequestObject struct {
+	Id Id `json:"id"`
+}
+
+type DeleteDocumentResponseObject interface {
+	VisitDeleteDocumentResponse(w http.ResponseWriter) error
+}
+
+type DeleteDocument204Response struct {
+}
+
+func (response DeleteDocument204Response) VisitDeleteDocumentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteDocument404JSONResponse struct{ ProblemJSONResponse }
+
+func (response DeleteDocument404JSONResponse) VisitDeleteDocumentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteDocument409JSONResponse Problem
+
+func (response DeleteDocument409JSONResponse) VisitDeleteDocumentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3161,6 +3228,9 @@ type StrictServerInterface interface {
 	// UploadDocument Upload a statement e-mail (.eml) and queue it for parsing
 	// (POST /api/documents)
 	UploadDocument(ctx context.Context, request UploadDocumentRequestObject) (UploadDocumentResponseObject, error)
+	// DeleteDocument Delete a document that holds nothing of the ledger, its original included
+	// (DELETE /api/documents/{id})
+	DeleteDocument(ctx context.Context, request DeleteDocumentRequestObject) (DeleteDocumentResponseObject, error)
 
 	// (GET /api/documents/{id})
 	GetDocument(ctx context.Context, request GetDocumentRequestObject) (GetDocumentResponseObject, error)
@@ -3496,6 +3566,31 @@ func (sh *strictHandler) UploadDocument(ctx *echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(UploadDocumentResponseObject); ok {
 		return validResponse.VisitUploadDocumentResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// DeleteDocument operation middleware
+func (sh *strictHandler) DeleteDocument(ctx *echo.Context, id Id) error {
+	var request DeleteDocumentRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteDocument(ctx.Request().Context(), request.(DeleteDocumentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteDocument")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(DeleteDocumentResponseObject); ok {
+		return validResponse.VisitDeleteDocumentResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

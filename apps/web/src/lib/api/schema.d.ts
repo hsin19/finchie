@@ -40,7 +40,12 @@ export interface paths {
         get: operations["getDocument"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a document that holds nothing of the ledger, its original included
+         * @description Only a document that failed, was skipped, or is a duplicate (`deletable`). Documents that are
+         *     duplicates of this one are parsed again, so that one of them holds the statement.
+         */
+        delete: operations["deleteDocument"];
         options?: never;
         head?: never;
         patch?: never;
@@ -558,6 +563,8 @@ export interface components {
             lineCount: number;
             /** @description Accounts its statement reported, 0 without one */
             accountCount: number;
+            /** @description Whether DELETE takes it: it failed, was skipped, or is a duplicate, and so holds nothing of the ledger */
+            deletable: boolean;
         };
         DocumentPreview: {
             email?: components["schemas"]["EmailPreview"];
@@ -1166,6 +1173,28 @@ export interface operations {
                 };
             };
             404: components["responses"]["Problem"];
+        };
+    };
+    deleteDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     reparseDocument: {

@@ -17,6 +17,14 @@ const (
 // DocumentStatuses are every status, in the order the web app lists them.
 var DocumentStatuses = []DocumentStatus{Pending, Parsed, NeedsReview, Duplicate, Failed, Skipped}
 
+// Deletable reports whether a document in this status may be deleted: it holds nothing of the ledger (one
+// that failed holds no statement, a duplicate's statement is another document's), and no parse is at work
+// on it. Deleting one that holds a statement would take the statement, its lines, and what was trimmed or
+// linked because of them along; that is not offered.
+func (s DocumentStatus) Deletable() bool {
+	return s == Failed || s == Skipped || s == Duplicate
+}
+
 // Failure is why a document could not be parsed, as stored in documents.failure: what has to change before
 // parsing it again can succeed.
 type Failure string

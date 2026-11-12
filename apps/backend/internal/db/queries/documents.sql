@@ -38,6 +38,24 @@ SELECT filename, content_type, content
 FROM documents
 WHERE id = @id;
 
+-- name: LockDocument :one
+-- Its status, and no parse or retry may change it until the transaction ends.
+SELECT status
+FROM documents
+WHERE id = @id
+FOR UPDATE;
+
+-- name: MarkDuplicatesPending :many
+-- The documents that say this one holds their statement, to be parsed again: one of them will hold it.
+UPDATE documents
+SET status = 'pending', failure = NULL, error = NULL, duplicate_of = NULL
+WHERE duplicate_of = @id::bigint
+RETURNING id;
+
+-- name: DeleteDocument :exec
+DELETE FROM documents
+WHERE id = @id;
+
 -- name: MarkDocumentPending :exec
 UPDATE documents
 SET status = 'pending', failure = NULL, error = NULL, duplicate_of = NULL

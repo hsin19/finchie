@@ -31,6 +31,7 @@ func toDocument(row dbq.GetDocumentRow) Document {
 		Warnings:      row.Warnings,
 		LineCount:     int(row.LineCount),
 		AccountCount:  int(row.AccountCount),
+		Deletable:     row.Status.Deletable(),
 	}
 	if row.StatementKind != "" {
 		doc.StatementKind = ptr(AccountKind(row.StatementKind))

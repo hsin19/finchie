@@ -193,6 +193,46 @@ func (s *Server) ReparseDocument(ctx context.Context, request ReparseDocumentReq
 	return ReparseDocument202JSONResponse(doc), nil
 }
 
+// DeleteDocument deletes a document that holds nothing of the ledger, such as a file uploaded by mistake
+// or a mail no parser takes, so it does not stay among the documents for good.
+func (s *Server) DeleteDocument(ctx context.Context, request DeleteDocumentRequestObject) (DeleteDocumentResponseObject, error) {
+	var status domain.DocumentStatus
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		queries := dbq.New(tx)
+		var err error
+		// Locked, so that a retry or a re-parse cannot start on it between the check and the delete.
+		if status, err = queries.LockDocument(ctx, request.Id); err != nil || !status.Deletable() {
+			return err
+		}
+		// A document that names this one as holding its statement would be left a duplicate of nothing,
+		// with the statement in no one's hands. Parsed again, one of them holds it. Before the delete,
+		// which forgets which documents those were.
+		duplicates, err := queries.MarkDuplicatesPending(ctx, request.Id)
+		if err != nil {
+			return fmt.Errorf("duplicates of it: %w", err)
+		}
+		for _, id := range duplicates {
+			if _, err := s.jobs.InsertTx(ctx, tx, ingest.ParseDocumentArgs{DocumentID: id}, nil); err != nil {
+				return fmt.Errorf("queue document %d: %w", id, err)
+			}
+		}
+		return queries.DeleteDocument(ctx, request.Id)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DeleteDocument404JSONResponse{notFound("document", request.Id)}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("delete document %d: %w", request.Id, err)
+	}
+	switch {
+	case status == domain.Pending:
+		return DeleteDocument409JSONResponse{Message: fmt.Sprintf("document %d is being parsed: delete it once that is done", request.Id)}, nil
+	case !status.Deletable():
+		return DeleteDocument409JSONResponse{Message: fmt.Sprintf("document %d holds a statement: only one that failed, was skipped, or is a duplicate can be deleted", request.Id)}, nil
+	}
+	return DeleteDocument204Response{}, nil
+}
+
 func (s *Server) GetDocumentContent(ctx context.Context, request GetDocumentContentRequestObject) (GetDocumentContentResponseObject, error) {
 	row, err := dbq.New(s.pool).GetDocumentContent(ctx, request.Id)
 	if errors.Is(err, pgx.ErrNoRows) {
