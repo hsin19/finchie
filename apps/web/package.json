@@ -37,7 +37,7 @@
     "@vite-pwa/assets-generator": "^2.0.0",
     "dprint": "^0.64.3",
     "eslint": "^10.14.0",
-    "eslint-plugin-svelte": "^3.19.0",
+    "eslint-plugin-svelte": "^3.24.0",
     "globals": "^17.14.0",
     "happy-dom": "^21.0.4",
     "openapi-typescript": "^7.13.0",
