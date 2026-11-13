@@ -126,6 +126,14 @@ def test_nextbank_deposit_reads_the_other_side_of_a_transfer_from_its_memo() -> 
     assert [deposit_detail(line).counterparty for line in parse().accounts[0].lines] == ["", "808 0012345678901", ""]
 
 
+def test_nextbank_deposit_reads_a_transfer_to_a_payee_by_the_code_in_brackets() -> None:
+    memo = "轉出至帳戶暱稱(台新銀行 812- 0028881234567890);FT0002"
+    page_2 = [Word(memo, w.x0, w.x1, w.top) if w.text.startswith("玉山銀行") else w for w in PAGE_2]
+    document = FakeDocument([PAGE_1], words={1: page_2, 2: PAGE_3})
+    statement = deposit(NextBankDepositParser().parse(document, ocr=None))
+    assert deposit_detail(statement.accounts[0].lines[1]).counterparty == "812 0028881234567890"
+
+
 def test_nextbank_deposit_keeps_a_bank_it_has_no_code_for_by_name() -> None:
     page_2 = [Word("某某銀行-123456;FT0002", w.x0, w.x1, w.top) if w.text.startswith("玉山銀行") else w for w in PAGE_2]
     document = FakeDocument([PAGE_1], words={1: page_2, 2: PAGE_3})

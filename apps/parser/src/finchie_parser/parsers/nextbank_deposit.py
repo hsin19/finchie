@@ -4,7 +4,8 @@ Page 1 prints the period. Every account and currency then has a section of its o
 美元餘額：…) that prints its balance in its heading, then, if it had any lines, the balance brought forward
 (上期餘額) and the lines, dated by month and day only, 收入 before 支出; an amount under 支出 is printed
 negative. A long memo wraps onto rows of its own, above and below its line's row. A transfer's memo
-starts with the other side's bank, by name, and account (玉山銀行-…;FT…). Pockets (活存口袋) follow,
+starts with the other side's bank, by name, and account (玉山銀行-…;FT…); one to a payee the owner named
+gives that name, then the bank and its code in brackets (轉出至…(台新銀行 812- …);FT…). Pockets (活存口袋) follow,
 each with a balance of its own.
 """
 
@@ -44,13 +45,15 @@ _COLUMNS = ("收入", "支出", "餘額")
 _MEMO_REACH = 20
 # A transfer's memo names the other side: 玉山銀行-0012345678901;FT….
 _COUNTERPARTY = re.compile(r"(?P<bank>[^\d;-]+)-(?P<number>\d[\d*]*)")
+# Or a payee the owner named, its bank and code in brackets: 轉出至房東(台新銀行 812- 0012345678901);FT….
+_PAYEE = re.compile(r".*\([^\d()]*?(?P<code>\d{3})-\s*(?P<number>\d[\d*]*)\)")
 # Banks by the name a memo gives them, with their codes (金融機構代號), as statements have shown them.
 _BANK_CODES = {"玉山銀行": "808"}
 
 
 class NextBankDepositParser(StatementParser):
     name = "nextbank.deposit"
-    version = "5"
+    version = "6"
     institution = "nextbank"
     # 【將來銀行通知】2026年9月綜合對帳單, from no_reply@eblsdr.nextbank.com.tw (the e-mail asks to trust
     # eStatement@nextbank.com.tw).
@@ -179,7 +182,11 @@ class _Reader:
 def _counterparty(memo: str) -> str:
     """ "808 0012345678901" for a memo naming a bank whose code is known, as other banks print it; else the
     name as printed, which shows where the money went but fits no account."""
-    named = _COUNTERPARTY.fullmatch(memo.split(";", 1)[0])
+    first = memo.split(";", 1)[0]
+    payee = _PAYEE.fullmatch(first)
+    if payee is not None:
+        return f"{payee['code']} {payee['number']}"
+    named = _COUNTERPARTY.fullmatch(first)
     if named is None:
         return ""
     code = _BANK_CODES.get(named["bank"])
