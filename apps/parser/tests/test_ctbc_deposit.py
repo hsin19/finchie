@@ -92,6 +92,15 @@ def test_ctbc_deposit_reads_a_balance_right_of_the_number_whatever_digits_the_ac
     assert (digital.name, digital.number, digital.balances[-1].amount) == ("MyWay數2", DIGITAL, Decimal(15124))
 
 
+def test_ctbc_deposit_keeps_a_reference_number_in_the_description_out_of_the_amounts() -> None:
+    # 網購退支付寶 and its order number: the text layer holds the number, left of the amounts' columns.
+    text = [w for w in TEXT if w.top != 440]
+    text += row(440, ("2026/09/21", 107, 146), ("5000000001234567", 214, 283), ("9", 438, 442), ("15,124", 512, 536))
+    ocr = [OcrLine("網購退支付寶5000000001234567", o.top, o.bottom, 162) if o.text == "利息" else o for o in OCR]
+    [line] = parse(text, ocr).accounts[1].lines
+    assert (line.description, line.amount) == ("網購退支付寶5000000001234567", Decimal(9))
+
+
 def test_ctbc_deposit_without_ocr_is_a_configuration_error_not_a_layout_change() -> None:
     assert CtbcDepositParser.needs_ocr
     with pytest.raises(ConfigurationError, match="need OCR"):

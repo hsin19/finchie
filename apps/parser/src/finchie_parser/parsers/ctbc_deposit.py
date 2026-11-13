@@ -39,7 +39,7 @@ _CURRENCIES = {"美元": "USD", "日圓": "JPY", "日幣": "JPY", "歐元": "EUR
 
 class CtbcDepositParser(StatementParser):
     name = "ctbc.deposit"
-    version = "4"
+    version = "5"
     institution = "ctbc"
     # 中國信託銀行電子對帳單 11510, from ebill@estats.ctbcbank.com.
     sender_domains = ("ctbcbank.com",)
@@ -152,10 +152,9 @@ class _Reader:
             return
         if not _DATE.fullmatch(row[0].text) or "帳戶餘額" not in by_column:
             raise LayoutError(f"a row in the lines that is not one: {[w.text for w in row]} {said}")
-        description_column = headings.get("摘要")
-        description = " ".join(
-            line.text for line in beside if description_column is None or abs(line.left - description_column.left) <= 40
-        )
+        # Between the date and the amounts: a long description starts well left of its heading
+        # (網購退支付寶 and an order number), a short one under it.
+        description = " ".join(line.text for line in beside if row[0].x1 < line.left < columns["支出"].left)
         self.current.lines.append(
             Entry(
                 date=iso_date(row[0].text),
@@ -174,9 +173,12 @@ def _beside(row: list[Word], labels: Sequence[OcrLine]) -> list[OcrLine]:
     return sorted(near, key=lambda line: line.left)
 
 
-def _column(word: Word, columns: dict[str, OcrLine]) -> str:
-    """Columns run from one heading's left edge to the next's: an amount ends inside the one it is under."""
+def _column(word: Word, columns: dict[str, OcrLine]) -> str | None:
+    """Columns run from one heading's left edge to the next's: an amount ends inside the one it is under.
+    Digits that end left of them all are the description's (an order number), not an amount."""
     order = sorted(columns, key=lambda name: columns[name].left)
+    if word.x1 < columns[order[0]].left:
+        return None
     for name, following in itertools.pairwise(order):
         if word.x1 < columns[following].left:
             return name
