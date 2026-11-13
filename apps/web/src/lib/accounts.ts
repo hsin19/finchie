@@ -129,6 +129,18 @@ export function leftOut({ others, othersAtMost, unpriced }: ListedBalances): str
     return parts.length > 0 ? `另 ${parts.join("、")}` : "";
 }
 
+/**
+ * "另 9 個 ≤ NT$874": the small accounts a kind's list leaves out, as leftOut says of an account's balances:
+ * how many, and the most any of them is worth either way. One worth nothing is none at all; "" when that
+ * leaves none.
+ */
+export function leftOutAccounts(hidden: readonly Account[]): string {
+    const worths = hidden.flatMap(a => a.worth !== undefined && sign(a.worth) !== 0 ? [magnitude(a.worth)] : []);
+    if (worths.length === 0) return "";
+    const most = worths.reduce((a, b) => sign(subtract(b, a)) > 0 ? b : a);
+    return `另 ${worths.length} 個 ≤ NT$${formatAmount(roundWhole(most))}`;
+}
+
 /** Holdings by worth in NT$, largest first; those without a rate go last, by unit. */
 export function holdingsByWorth(balances: Balance[]): Balance[] {
     return [...balances].sort((a, b) => {

@@ -20,6 +20,7 @@ import {
     isSmallAccount,
     lapsesSoon,
     leftOut,
+    leftOutAccounts,
     listedBalances,
     readAccountsView,
     shownNumber,
@@ -129,6 +130,13 @@ describe("small accounts and balances", () => {
         expect(isSmallAccount(holding([], "-5000"))).toBe(false);
         expect(isSmallAccount(holding([]))).toBe(false);
         expect(isSmallAccount(holding([], "0", 1))).toBe(true);
+    });
+
+    it("says of the small accounts left out how many and the most any of them is worth, either way", () => {
+        expect(leftOutAccounts([account(1, "120.40"), account(2, "-873.60"), account(3, "5")])).toBe("另 3 個 ≤ NT$874");
+        // One worth nothing is none at all, as a balance at 0 is.
+        expect(leftOutAccounts([account(1, "0"), account(2, "0.00")])).toBe("");
+        expect(leftOutAccounts([])).toBe("");
     });
 });
 

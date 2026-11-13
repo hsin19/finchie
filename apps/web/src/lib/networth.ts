@@ -1,6 +1,7 @@
 // What the owner has less what they owe (ADR 0022), on a day and over time (ADR 0023): worked out by the
 // backend; this is how the accounts page shows it.
 
+import { accountStatus } from "#lib/accounts.js";
 import type {
     Account,
     NetWorth,
@@ -14,13 +15,13 @@ import {
 import { approx } from "#lib/money.js";
 
 /**
- * Whether the figure is exact: every account had reported by its day. Otherwise it is an estimate past
- * `completeAsOf`, and `behind` are the accounts that have not reported since, in the order listed.
+ * The accounts the figure takes an old balance of because they are overdue as of `today` (accountStatus),
+ * in the order listed: what is worth saying about it. A figure past the day every account had reported
+ * is an estimate (ADR 0023), but that is every day: a bank's statement comes once a month, so nearly every
+ * account is behind as a matter of course, and saying so, or naming them, says nothing.
  */
-export function exactness(netWorth: Pick<NetWorth, "on" | "completeAsOf" | "behind">, accounts: readonly Account[]): { exact: boolean; asOf?: string; behind: Account[]; } {
-    const exact = netWorth.completeAsOf !== undefined && netWorth.completeAsOf >= netWorth.on;
-    const behind = exact ? [] : accounts.filter(a => netWorth.behind.includes(a.id));
-    return { exact, asOf: netWorth.completeAsOf, behind };
+export function overdueBehind(netWorth: Pick<NetWorth, "behind">, accounts: readonly Account[], today: string): Account[] {
+    return accounts.filter(a => netWorth.behind.includes(a.id) && accountStatus(a, today).stale);
 }
 
 /** The trend's query: each month end of the last year, and `today`. */

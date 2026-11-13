@@ -6,6 +6,7 @@ import {
     isSmallAccount,
     lapsesSoon,
     leftOut,
+    leftOutAccounts,
     listedBalances,
     shownNumber,
     sortAccounts,
@@ -28,7 +29,7 @@ import {
     roundWhole,
     sign,
 } from "#lib/money.js";
-import { exactness } from "#lib/networth.js";
+import { overdueBehind } from "#lib/networth.js";
 import { goto } from "$app/navigation";
 import { resolve } from "$app/paths";
 import type { PageProps } from "./$types";
@@ -43,7 +44,7 @@ let adding = $state(false);
 const now = today();
 
 const worthOf = $derived(new Map(data.netWorth.byKind.map(k => [k.kind, k])));
-const exact = $derived(exactness(data.netWorth, data.accounts));
+const overdue = $derived(overdueBehind(data.netWorth, data.accounts, now));
 
 // What the owner has, then what they owe (ADR 0022); by kind within each, in a fixed order. Small
 // accounts are left out of the list, never out of the totals.
@@ -61,13 +62,14 @@ const groups = $derived(
                 kind,
                 side: accounts[0]?.side ?? "asset",
                 accounts: sortAccounts(listed, data.sort),
-                hidden: accounts.length - listed.length,
+                // What the list leaves out, in words; "" when nothing of worth.
+                hidden: leftOutAccounts(accounts.filter(a => !listed.includes(a))),
                 worth,
                 // Points until the owner gives them a value (ADR 0019).
                 worthless: (worth?.unvalued ?? accounts.length) === accounts.length,
             };
         })
-        .filter(group => group.accounts.length + group.hidden > 0),
+        .filter(group => group.accounts.length > 0 || group.hidden !== ""),
 );
 
 const sorts = $derived([
@@ -122,16 +124,14 @@ function href(account: Account) {
             </div>
         {/each}
     </div>
-    <!-- Sources report on days of their own: exact once every account has reported (ADR 0023). -->
-    <div class="text-[12px] text-mute">
-        {#if exact.exact}
-            exact as of {exact.asOf}：每個帳戶都回報到這天了
-        {:else}
-            {exact.asOf ? `exact as of ${exact.asOf}，之後是估計` : "還沒有哪天每個帳戶都回報過，這是估計"}{#if exact.behind.length > 0}：{exact.behind.length} 個帳戶還沒回報到 {data.netWorth.on} ·
-                {#each exact.behind as account, i (account.id)}{i > 0 ? "、" : ""}<a href={href(account)} class="text-dim hover:text-ink">{institution(account.institution).name} {accountName(account)}</a>{/each}
-            {/if}
-        {/if}
-    </div>
+    <!-- Sources report on days of their own (ADR 0023): the figure is always an estimate for some of them
+         (≈), and only one overdue is worth a word. -->
+    {#if overdue.length > 0}
+        <div class="text-[12px] text-mute">
+            {overdue.length} 個帳戶太久沒更新，淨額用的是它們最後一次的餘額 ·
+            {#each overdue as account, i (account.id)}{i > 0 ? "、" : ""}<a href={href(account)} class="text-accent hover:text-accent-soft">{institution(account.institution).name} {accountName(account)}</a>{/each}
+        </div>
+    {/if}
 </section>
 
 {#if data.history}
@@ -180,7 +180,7 @@ function href(account: Account) {
                     {:else}
                         合計 ≈ NT${formatAmount(group.worth.worth)}{group.worth.unvalued ? `（${group.worth.unvalued} 個帳戶沒有價格，不計）` : ""}
                     {/if}
-                    {#if group.hidden > 0}· 另 {group.hidden} 個 &lt; NT$1,000 未列出{/if}
+                    {#if group.hidden}· {group.hidden}{/if}
                 </span>
             </div>
             <div class="overflow-x-auto">

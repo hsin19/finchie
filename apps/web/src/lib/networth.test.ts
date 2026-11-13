@@ -8,23 +8,35 @@ import {
     it,
 } from "vitest";
 import {
-    exactness,
+    overdueBehind,
     trendColumns,
     trendQuery,
 } from "./networth";
 
-const account = (id: number) => ({ id }) as Account;
+/** A deposit account whose newest balance is of `asOf`. */
+const reported = (id: number, asOf: string): Account => ({
+    id,
+    institution: "esun",
+    kind: "deposit",
+    side: "asset",
+    number: String(id),
+    continuity: "checked",
+    gaps: [],
+    expiries: [],
+    balances: [{ unit: "TWD", asOf, amount: "1" }],
+});
 const point = (on: string, net: string, complete = true): NetWorthPoint => ({ on, assets: "0", liabilities: "0", net, unvalued: 0, complete });
 
-describe("exactness", () => {
-    it("is exact on a day every account had reported by", () => {
-        expect(exactness({ on: "2026-10-31", completeAsOf: "2026-11-02", behind: [] }, [])).toEqual({ exact: true, asOf: "2026-11-02", behind: [] });
+describe("overdueBehind", () => {
+    it("names only the accounts behind the figure that are overdue", () => {
+        // A statement that closed last month is behind today as a matter of course; one 60 days old is overdue.
+        const accounts = [reported(1, "2026-09-12"), reported(2, "2026-10-31"), reported(3, "2026-10-31")];
+        expect(overdueBehind({ behind: [3, 1] }, accounts, "2026-11-11")).toEqual([accounts[0]]);
+        expect(overdueBehind({ behind: [2, 3] }, accounts, "2026-11-11")).toEqual([]);
     });
 
-    it("is an estimate after it, naming the accounts that are behind", () => {
-        const accounts = [account(1), account(2), account(3)];
-        expect(exactness({ on: "2026-11-11", completeAsOf: "2026-10-31", behind: [3, 1] }, accounts)).toEqual({ exact: false, asOf: "2026-10-31", behind: [accounts[0], accounts[2]] });
-        expect(exactness({ on: "2026-11-11", behind: [] }, accounts).exact).toBe(false);
+    it("names none that is not behind, however old", () => {
+        expect(overdueBehind({ behind: [] }, [reported(1, "2026-09-12")], "2026-11-11")).toEqual([]);
     });
 });
 
