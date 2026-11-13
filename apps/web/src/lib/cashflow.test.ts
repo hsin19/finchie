@@ -49,6 +49,12 @@ describe("reportedThrough", () => {
         expect(reportedThrough(accounts, "2026-11-13")).toBe("2026-09-30");
     });
 
+    it("waits for no account the owner said not to look at again yet", () => {
+        // Excused for years, its old balance would hold every month back.
+        const quiet = { ...account(2, "deposit", "2026-08-04"), checkAgainOn: "2030-01-01" };
+        expect(reportedThrough([account(1, "deposit", "2026-10-31"), quiet], "2026-11-13")).toBe("2026-10-31");
+    });
+
     it("waits for no account that is overdue, nor one the owner keeps", () => {
         const accounts = [account(1, "deposit", "2026-10-31"), account(2, "deposit", "2026-08-01"), account(3, "deposit", "2026-01-01", "owner")];
         expect(reportedThrough(accounts, "2026-11-13")).toBe("2026-10-31");

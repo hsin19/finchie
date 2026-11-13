@@ -8,6 +8,10 @@ import type {
     Transaction,
 } from "#lib/api/client.js";
 import {
+    addDays,
+    yearlyDate,
+} from "#lib/dates.js";
+import {
     cardLabel,
     institution,
     OWNER,
@@ -224,8 +228,13 @@ export interface AccountStatus {
     /** The day of its newest balance, and how many days before `today` that was. */
     asOf?: string;
     days?: number;
-    /** Nothing new for longer than its source takes. Why is not said: a bank sends nothing for a month without a line. */
+    /**
+     * Nothing new for longer than its source takes, and no day still ahead that the owner said to look again
+     * on. Why is not said: a bank sends nothing for a month without a line, which is what that day is for.
+     */
     stale: boolean;
+    /** It would be overdue, but the owner said to look again on a day still ahead (`checkAgainOn`). */
+    excused: boolean;
     /** Why an old balance is still fine. */
     note?: string;
     /** Stretches where its balance moved and no line says why. */
@@ -234,16 +243,36 @@ export interface AccountStatus {
     checked: boolean;
 }
 
-/** How current an account is and whether it joins up. One the owner keeps is as old as they leave it. */
+/** How many days its source takes at most before an account of the kind is overdue. */
+const overdueAfter = (kind: AccountKind) => (kind === "exchange" ? SNAPSHOT_DAYS : STATEMENT_DAYS);
+
+/**
+ * The day to look again that confirming an account is current gives: as long from today as its source
+ * may take. The owner can give a later one, far off for an account that never moves.
+ */
+export function checkAgainDefault(account: Pick<Account, "kind">, today: string): string {
+    return addDays(today, overdueAfter(account.kind));
+}
+
+/**
+ * How current an account is and whether it joins up. One the owner keeps is as old as they leave it; one
+ * they said to look at again on a day still ahead is not overdue until then.
+ */
 export function accountStatus(account: Account, today: string): AccountStatus {
-    const status: AccountStatus = { stale: false, gaps: account.gaps.length, checked: account.continuity === "checked" };
+    const status: AccountStatus = { stale: false, excused: false, gaps: account.gaps.length, checked: account.continuity === "checked" };
     const asOf = account.balances.map(b => b.asOf).sort().at(-1);
     if (!asOf) return status;
     const days = Math.round((Date.parse(today) - Date.parse(asOf)) / 86_400_000);
     status.asOf = asOf;
     status.days = days;
-    if (isOwned(account)) status.note = "手動";
-    else status.stale = days > (account.kind === "exchange" ? SNAPSHOT_DAYS : STATEMENT_DAYS);
+    if (isOwned(account)) {
+        status.note = "手動";
+        return status;
+    }
+    const overdue = days > overdueAfter(account.kind);
+    status.excused = overdue && account.checkAgainOn !== undefined && today < account.checkAgainOn;
+    status.stale = overdue && !status.excused;
+    if (status.excused) status.note = `確認過沒變 · ${yearlyDate(account.checkAgainOn!, today)} 再提醒`;
     return status;
 }
 

@@ -13,6 +13,7 @@ import {
     accountsHref,
     accountSort,
     accountStatus,
+    checkAgainDefault,
     daysAgo,
     describePrice,
     historyByDay,
@@ -183,7 +184,7 @@ describe("accountStatus", () => {
 
     it("counts the days since the newest balance", () => {
         expect(accountStatus(at("deposit", "2026-10-31"), "2026-11-10")).toMatchObject({ asOf: "2026-10-31", days: 10, stale: false });
-        expect(accountStatus({ ...account(1), balances: [] }, "2026-11-10")).toEqual({ stale: false, gaps: 0, checked: true });
+        expect(accountStatus({ ...account(1), balances: [] }, "2026-11-10")).toEqual({ stale: false, excused: false, gaps: 0, checked: true });
     });
 
     it("calls a statement that has not come in 50 days stale, and an exchange not read for a day", () => {
@@ -193,6 +194,23 @@ describe("accountStatus", () => {
         expect(accountStatus(at("securities", "2026-08-04"), "2026-11-10").stale).toBe(true);
         expect(accountStatus(at("exchange", "2026-11-09"), "2026-11-10").stale).toBe(false);
         expect(accountStatus(at("exchange", "2026-11-08"), "2026-11-10").stale).toBe(true);
+    });
+
+    it("is not overdue before the day the owner said to look again", () => {
+        // A brokerage sends nothing for a month without a trade: confirmed on 11/13, as its rule would.
+        const quiet = at("securities", "2026-08-04", { checkAgainOn: "2027-01-02" });
+        expect(accountStatus(quiet, "2026-11-13")).toMatchObject({ days: 74, stale: false, excused: true, note: "確認過沒變 · 2027/01/02 再提醒" });
+        expect(accountStatus(quiet, "2027-01-01").stale).toBe(false);
+        expect(accountStatus(quiet, "2027-01-02")).toMatchObject({ stale: true, excused: false });
+        // Far off, for one that never moves.
+        expect(accountStatus(at("deposit", "2026-08-04", { checkAgainOn: "2030-01-01" }), "2029-06-01").stale).toBe(false);
+        // Nothing to excuse while it is current.
+        expect(accountStatus(at("deposit", "2026-11-01", { checkAgainOn: "2027-01-02" }), "2026-11-13")).toEqual(expect.objectContaining({ stale: false, excused: false }));
+    });
+
+    it("gives as long from today as the account's source may take, by default", () => {
+        expect(checkAgainDefault({ kind: "securities" }, "2026-11-13")).toBe("2027-01-02");
+        expect(checkAgainDefault({ kind: "exchange" }, "2026-11-13")).toBe("2026-11-14");
     });
 
     it("never calls an account the owner keeps stale", () => {

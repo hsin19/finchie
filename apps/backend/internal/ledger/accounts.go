@@ -75,6 +75,9 @@ func OpenAccount(ctx context.Context, queries *dbq.Queries, kind domain.AccountK
 // AccountDetails are what the owner gives an account (ADR 0016): nil leaves one as it is, blank clears it.
 type AccountDetails struct {
 	Name, FullNumber *string
+	// The day to look again whether it is current: until then its age is no sign of a statement that never
+	// came. The zero day clears it.
+	CheckAgainOn *time.Time
 }
 
 // UpdateAccount keeps the owner's details of an account and, since a full number fits counterparties
@@ -107,6 +110,10 @@ func UpdateAccount(ctx context.Context, pool *pgxpool.Pool, id int64, details Ac
 				}
 				params.FullNumber = &full
 			}
+		}
+		if on := details.CheckAgainOn; on != nil {
+			params.SetCheckAgainOn = true
+			params.CheckAgainOn = pgtype.Date{Time: *on, Valid: !on.IsZero()}
 		}
 		if _, err := queries.UpdateAccountDetails(ctx, params); nameTaken(err) {
 			// Cleared, the account goes by its own name again, which another may have taken meanwhile.

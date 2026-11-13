@@ -46,6 +46,12 @@ describe("needs", () => {
         ]);
     });
 
+    it("lets the owner confirm an overdue account is current, and then says nothing of it", () => {
+        const quiet = account(2, { balances: [{ unit: "TWD", asOf: "2026-08-04", amount: "1" }] });
+        expect(needs({ byState: [], accounts: [quiet], today })[0].names[0].confirm).toEqual({ id: 2, checkAgainOn: "2027-01-02" });
+        expect(needs({ byState: [], accounts: [{ ...quiet, checkAgainOn: "2027-01-02" }], today })).toEqual([]);
+    });
+
     it("says only the kind of document trouble there is", () => {
         expect(needs({ byState: [{ state: "needs_review", count: 2 }], accounts: [], today })[0].text).toBe("2 份文件要處理：2 份對不起來");
     });

@@ -10,14 +10,15 @@ import (
 )
 
 type Account struct {
-	ID          int64
-	Institution string
-	Kind        domain.AccountKind
-	Number      string
-	Name        *string
-	CreatedAt   pgtype.Timestamptz
-	Label       *string
-	FullNumber  *string
+	ID           int64
+	Institution  string
+	Kind         domain.AccountKind
+	Number       string
+	Name         *string
+	CreatedAt    pgtype.Timestamptz
+	Label        *string
+	FullNumber   *string
+	CheckAgainOn pgtype.Date
 }
 
 type Balance struct {

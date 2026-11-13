@@ -58,6 +58,11 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, instance s
 
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		queries := dbq.New(tx)
+		// Before replace deletes what this document reported last time, which a re-parse brings again.
+		newest, err := queries.NewestStatementBalances(ctx)
+		if err != nil {
+			return fmt.Errorf("newest balances: %w", err)
+		}
 		holder, err := replace(ctx, queries, documentID, &result.statement)
 		if err != nil {
 			return err
@@ -67,6 +72,9 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, instance s
 			finish.Status, finish.DuplicateOf = domain.Duplicate, holder
 		} else {
 			if err := insert(ctx, queries, result); err != nil {
+				return err
+			}
+			if err := spendCheckAgain(ctx, queries, newest); err != nil {
 				return err
 			}
 			finish.Status = domain.Outcome(result.statement.Balanced)
@@ -81,6 +89,20 @@ func Store(ctx context.Context, pool *pgxpool.Pool, documentID int64, instance s
 		return "", fmt.Errorf("store parse result: %w", err)
 	}
 	return finish.Status, nil
+}
+
+// spendCheckAgain clears the owner's day to look again at each account the statement just stored brought a
+// newer balance of than `before`.
+func spendCheckAgain(ctx context.Context, queries *dbq.Queries, before []dbq.NewestStatementBalancesRow) error {
+	params := dbq.SpendCheckAgainParams{AccountIds: make([]int64, 0, len(before)), Newest: make([]pgtype.Date, 0, len(before))}
+	for _, b := range before {
+		params.AccountIds = append(params.AccountIds, b.AccountID)
+		params.Newest = append(params.Newest, b.Newest)
+	}
+	if err := queries.SpendCheckAgain(ctx, params); err != nil {
+		return fmt.Errorf("spend check-again days: %w", err)
+	}
+	return nil
 }
 
 // replace deletes what the document derived before and, when another document already holds the same

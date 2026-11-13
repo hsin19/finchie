@@ -45,6 +45,18 @@ export function slashDate(date: string): string {
     return shortDate(date).replace("-", "/");
 }
 
+/** "2027-01-02" → "01/02" this year, "2030/01/02" another. */
+export function yearlyDate(date: string, today: string): string {
+    return date.startsWith(today.slice(0, 5)) ? slashDate(date) : date.replaceAll("-", "/");
+}
+
+/** The day `days` after `date`, as dates without time zones are: in UTC. */
+export function addDays(date: string, days: number): string {
+    const day = new Date(`${date}T00:00:00Z`);
+    day.setUTCDate(day.getUTCDate() + days);
+    return day.toISOString().slice(0, 10);
+}
+
 export function weekday(date: string): string {
     return WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }

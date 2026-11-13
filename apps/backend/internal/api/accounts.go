@@ -55,7 +55,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	}
 	detail := AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Side: account.Side, Number: account.Number,
-		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
+		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, CheckAgainOn: account.CheckAgainOn, Balances: account.Balances,
 		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
 		Gaps: account.Gaps, Expiries: account.Expiries, History: history, Fills: fills,
 	}
@@ -145,7 +145,7 @@ func toAccount(row dbq.ListAccountsRow, latest []dbq.LatestBalancesRow, gaps dom
 	}
 	account := Account{
 		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Side: side, Number: row.Number,
-		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, Continuity: AccountContinuity(standing.Continuity),
+		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, CheckAgainOn: optionalDate(row.CheckAgainOn), Continuity: AccountContinuity(standing.Continuity),
 		Balances: make([]Balance, 0, len(standing.Held)), Gaps: make([]BalanceGap, 0, len(gaps.Unseen)), Expiries: []Expiry{},
 	}
 	for _, b := range standing.Held {

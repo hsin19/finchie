@@ -638,20 +638,21 @@ func (q *Queries) LatestValuations(ctx context.Context, accountID *int64) ([]Lat
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, institution, kind, number, label, name, full_number
+SELECT id, institution, kind, number, label, name, full_number, check_again_on
 FROM accounts
 WHERE $1::bigint IS NULL OR id = $1::bigint
 ORDER BY institution, kind DESC, number
 `
 
 type ListAccountsRow struct {
-	ID          int64
-	Institution string
-	Kind        domain.AccountKind
-	Number      string
-	Label       *string
-	Name        *string
-	FullNumber  *string
+	ID           int64
+	Institution  string
+	Kind         domain.AccountKind
+	Number       string
+	Label        *string
+	Name         *string
+	FullNumber   *string
+	CheckAgainOn pgtype.Date
 }
 
 // The owner's accounts, assets and liabilities alike (ADR 0022). Of one account, or with none, of all.
@@ -672,7 +673,41 @@ func (q *Queries) ListAccounts(ctx context.Context, id *int64) ([]ListAccountsRo
 			&i.Label,
 			&i.Name,
 			&i.FullNumber,
+			&i.CheckAgainOn,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const newestStatementBalances = `-- name: NewestStatementBalances :many
+SELECT account_id, max(as_of)::date AS newest
+FROM balances
+WHERE statement_id IS NOT NULL
+GROUP BY account_id
+`
+
+type NewestStatementBalancesRow struct {
+	AccountID int64
+	Newest    pgtype.Date
+}
+
+// Each account's newest balance a statement reports: what a statement about to be stored is newer than.
+func (q *Queries) NewestStatementBalances(ctx context.Context) ([]NewestStatementBalancesRow, error) {
+	rows, err := q.db.Query(ctx, newestStatementBalances)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NewestStatementBalancesRow
+	for rows.Next() {
+		var i NewestStatementBalancesRow
+		if err := rows.Scan(&i.AccountID, &i.Newest); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -703,29 +738,60 @@ func (q *Queries) SetFillMemo(ctx context.Context, arg SetFillMemoParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const spendCheckAgain = `-- name: SpendCheckAgain :exec
+WITH before AS (
+    SELECT unnest($1::bigint[]) AS account_id, unnest($2::date[]) AS newest
+)
+UPDATE accounts a
+SET check_again_on = NULL
+WHERE a.check_again_on IS NOT NULL
+  AND EXISTS (SELECT 1
+              FROM balances b
+              WHERE b.account_id = a.id AND b.statement_id IS NOT NULL
+                AND b.as_of > coalesce((SELECT newest FROM before WHERE before.account_id = a.id), '-infinity'::date))
+`
+
+type SpendCheckAgainParams struct {
+	AccountIds []int64
+	Newest     []pgtype.Date
+}
+
+// The owner's day to look again at an account is spent once a statement reports a balance newer than the
+// account's newest before (given, each account with one), however far off the day: the account is
+// current, and quiet or not from here. Parsing a statement again brings nothing newer, so it keeps it.
+func (q *Queries) SpendCheckAgain(ctx context.Context, arg SpendCheckAgainParams) error {
+	_, err := q.db.Exec(ctx, spendCheckAgain, arg.AccountIds, arg.Newest)
+	return err
+}
+
 const updateAccountDetails = `-- name: UpdateAccountDetails :one
 UPDATE accounts
-SET name        = CASE WHEN $1::boolean THEN $2::text ELSE name END,
-    full_number = CASE WHEN $3::boolean THEN $4::text ELSE full_number END
-WHERE id = $5
+SET name           = CASE WHEN $1::boolean THEN $2::text ELSE name END,
+    full_number    = CASE WHEN $3::boolean THEN $4::text ELSE full_number END,
+    check_again_on = CASE WHEN $5::boolean THEN $6::date ELSE check_again_on END
+WHERE id = $7
 RETURNING id
 `
 
 type UpdateAccountDetailsParams struct {
-	SetName       bool
-	Name          *string
-	SetFullNumber bool
-	FullNumber    *string
-	ID            int64
+	SetName         bool
+	Name            *string
+	SetFullNumber   bool
+	FullNumber      *string
+	SetCheckAgainOn bool
+	CheckAgainOn    pgtype.Date
+	ID              int64
 }
 
-// The owner's details (ADR 0016); a set flag that is false leaves its column as it is.
+// The owner's details (ADR 0016); a set flag that is false leaves its column as it is, and none clears it.
 func (q *Queries) UpdateAccountDetails(ctx context.Context, arg UpdateAccountDetailsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, updateAccountDetails,
 		arg.SetName,
 		arg.Name,
 		arg.SetFullNumber,
 		arg.FullNumber,
+		arg.SetCheckAgainOn,
+		arg.CheckAgainOn,
 		arg.ID,
 	)
 	var id int64

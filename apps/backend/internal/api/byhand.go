@@ -36,7 +36,15 @@ func (s *Server) CreateAccount(ctx context.Context, request CreateAccountRequest
 }
 
 func (s *Server) UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error) {
-	err := ledger.UpdateAccount(ctx, s.pool, request.Id, ledger.AccountDetails{Name: request.Body.Name, FullNumber: request.Body.FullNumber})
+	details := ledger.AccountDetails{Name: request.Body.Name, FullNumber: request.Body.FullNumber}
+	if given := request.Body.CheckAgainOn; given != nil {
+		on, problem := checkAgainOn(*given, taipei.Today(time.Now()))
+		if problem != "" {
+			return UpdateAccount400JSONResponse{ProblemJSONResponse{Message: problem}}, nil
+		}
+		details.CheckAgainOn = &on
+	}
+	err := ledger.UpdateAccount(ctx, s.pool, request.Id, details)
 	switch {
 	case errors.Is(err, ledger.ErrNoAccount):
 		return UpdateAccount404JSONResponse(notFound("account", request.Id)), nil
@@ -48,6 +56,22 @@ func (s *Server) UpdateAccount(ctx context.Context, request UpdateAccountRequest
 		return nil, err
 	}
 	return UpdateAccount204Response{}, nil
+}
+
+// checkAgainOn reads the day the owner said to look at an account again: a day after today, or empty for
+// none (the zero day); a problem is said in words.
+func checkAgainOn(given string, today time.Time) (time.Time, string) {
+	if strings.TrimSpace(given) == "" {
+		return time.Time{}, ""
+	}
+	on, err := time.Parse(time.DateOnly, strings.TrimSpace(given))
+	if err != nil {
+		return time.Time{}, fmt.Sprintf("%q is no day: YYYY-MM-DD", given)
+	}
+	if !on.After(today) {
+		return time.Time{}, fmt.Sprintf("%s is not after today", given)
+	}
+	return on, ""
 }
 
 func (s *Server) UpdateHoldings(ctx context.Context, request UpdateHoldingsRequestObject) (UpdateHoldingsResponseObject, error) {

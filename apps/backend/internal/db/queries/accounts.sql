@@ -14,7 +14,7 @@ VALUES (@account_id, @unit_id, @as_of, @amount, @statement_id::bigint);
 
 -- name: ListAccounts :many
 -- The owner's accounts, assets and liabilities alike (ADR 0022). Of one account, or with none, of all.
-SELECT id, institution, kind, number, label, name, full_number
+SELECT id, institution, kind, number, label, name, full_number, check_again_on
 FROM accounts
 WHERE sqlc.narg(id)::bigint IS NULL OR id = sqlc.narg(id)::bigint
 ORDER BY institution, kind DESC, number;
@@ -25,12 +25,35 @@ FROM accounts
 WHERE id = @id;
 
 -- name: UpdateAccountDetails :one
--- The owner's details (ADR 0016); a set flag that is false leaves its column as it is.
+-- The owner's details (ADR 0016); a set flag that is false leaves its column as it is, and none clears it.
 UPDATE accounts
-SET name        = CASE WHEN @set_name::boolean THEN sqlc.narg(name)::text ELSE name END,
-    full_number = CASE WHEN @set_full_number::boolean THEN sqlc.narg(full_number)::text ELSE full_number END
+SET name           = CASE WHEN @set_name::boolean THEN sqlc.narg(name)::text ELSE name END,
+    full_number    = CASE WHEN @set_full_number::boolean THEN sqlc.narg(full_number)::text ELSE full_number END,
+    check_again_on = CASE WHEN @set_check_again_on::boolean THEN sqlc.narg(check_again_on)::date ELSE check_again_on END
 WHERE id = @id
 RETURNING id;
+
+-- name: NewestStatementBalances :many
+-- Each account's newest balance a statement reports: what a statement about to be stored is newer than.
+SELECT account_id, max(as_of)::date AS newest
+FROM balances
+WHERE statement_id IS NOT NULL
+GROUP BY account_id;
+
+-- name: SpendCheckAgain :exec
+-- The owner's day to look again at an account is spent once a statement reports a balance newer than the
+-- account's newest before (given, each account with one), however far off the day: the account is
+-- current, and quiet or not from here. Parsing a statement again brings nothing newer, so it keeps it.
+WITH before AS (
+    SELECT unnest(@account_ids::bigint[]) AS account_id, unnest(@newest::date[]) AS newest
+)
+UPDATE accounts a
+SET check_again_on = NULL
+WHERE a.check_again_on IS NOT NULL
+  AND EXISTS (SELECT 1
+              FROM balances b
+              WHERE b.account_id = a.id AND b.statement_id IS NOT NULL
+                AND b.as_of > coalesce((SELECT newest FROM before WHERE before.account_id = a.id), '-infinity'::date));
 
 -- name: LatestBalances :many
 -- Each account's newest balance in each unit, with its unit's newest price, whatever its source, and its

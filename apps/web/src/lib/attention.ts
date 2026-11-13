@@ -4,6 +4,7 @@
 import {
     accountName,
     accountStatus,
+    checkAgainDefault,
     daysAgo,
     lapsesSoon,
 } from "#lib/accounts.js";
@@ -23,8 +24,11 @@ export interface Need {
     text: string;
     /** Where to look into it. */
     href: ResolvedPathname;
-    /** What it is about, each with its own page. */
-    names: { text: string; href: ResolvedPathname; }[];
+    /**
+     * What it is about, each with its own page; an account the owner can confirm is current, with the day
+     * to look again that gives.
+     */
+    names: { text: string; href: ResolvedPathname; confirm?: { id: number; checkAgainOn: string; }; }[];
 }
 
 const accountHref = (a: Account) => resolve("/accounts/[id]", { id: String(a.id) });
@@ -61,7 +65,7 @@ export function needs({ byState, accounts, today }: { byState: readonly StateCou
             key: "stale",
             text: `${stale.length} 個帳戶太久沒更新`,
             href: resolve("/accounts"),
-            names: stale.map(({ a, status }) => ({ text: `${named(a)}（${daysAgo(status.days ?? 0)}）`, href: accountHref(a) })),
+            names: stale.map(({ a, status }) => ({ text: `${named(a)}（${daysAgo(status.days ?? 0)}）`, href: accountHref(a), confirm: { id: a.id, checkAgainOn: checkAgainDefault(a, today) } })),
         });
     }
 

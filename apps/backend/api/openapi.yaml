@@ -333,7 +333,7 @@ paths:
           $ref: "#/components/responses/Problem"
     patch:
       operationId: updateAccount
-      summary: The owner's details of an account, its own name and its full number
+      summary: The owner's details of an account, its own name and its full number, and that it is current
       description: |
         Both optional (ADR 0016): a field left out stays as it is, an empty string clears it. A full
         number must fit the masked number the bank prints, digit for digit; links are worked out
@@ -920,6 +920,13 @@ components:
         label: { type: string, nullable: true, description: The source's name for it, example: 臺幣活存 }
         name: { type: string, nullable: true, description: The owner's name for it }
         fullNumber: { type: string, description: "Its full number, where the owner gave one (ADR 0016)" }
+        checkAgainOn:
+          type: string
+          format: date
+          description: |
+            The day the owner said to look again whether it is current: an account with no lines gets no
+            statement, so its newest balance can be old though nothing is wrong. Until then an old balance
+            is no sign of a statement that never came. A statement with a newer balance clears it.
         balances:
           type: array
           description: The newest balance in each unit
@@ -1143,6 +1150,7 @@ components:
       properties:
         name: { type: string, description: "The owner's name for the account; empty clears it" }
         fullNumber: { type: string, description: "Where the source prints a masked number, its digits (spaces and dashes allowed); else any. Empty clears it" }
+        checkAgainOn: { type: string, description: "The day to look again whether it is current (`checkAgainOn`), a day after today, as YYYY-MM-DD. Empty clears it" }
 
     LineCounterpart:
       type: object

@@ -302,6 +302,55 @@ func TestTheOwnerNamesAnAccountAndGivesItsFullNumberWhichMustFit(t *testing.T) {
 	}
 }
 
+func TestTheOwnerSaysWhenToLookAgainWhetherAQuietAccountIsCurrent(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	storeDeposit(t, pool, 8, "1000")
+	id := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), savings).Id
+	path := fmt.Sprintf("/api/accounts/%d", id)
+	checkAgainOn := func() string {
+		t.Helper()
+		if on := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), savings).CheckAgainOn; on != nil {
+			return on.String()
+		}
+		return ""
+	}
+	today := taipei.Today(time.Now())
+	later := today.AddDate(3, 0, 0).Format(time.DateOnly)
+
+	if got := patch(t, e, path, `{"checkAgainOn": "`+later+`"}`); got.Code != http.StatusNoContent {
+		t.Fatalf("set: %d %s", got.Code, got.Body)
+	}
+	if got := checkAgainOn(); got != later {
+		t.Fatalf("checkAgainOn = %q, want %s", got, later)
+	}
+	// Today or before would be no reminder at all; nor is a day misspelt. Neither changes it.
+	for _, wrong := range []string{today.Format(time.DateOnly), "2020-01-01", "2026/12/31", "soon"} {
+		if got := patch(t, e, path, `{"checkAgainOn": "`+wrong+`"}`); got.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d", wrong, got.Code)
+		}
+	}
+	// Other details leave it; so does parsing the same statement again, which brings nothing newer.
+	if got := patch(t, e, path, `{"name": "備用"}`); got.Code != http.StatusNoContent || checkAgainOn() != later {
+		t.Fatalf("a name took it with it: %d, %q", got.Code, checkAgainOn())
+	}
+	storeDeposit(t, pool, 8, "1000")
+	if got := checkAgainOn(); got != later {
+		t.Fatalf("after a re-parse: checkAgainOn = %q", got)
+	}
+	// A statement with a newer balance clears it, however far off.
+	storeDeposit(t, pool, 9, "1000")
+	if got := checkAgainOn(); got != "" {
+		t.Fatalf("after a newer statement: checkAgainOn = %q", got)
+	}
+	// Empty clears it too.
+	if got := patch(t, e, path, `{"checkAgainOn": "`+later+`"}`); got.Code != http.StatusNoContent || checkAgainOn() != later {
+		t.Fatalf("set again: %d, %q", got.Code, checkAgainOn())
+	}
+	if got := patch(t, e, path, `{"checkAgainOn": ""}`); got.Code != http.StatusNoContent || checkAgainOn() != "" {
+		t.Fatalf("cleared: %d, %q", got.Code, checkAgainOn())
+	}
+}
+
 func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	// The bill closing 9/7 is paid on 9/22 from E.SUN; 5,000 goes to Taishin, whose number the line prints.

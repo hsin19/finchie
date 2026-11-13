@@ -28,14 +28,14 @@ export function cashflowMonths(now: Month, count = 12): Month[] {
 /**
  * The day up to which every source of what is spent and received has reported: the oldest newest
  * balance of the deposit accounts and cards, which a statement prints on its closing day. One that is
- * overdue (accountStatus) is left out, or a single quiet account would hold every month back, and so is
- * one the owner keeps.
+ * overdue (accountStatus) is left out, or a single quiet account would hold every month back; so is one
+ * the owner said not to look at again yet, and one they keep.
  */
 export function reportedThrough(accounts: readonly Account[], today: string): string | undefined {
     return accounts
         .filter(a => (a.kind === "deposit" || a.kind === "credit_card") && !isOwned(a))
         .map(a => accountStatus(a, today))
-        .filter(status => !status.stale && status.asOf !== undefined)
+        .filter(status => !status.stale && !status.excused && status.asOf !== undefined)
         .map(status => status.asOf!)
         .sort()[0];
 }

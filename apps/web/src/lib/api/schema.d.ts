@@ -222,7 +222,7 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * The owner's details of an account, its own name and its full number
+         * The owner's details of an account, its own name and its full number, and that it is current
          * @description Both optional (ADR 0016): a field left out stays as it is, an empty string clears it. A full
          *     number must fit the masked number the bank prints, digit for digit; links are worked out
          *     again, since it fits counterparties too. No two accounts go by one name the owner gave (`409`);
@@ -693,6 +693,13 @@ export interface components {
             name?: string | null;
             /** @description Its full number, where the owner gave one (ADR 0016) */
             fullNumber?: string;
+            /**
+             * Format: date
+             * @description The day the owner said to look again whether it is current: an account with no lines gets no
+             *     statement, so its newest balance can be old though nothing is wrong. Until then an old balance
+             *     is no sign of a statement that never came.
+             */
+            checkAgainOn?: string;
             /** @description The newest balance in each unit */
             balances: components["schemas"]["Balance"][];
             continuity: components["schemas"]["AccountContinuity"];
@@ -913,6 +920,8 @@ export interface components {
             name?: string;
             /** @description Where the source prints a masked number, its digits (spaces and dashes allowed); else any. Empty clears it */
             fullNumber?: string;
+            /** @description The day to look again whether it is current (`checkAgainOn`), a day after today, as YYYY-MM-DD. Empty clears it */
+            checkAgainOn?: string;
         };
         /** @description The other line of a transfer or card payment (ADR 0016) */
         LineCounterpart: {

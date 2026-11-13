@@ -4,6 +4,7 @@ import {
     it,
 } from "vitest";
 import {
+    addDays,
     formatBytes,
     isMonth,
     monthRange,
@@ -11,6 +12,7 @@ import {
     shiftMonth,
     today,
     weekday,
+    yearlyDate,
 } from "./dates";
 
 describe("months", () => {
@@ -33,6 +35,16 @@ describe("months", () => {
     it("lists newest first", () => {
         expect(monthsBetween("2026-08", "2026-10")).toEqual(["2026-10", "2026-09", "2026-08"]);
         expect(monthsBetween("2026-11", "2026-10")).toEqual([]);
+    });
+});
+
+describe("addDays and yearlyDate", () => {
+    it("counts days across a month and a year", () => {
+        expect([addDays("2026-11-13", 50), addDays("2026-12-31", 1), addDays("2026-03-01", -1)]).toEqual(["2027-01-02", "2027-01-01", "2026-02-28"]);
+    });
+
+    it("leaves the year out only within this one", () => {
+        expect([yearlyDate("2026-12-31", "2026-11-13"), yearlyDate("2030-01-02", "2026-11-13")]).toEqual(["12/31", "2030/01/02"]);
     });
 });
 

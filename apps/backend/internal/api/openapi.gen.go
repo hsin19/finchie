@@ -320,6 +320,11 @@ type Account struct {
 	// Balances The newest balance in each unit
 	Balances []Balance `json:"balances"`
 
+	// CheckAgainOn The day the owner said to look again whether it is current: an account with no lines gets no
+	// statement, so its newest balance can be old though nothing is wrong. Until then an old balance
+	// is no sign of a statement that never came. A statement with a newer balance clears it.
+	CheckAgainOn *openapi_types.Date `json:"checkAgainOn,omitempty"`
+
 	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
 
@@ -384,6 +389,11 @@ type AccountCreated struct {
 type AccountDetail struct {
 	// Balances The newest balance in each unit
 	Balances []Balance `json:"balances"`
+
+	// CheckAgainOn The day the owner said to look again whether it is current: an account with no lines gets no
+	// statement, so its newest balance can be old though nothing is wrong. Until then an old balance
+	// is no sign of a statement that never came. A statement with a newer balance clears it.
+	CheckAgainOn *openapi_types.Date `json:"checkAgainOn,omitempty"`
 
 	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
@@ -488,6 +498,9 @@ type AccountTotal struct {
 
 // AccountUpdate defines model for AccountUpdate.
 type AccountUpdate struct {
+	// CheckAgainOn The day to look again whether it is current (`checkAgainOn`), a day after today, as YYYY-MM-DD. Empty clears it
+	CheckAgainOn *string `json:"checkAgainOn,omitempty"`
+
 	// FullNumber Where the source prints a masked number, its digits (spaces and dashes allowed); else any. Empty clears it
 	FullNumber *string `json:"fullNumber,omitempty"`
 
@@ -1295,7 +1308,7 @@ type ServerInterface interface {
 	// GetAccount One account with every balance its sources reported
 	// (GET /api/accounts/{id})
 	GetAccount(ctx *echo.Context, id Id) error
-	// UpdateAccount The owner's details of an account, its own name and its full number
+	// UpdateAccount The owner's details of an account, its own name and its full number, and that it is current
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx *echo.Context, id Id) error
 	// FillGap Make up for one of an account's gaps with what it lacks
@@ -3471,7 +3484,7 @@ type StrictServerInterface interface {
 	// GetAccount One account with every balance its sources reported
 	// (GET /api/accounts/{id})
 	GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error)
-	// UpdateAccount The owner's details of an account, its own name and its full number
+	// UpdateAccount The owner's details of an account, its own name and its full number, and that it is current
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error)
 	// FillGap Make up for one of an account's gaps with what it lacks
