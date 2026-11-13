@@ -7,6 +7,7 @@ import {
     divide,
     formatAmount,
     formatPrice,
+    multiply,
     negate,
     roundWhole,
     sign,
@@ -84,6 +85,14 @@ describe("roundWhole", () => {
         ["15124", "15124"],
     ])("%s → %s", (input, expected) => {
         expect(roundWhole(input)).toBe(expected);
+    });
+});
+
+describe("multiply", () => {
+    it("multiplies exactly, keeping every decimal", () => {
+        expect(multiply("1234.5", "0.03")).toBe("37.035");
+        expect(multiply("-200", "0.5")).toBe("-100.0");
+        expect(multiply("0.1", "0.2")).toBe("0.02");
     });
 });
 

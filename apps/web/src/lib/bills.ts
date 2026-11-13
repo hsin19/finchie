@@ -2,7 +2,10 @@
 // statements say is due: for a card paid in full every month, that month's net charges.
 
 import type {
+    Account,
+    KindTotal,
     Statement,
+    Transaction,
     TransactionSearch,
 } from "#lib/api/client.js";
 import {
@@ -13,6 +16,12 @@ import {
 import { sortInstitutions } from "#lib/institutions.js";
 import {
     approx,
+    formatAmount,
+    multiply,
+    negate,
+    roundTo,
+    roundWhole,
+    sign,
     sum,
 } from "#lib/money.js";
 
@@ -92,4 +101,62 @@ export function monthlyBills(statements: readonly Statement[], months: readonly 
 export function dueBills(statements: readonly Statement[], today: string): { amount: string; next?: string; count: number; } {
     const upcoming = statements.filter(s => s.dueDate >= today && !s.paidOn);
     return { amount: totalDue(upcoming), next: upcoming.map(s => s.dueDate).sort()[0], count: upcoming.length };
+}
+
+/** The points of one program a month's bills gave, and their worth in NT$ when the program has a price. */
+export interface RewardPoints {
+    unit: string;
+    amount: string;
+    worth?: string;
+}
+
+export interface Reward {
+    /** The cash rebates credited to the bills, as a positive amount, and how many lines. */
+    cash: string;
+    cashCount: number;
+    /** The points they gave, by program in the order the lines come. */
+    points: RewardPoints[];
+    /** Cash and the points that have a price, in NT$. */
+    total: string;
+}
+
+/**
+ * What a month's bills gave back: their cash rebates (`rebate`, printed negative, as credited), and the
+ * points they report earned, by program (ADR 0019): what each program earned, campaigns and adjustments
+ * included, points used left out. Points count at their program's newest price in NT$ (ADR 0020), from
+ * whichever account holds the program; one without a price is listed, not counted.
+ */
+export function reward(rebate: KindTotal | undefined, pointLines: readonly Transaction[], accounts: readonly Account[]): Reward {
+    const cash = rebate ? negate(rebate.amount) : "0";
+    const priceOf = new Map<string, string>();
+    for (const balance of accounts.flatMap(a => a.balances)) {
+        if (balance.price?.twd !== undefined) priceOf.set(balance.unit, balance.price.twd);
+    }
+    const earned = new Map<string, string[]>();
+    for (const line of pointLines) {
+        if (line.kind !== "earn" && line.kind !== "adjust") continue;
+        earned.set(line.unit, [...earned.get(line.unit) ?? [], line.amount]);
+    }
+    const points: RewardPoints[] = [];
+    for (const [unit, amounts] of earned) {
+        const amount = sum(amounts);
+        if (sign(amount) === 0) continue;
+        const twd = priceOf.get(unit);
+        points.push(twd === undefined ? { unit, amount } : { unit, amount, worth: roundTo(multiply(amount, twd), 2) });
+    }
+    return { cash, cashCount: rebate?.count ?? 0, points, total: sum([cash, ...points.flatMap(p => p.worth ?? [])]) };
+}
+
+/** The worth of the points with a price, in NT$. */
+export function pointsWorth(r: Reward): string {
+    return sum(r.points.flatMap(p => p.worth ?? []));
+}
+
+/** "2 筆現金回饋 · 點數 ≈ NT$575 · 800 e point 沒有價格", or why there is nothing. */
+export function rewardText(r: Reward): string {
+    const parts: string[] = [];
+    if (r.cashCount > 0) parts.push(`${r.cashCount} 筆現金回饋`);
+    if (r.points.some(p => p.worth !== undefined)) parts.push(`點數 ≈ NT$${formatAmount(roundWhole(pointsWorth(r)))}`);
+    for (const p of r.points.filter(p => p.worth === undefined)) parts.push(`${formatAmount(p.amount, { signed: true })} ${p.unit} 沒有價格`);
+    return parts.length > 0 ? parts.join(" · ") : "這期沒有回饋";
 }

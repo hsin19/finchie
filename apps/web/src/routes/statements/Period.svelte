@@ -4,6 +4,8 @@ import {
     fxFeeShare,
     pendingInstitutions,
     percentChange,
+    reward,
+    rewardText,
     totalDue,
 } from "#lib/bills.js";
 import Bar from "#lib/components/Bar.svelte";
@@ -29,7 +31,7 @@ import {
 import {
     approx,
     formatAmount,
-    negate,
+    roundWhole,
     sign,
     subtract,
 } from "#lib/money.js";
@@ -69,7 +71,9 @@ const spend = $derived(data.current.sum);
 const spendChange = $derived(percentChange(spend, data.previous.sum));
 const fxFee = $derived(kindTotal("foreign_transaction_fee")?.amount ?? "0");
 const fxShare = $derived(fxFeeShare(data.current, data.overseas));
-const rebate = $derived(kindTotal("rebate"));
+// Cash rebates and the points the bills gave, at each program's price.
+const rewarded = $derived(reward(kindTotal("rebate"), data.pointLines, data.accounts));
+const rewardWorth = $derived(roundWhole(rewarded.total));
 
 const cards = $derived([...data.current.byCard].sort((a, b) => sign(subtract(b.amount, a.amount))));
 const topCard = $derived(Math.max(...cards.map(c => approx(c.amount)), 1));
@@ -116,9 +120,11 @@ function changeTone(change: number | undefined): string {
         <div class="text-[11px] text-dim">{fxShare === undefined ? "沒有海外消費" : `${fxShare.percent.toFixed(1)}% of overseas ${formatAmount(fxShare.of)}`}</div>
     </div>
     <div class="panel flex flex-col gap-1 p-3 md:p-3.5">
-        <div class="text-[10px] tracking-[0.12em] text-mute">REWARD · 回饋</div>
-        <div class="text-[20px] font-bold md:text-[24px] {rebate ? 'text-pos' : 'text-mute'}">{formatAmount(rebate ? negate(rebate.amount) : "0")}</div>
-        <div class="text-[11px] text-dim">{rebate ? `${rebate.count} 筆入帳回饋` : "這期沒有回饋入帳"}</div>
+        <div class="text-[10px] tracking-[0.12em] text-mute" title="帳單入帳的現金回饋，加上這期帳單印的獲得點數（含活動與調整，不含使用）；點數照它目前的價格換成 NT$">REWARD · 回饋</div>
+        <div class="text-[20px] font-bold md:text-[24px] {sign(rewardWorth) > 0 ? 'text-pos' : 'text-mute'}">
+            {rewarded.points.some(p => p.worth !== undefined) ? "≈ " : ""}{formatAmount(rewardWorth)}
+        </div>
+        <div class="text-[11px] text-dim">{rewardText(rewarded)}</div>
     </div>
 </div>
 

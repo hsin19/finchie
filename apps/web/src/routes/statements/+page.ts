@@ -31,10 +31,13 @@ export const load = (async ({ fetch, url, parent, depends }) => {
     // fees, rebates, and payments.
     const client = api(fetch);
     const purchases = (query: TransactionQuery) => client.GET("/api/transactions", { params: { query: { accountKind: "credit_card", kind: ["purchase"], limit: 0, ...query } } });
-    const [current, previous, overseas] = await Promise.all([
+    // The points the month's bills report earned (ADR 0019), and the accounts, for each program's price.
+    const [current, previous, overseas, points, accounts] = await Promise.all([
         purchases(closingRange(month)),
         purchases(closingRange(shiftMonth(month, -1))),
         purchases({ ...closingRange(month), overseas: true }),
+        client.GET("/api/transactions", { params: { query: { accountKind: "points", kind: ["earn", "adjust"], limit: 500, ...closingRange(month) } } }),
+        client.GET("/api/accounts"),
     ]);
     return {
         view: "period" as const,
@@ -43,5 +46,7 @@ export const load = (async ({ fetch, url, parent, depends }) => {
         current: need(current),
         previous: need(previous),
         overseas: need(overseas),
+        pointLines: need(points).items,
+        accounts: need(accounts),
     };
 }) satisfies PageLoad;

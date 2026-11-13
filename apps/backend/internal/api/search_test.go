@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -319,4 +320,29 @@ func countByKind(totals []KindTotal) map[TransactionKind]int {
 		counts[k.Kind] = k.Count
 	}
 	return counts
+}
+
+// The bill page's reward reads the points a month's bills report earned this way.
+func TestAMonthsBillsPointsAreFoundByTheirClosing(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	store(t, pool, "october.eml", cathayBill(10, withLines(program("小樹點(信用卡)", "1150"),
+		pointsMove{"本期新增/扣除", parserv2.LineKind_LINE_KIND_EARN, "1000"},
+		pointsMove{"本期贈送", parserv2.LineKind_LINE_KIND_EARN, "200"},
+		pointsMove{"本期兌/轉換", parserv2.LineKind_LINE_KIND_REDEEM, "-50"})))
+	store(t, pool, "september.eml", cathayBill(9, withLines(program("小樹點(信用卡)", "0"),
+		pointsMove{"本期新增/扣除", parserv2.LineKind_LINE_KIND_EARN, "700"})))
+
+	found := decode[TransactionSearch](t, get(t, e,
+		"/api/transactions?accountKind=points&kind=earn&kind=adjust&closingFrom=2026-10-01&closingTo=2026-10-31&limit=500"))
+	var amounts []string
+	for _, line := range found.Items {
+		if line.Unit != "小樹點(信用卡)" || line.AccountKind != AccountKindPoints {
+			t.Fatalf("line = %+v", line)
+		}
+		amounts = append(amounts, line.Amount)
+	}
+	slices.Sort(amounts)
+	if !slices.Equal(amounts, []string{"1000", "200"}) {
+		t.Fatalf("October's points earned = %v, want its two earn lines and not the points used", amounts)
+	}
 }

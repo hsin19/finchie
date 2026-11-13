@@ -50,6 +50,13 @@ export function sign(value: string): -1 | 0 | 1 {
     return units < 0n ? -1 : units > 0n ? 1 : 0;
 }
 
+/** `a` times `b`, exactly, every decimal kept: an amount of points at a price. ("1234.5", "0.03") → "37.035". */
+export function multiply(a: string, b: string): string {
+    const x = parse(a);
+    const y = parse(b);
+    return render({ units: x.units * y.units, scale: x.scale + y.scale });
+}
+
 /**
  * `value` divided by a whole number `n`, to `places` decimals, halves away from zero: an average.
  * ("2000", 3) → "667", ("-10", 4, 1) → "-2.5".
