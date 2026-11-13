@@ -22,8 +22,11 @@ import (
 // and the reference a bank prints on both sides of an exchange.
 
 const (
-	// A transfer's two lines are at most this many days apart: banks post them on different days.
+	// A card payment's two lines are at most this many days apart: banks post them on different days.
 	transferWindowDays = 3
+	// An own transfer's, which a fitting counterparty proves, may be further apart: one bank posts it on
+	// the day, another on its next working day, past a holiday of up to nine days (the Lunar New Year).
+	ownTransferWindowDays = 10
 	// A bill counts as paid by a payment this many days past its due date at the latest.
 	paidGraceDays = 5
 	// A counterparty fits an account when at least this many digits both print agree.
@@ -124,7 +127,7 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 			if in.AccountID == out.AccountID || in.Unit != out.Unit || new(big.Rat).Neg(amount(in.Amount)).Cmp(amount(out.Amount)) != 0 {
 				continue
 			}
-			if d := daysApart(out.TransactionDate, in.TransactionDate); d <= transferWindowDays && (fits(out.Counterparty, out.Institution, in) || fits(in.Counterparty, in.Institution, out)) {
+			if d := daysApart(out.TransactionDate, in.TransactionDate); d <= ownTransferWindowDays && (fits(out.Counterparty, out.Institution, in) || fits(in.Counterparty, in.Institution, out)) {
 				candidates = append(candidates, candidate{out.ID, in.ID, d, false})
 			}
 		}

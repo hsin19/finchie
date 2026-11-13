@@ -110,6 +110,14 @@ func TestAnOwnTransferLinksOnlyWhenACounterpartyFitsTheOtherAccount(t *testing.T
 			depositLine(t, 1, esunSavings, "2026-07-21", "-30000", ""),
 			depositLine(t, 2, taishinRichart, "2026-07-22", "30000", "808 0000345678***012"),
 		}, true},
+		"a holiday apart: one bank posts it on the next working day": {[]transferLine{
+			depositLine(t, 1, taishinRichart, "2026-02-23", "-30000", ""),
+			depositLine(t, 2, esunSavings, "2026-02-19", "30000", "812 0087654321***234"),
+		}, true},
+		"more than ten days apart": {[]transferLine{
+			depositLine(t, 1, taishinRichart, "2026-03-02", "-30000", ""),
+			depositLine(t, 2, esunSavings, "2026-02-19", "30000", "812 0087654321***234"),
+		}, false},
 		"neither names the other: equal amounts prove nothing": {[]transferLine{
 			depositLine(t, 1, esunSavings, "2026-07-21", "-30000", ""),
 			depositLine(t, 2, taishinRichart, "2026-07-21", "30000", ""),

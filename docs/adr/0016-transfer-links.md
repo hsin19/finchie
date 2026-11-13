@@ -7,7 +7,7 @@ Money that moves between two of the owner's lines is linked: a deposit account p
 | Link | When |
 |---|---|
 | Card payment | A deposit account's outflow and a bill's payment line (`payment`) of the same amount, at most 3 days apart. Either bank's: a card is paid from whichever account |
-| Own transfer | An outflow of one deposit account and an inflow of another, of the same amount, at most 3 days apart, and at least one of them prints a counterparty that fits the other account. A pair that prints none is not linked: two equal amounts prove nothing by themselves |
+| Own transfer | An outflow of one deposit account and an inflow of another, of the same amount, at most 3 days apart (now 10: one bank posts a transfer made over the Lunar New Year on its next working day, and the fitting counterparty is the proof), and at least one of them prints a counterparty that fits the other account. A pair that prints none is not linked: two equal amounts prove nothing by themselves |
 | Exchange | An outflow in one unit and an inflow in another, at the same bank, on the same day, with the same memo: the bank prints the exchange's reference on both sides (Next Bank: `新臺幣換美元;@31.5000;FT…`). The amounts differ by the rate, so they prove nothing; a bank that prints no common reference leaves its exchanges unlinked |
 | Bill paid | A card bill is paid on the day an outflow of its total due leaves a deposit account, or a later bill of its bank shows a payment of it, between its closing and 5 days past its due date. A bill that owes nothing is paid on its closing date |
 
