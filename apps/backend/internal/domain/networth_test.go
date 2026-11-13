@@ -2,6 +2,7 @@ package domain
 
 import (
 	"testing"
+	"time"
 )
 
 // Synthetic figures (ADR 0006).
@@ -35,5 +36,27 @@ func TestAnAccountThatHoldsNothingDoesNotHoldBackTheDayNetWorthIsExactAsOf(t *te
 	})
 	if !complete.Equal(on("2026-11-30")) {
 		t.Fatalf("complete as of %v", complete)
+	}
+}
+
+func TestAnAccountTheOwnerConfirmedIsKnownThroughTodayUntilTheirDayToLookAgain(t *testing.T) {
+	today := on("2026-11-13")
+	none := time.Time{}
+	cases := []struct {
+		newest, checkAgainOn time.Time
+		want                 string
+	}{
+		// A brokerage that sent nothing since August, confirmed: its balance stands through today.
+		{on("2026-08-04"), on("2027-01-02"), "2026-11-13"},
+		// The day to look again has come: it is only as known as its newest report.
+		{on("2026-08-04"), on("2026-11-13"), "2026-08-04"},
+		{on("2026-08-04"), none, "2026-08-04"},
+		// Reported since: nothing to vouch for.
+		{on("2026-11-13"), on("2027-01-02"), "2026-11-13"},
+	}
+	for _, c := range cases {
+		if got := ReportedThrough(c.newest, c.checkAgainOn, today).Format(time.DateOnly); got != c.want {
+			t.Errorf("newest %v, check again %v: %s, want %s", c.newest, c.checkAgainOn, got, c.want)
+		}
 	}
 }

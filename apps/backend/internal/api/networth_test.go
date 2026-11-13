@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,6 +72,18 @@ func TestNetWorthOnADayIsEachAccountThenAtThatDaysPrices(t *testing.T) {
 	want := []string{"2026-07-31 1000.00 true", "2026-08-31 1800.00 true", "2026-09-30 1520.00 false"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("history = %v, want %v", got, want)
+	}
+	// The owner confirms the dollars have not moved: they stand through today, until the day to look again.
+	dollars := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), "7777777***777")
+	if got := patch(t, e, fmt.Sprintf("/api/accounts/%d", dollars.Id), `{"checkAgainOn": "2099-01-01"}`); got.Code != http.StatusNoContent {
+		t.Fatalf("confirm: %d %s", got.Code, got.Body)
+	}
+	history = decode[[]NetWorthPoint](t, get(t, e, "/api/net-worth/history?from=2026-07-15&to=2026-09-30"))
+	if !history[len(history)-1].Complete {
+		t.Fatalf("after confirming: %+v, want 9/30 exact", history[len(history)-1])
+	}
+	if n := decode[NetWorth](t, get(t, e, "/api/net-worth")); slices.Contains(n.Behind, dollars.Id) {
+		t.Fatalf("behind = %v: a confirmed account is current", n.Behind)
 	}
 	if daily := decode[[]NetWorthPoint](t, get(t, e, "/api/net-worth/history?from=2026-09-01&to=2026-09-03&step=day")); len(daily) != 3 {
 		t.Fatalf("daily = %+v", daily)

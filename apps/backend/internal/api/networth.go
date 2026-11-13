@@ -147,10 +147,13 @@ func netWorths(ctx context.Context, queries *dbq.Queries, days []time.Time) ([]d
 		valuedOn[key{v.Day.Time, v.AccountID}] = &domain.Valuation{AsOf: v.AsOf.Time, Worth: numeric.ToRat(v.Worth)}
 	}
 
-	// How each account stands now does not change from one day to the next.
+	// How each account stands now does not change from one day to the next, nor how long it is known for.
+	today := taipei.Today(time.Now())
 	now := make(map[int64]domain.Standing, len(accounts))
+	through := make(map[int64]time.Time, len(accounts))
 	for _, a := range accounts {
 		now[a.ID] = domain.Assess(a.Kind, latestOf[a.ID], domain.Gaps{}, nil)
+		through[a.ID] = domain.ReportedThrough(now[a.ID].Newest, a.CheckAgainOn.Time, today)
 	}
 	nets := make([]domain.NetWorth, 0, len(days))
 	for _, day := range days {
@@ -163,7 +166,7 @@ func netWorths(ctx context.Context, queries *dbq.Queries, days []time.Time) ([]d
 			}
 			standing := domain.Assess(a.Kind, balances, domain.Gaps{}, valuedOn[key{day, a.ID}])
 			worths = append(worths, domain.Worth{
-				AccountID: a.ID, Kind: a.Kind, Worth: standing.Worth, Newest: now[a.ID].Newest,
+				AccountID: a.ID, Kind: a.Kind, Worth: standing.Worth, Newest: through[a.ID],
 				ByHand: a.Institution == domain.OwnerInstitution, Empty: len(latestOf[a.ID]) > 0 && len(now[a.ID].Held) == 0,
 			})
 		}

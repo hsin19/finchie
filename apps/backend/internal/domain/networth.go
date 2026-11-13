@@ -94,3 +94,13 @@ func CompleteAsOf(accounts []Worth) time.Time {
 }
 
 func counts(a Worth) bool { return !a.ByHand && !a.Empty && !a.Newest.IsZero() }
+
+// ReportedThrough is the day an account's figure is known through: its newest report's, or today while
+// the owner's day to look again at it is still ahead (accounts.check_again_on). An account with no lines
+// gets no statement, and the owner who confirmed it has not moved vouches for its old balance until then.
+func ReportedThrough(newest, checkAgainOn, today time.Time) time.Time {
+	if !checkAgainOn.IsZero() && checkAgainOn.After(today) && newest.Before(today) {
+		return today
+	}
+	return newest
+}
