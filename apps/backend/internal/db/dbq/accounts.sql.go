@@ -796,6 +796,44 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (i
 	return id, err
 }
 
+const upsertExchangeLine = `-- name: UpsertExchangeLine :execrows
+INSERT INTO transactions (statement_id, line_no, transaction_date, description, kind, amount, account_id, unit_id, memo, external_id)
+VALUES (NULL, 0, $1, $2, 'other', $3, $4, $5, $6, $7::text)
+ON CONFLICT (account_id, external_id) DO UPDATE
+SET transaction_date = excluded.transaction_date, description = excluded.description, amount = excluded.amount,
+    unit_id = excluded.unit_id, memo = excluded.memo
+WHERE (transactions.transaction_date, transactions.description, transactions.amount, transactions.unit_id, transactions.memo)
+      IS DISTINCT FROM (excluded.transaction_date, excluded.description, excluded.amount, excluded.unit_id, excluded.memo)
+`
+
+type UpsertExchangeLineParams struct {
+	OnDate      pgtype.Date
+	Description string
+	Amount      pgtype.Numeric
+	AccountID   int64
+	UnitID      int64
+	Memo        *string
+	ExternalID  string
+}
+
+// A deposit or withdrawal an exchange reports (ADR 0018), found again by the exchange's id for it. It
+// affects a row only when it is new or the exchange reports it otherwise now.
+func (q *Queries) UpsertExchangeLine(ctx context.Context, arg UpsertExchangeLineParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertExchangeLine,
+		arg.OnDate,
+		arg.Description,
+		arg.Amount,
+		arg.AccountID,
+		arg.UnitID,
+		arg.Memo,
+		arg.ExternalID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const valuationsOn = `-- name: ValuationsOn :many
 WITH days AS (
     SELECT d::date AS day FROM unnest($1::date[]) d

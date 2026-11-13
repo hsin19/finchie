@@ -32,6 +32,23 @@ type Snapshot struct {
 	// What one of each coin held is worth at the exchange's own markets, in NT$ or USDT as it prices
 	// them (ADR 0020).
 	Prices map[string]Value
+	// Every deposit and withdrawal of money a bank holds that the exchange has completed.
+	Movements []Movement
+}
+
+// Movement is money the owner sent to the exchange from a bank or took out of it to one: a fiat deposit
+// or withdrawal, as the exchange records it. These alone meet a bank's lines, which they link to (ADR
+// 0016); coins sent between exchanges, trades, and the like are not read (ADR 0018).
+type Movement struct {
+	// The exchange's own id for it, which every later fetch reports again.
+	ID string
+	At time.Time
+	// A currency's code, as the exchange prints it.
+	Unit string
+	// What crossed between the bank and the exchange: positive in, negative out.
+	Amount *big.Rat
+	// How it came or went, as the exchange tells: a virtual account, a method, a fee.
+	Memo string
 }
 
 type Value struct {
@@ -152,6 +169,15 @@ func quantity(s string) (*big.Rat, error) {
 		return nil, fmt.Errorf("amount %q is not a number", s)
 	}
 	return r, nil
+}
+
+// feeMemo is a movement's fee as the exchange prints it, "手續費 15 TWD"; empty when there is none.
+func feeMemo(fee, unit string) string {
+	amount, err := quantity(fee)
+	if err != nil || amount.Sign() == 0 {
+		return ""
+	}
+	return "手續費 " + fee + " " + strings.ToUpper(unit)
 }
 
 // sum adds up decimal strings exactly.

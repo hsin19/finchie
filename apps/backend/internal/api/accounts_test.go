@@ -575,3 +575,49 @@ func TestAnAccountWhoseSourcesSayItHoldsNothingIsWorthNothing(t *testing.T) {
 		t.Fatalf("points account = %+v", points)
 	}
 }
+
+func TestMoneySentToAnExchangeIsMovedNotSpentAndEachSideShowsWhereItWent(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	ctx := t.Context()
+	storeDeposit(t, pool, 1, "0", depositLine{day: 21, amount: "-100000", after: "0", description: "行銀非約跨優", memo: "遠*銀行", opposite: "805 1234567890***123"})
+	// 13:07 in Taipei on the 21st. Fetched twice: one line.
+	deposited := exchanges.Movement{ID: "deposit/abc", At: time.Date(2026, 1, 21, 5, 7, 0, 0, time.UTC), Unit: "TWD", Amount: big.NewRat(100000, 1), Memo: "12345678901123"}
+	for range 2 {
+		snapshot := exchanges.Snapshot{Holdings: map[string]*big.Rat{"TWD": big.NewRat(100000, 1)}, Movements: []exchanges.Movement{deposited}}
+		if err := exchanges.Store(ctx, pool, "max", time.Date(2026, 1, 22, 0, 0, 0, 0, time.UTC), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	search := decode[TransactionSearch](t, get(t, e, "/api/transactions?from=2026-01-01&to=2026-01-31&limit=0"))
+	if len(search.Flows) != 1 || mustRat(t, search.Flows[0].Spent).Sign() != 0 || mustRat(t, search.Flows[0].Moved).Cmp(big.NewRat(100000, 1)) != 0 {
+		t.Fatalf("flows = %+v, want the 100,000 moved, not spent", search.Flows)
+	}
+
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	bank := accountNamed(t, accounts, savings)
+	var exchange Account
+	for _, a := range accounts {
+		if a.Kind == AccountKindExchange {
+			exchange = a
+		}
+	}
+	sent := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", bank.Id)))[0]
+	if c := sent.Counterpart; c == nil || c.AccountKind != AccountKindExchange || c.Institution != "max" || c.StatementId != nil {
+		t.Fatalf("the bank's line goes to %+v, want the exchange's deposit", sent.Counterpart)
+	}
+	received := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", exchange.Id)))
+	if len(received) != 1 || received[0].Description != "入金" || received[0].Date.String() != "2026-01-21" || received[0].StatementId != nil ||
+		received[0].Counterpart == nil || *received[0].Counterpart.AccountId != bank.Id {
+		t.Fatalf("exchange lines = %+v", received)
+	}
+}
+
+func mustRat(t *testing.T, s Decimal) *big.Rat {
+	t.Helper()
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		t.Fatalf("%q is not a number", s)
+	}
+	return r
+}

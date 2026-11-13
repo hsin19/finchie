@@ -213,15 +213,16 @@ FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@parent_ids::bigint[]) AS pare
 WHERE t.id = l.id;
 
 -- name: TransferLines :many
--- The lines a transfer link can join (ADR 0016): every deposit account's lines a statement reports, and card
--- payment lines; never the owner's fill of a gap, which is what moved over months, net.
-SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, s.id AS statement_id,
+-- The lines a transfer link can join (ADR 0016): every deposit account's lines a statement reports, card
+-- payment lines, and the deposits and withdrawals an exchange reports (ADR 0018), whose statement is 0;
+-- never the owner's fill of a gap, which is what moved over months, net.
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number,
+       coalesce(t.statement_id, 0)::bigint AS statement_id,
        t.transaction_date, t.kind, t.amount, u.symbol AS unit, t.memo, t.counterparty
 FROM transactions t
-JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
-WHERE a.kind = 'deposit' OR t.kind = 'payment'
+WHERE (t.statement_id IS NOT NULL AND (a.kind = 'deposit' OR t.kind = 'payment')) OR t.external_id IS NOT NULL
 ORDER BY t.id;
 
 -- name: CardBills :many

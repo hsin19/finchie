@@ -918,8 +918,11 @@ export interface components {
         LineCounterpart: {
             /** Format: int64 */
             id: number;
-            /** Format: int64 */
-            statementId: number;
+            /**
+             * Format: int64
+             * @description The statement that reports it; absent for an exchange's deposit or withdrawal (ADR 0018)
+             */
+            statementId?: number;
             /** Format: date */
             date: string;
             accountKind: components["schemas"]["AccountKind"];
@@ -935,9 +938,9 @@ export interface components {
             accountNumber?: string;
         };
         /**
-         * @description A line a statement reports, or the owner's fill of a gap (`fill`): one line for the whole period no
-         *     statement covers, as a passbook prints one for what went unprinted, dated on its last day, with the
-         *     fill's memo and the balance it leaves.
+         * @description A line a statement reports, a deposit or withdrawal an exchange reports (ADR 0018), or the owner's
+         *     fill of a gap (`fill`): one line for the whole period no statement covers, as a passbook prints one
+         *     for what went unprinted, dated on its last day, with the fill's memo and the balance it leaves.
          */
         AccountLine: {
             /**
@@ -947,7 +950,7 @@ export interface components {
             id: number;
             /**
              * Format: int64
-             * @description The statement that reports it; absent for a fill
+             * @description The statement that reports it; absent for a fill and an exchange's line
              */
             statementId?: number;
             fill?: components["schemas"]["LineFill"];

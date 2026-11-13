@@ -60,9 +60,9 @@ const layout = $derived(accountPage(account));
 
 <UnitPrices balances={account.balances} {base} />
 
-<!-- An exchange reports no lines at all (ADR 0018), nor does the owner of an account they keep (ADR 0019). -->
+<!-- The owner of an account they keep gives it no lines (ADR 0019). -->
 {#if layout.lines}
-    <AccountLines accountId={account.id} lines={data.lines} note={layout.lines.note} trade={layout.lines.trade} />
+    <AccountLines accountId={account.id} lines={data.lines} note={layout.lines.note} trade={layout.lines.trade} empty={layout.lines.empty} />
 {/if}
 
 <BalanceHistory {account} by={layout.history} />

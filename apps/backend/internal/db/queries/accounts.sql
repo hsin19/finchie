@@ -123,6 +123,17 @@ INSERT INTO transactions (statement_id, line_no, transaction_date, description, 
 VALUES (NULL, 0, @on_date, '', 'fill', @amount, @account_id, @unit_id, sqlc.narg(memo), @balance)
 RETURNING id, memo;
 
+-- name: UpsertExchangeLine :execrows
+-- A deposit or withdrawal an exchange reports (ADR 0018), found again by the exchange's id for it. It
+-- affects a row only when it is new or the exchange reports it otherwise now.
+INSERT INTO transactions (statement_id, line_no, transaction_date, description, kind, amount, account_id, unit_id, memo, external_id)
+VALUES (NULL, 0, @on_date, @description, 'other', @amount, @account_id, @unit_id, sqlc.narg(memo), @external_id::text)
+ON CONFLICT (account_id, external_id) DO UPDATE
+SET transaction_date = excluded.transaction_date, description = excluded.description, amount = excluded.amount,
+    unit_id = excluded.unit_id, memo = excluded.memo
+WHERE (transactions.transaction_date, transactions.description, transactions.amount, transactions.unit_id, transactions.memo)
+      IS DISTINCT FROM (excluded.transaction_date, excluded.description, excluded.amount, excluded.unit_id, excluded.memo);
+
 -- name: UpdateFillLine :one
 -- A gap filled again: what it lacks now, and what the owner wrote unless they write something else.
 UPDATE transactions

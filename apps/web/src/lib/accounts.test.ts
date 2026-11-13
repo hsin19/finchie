@@ -223,7 +223,8 @@ describe("accountPage", () => {
     it("shows each kind its own parts", () => {
         expect(accountPage({ kind: "deposit", institution: "esun" })).toMatchObject({ headline: "balances", lines: { trade: false }, history: "statements", form: false });
         expect(accountPage({ kind: "securities", institution: "skis" })).toMatchObject({ headline: "worth", positions: true, lines: { trade: true } });
-        expect(accountPage({ kind: "exchange", institution: "max" })).toMatchObject({ headline: "worth", holdings: true, lines: undefined, history: "days" });
+        // Its lines are the money it took from a bank or gave one (ADR 0018).
+        expect(accountPage({ kind: "exchange", institution: "max" })).toMatchObject({ headline: "worth", holdings: true, lines: { trade: false }, history: "days" });
         expect(accountPage({ kind: "points", institution: "esun" })).toMatchObject({ expiring: true, gaps: expect.stringContaining("過期") });
     });
 

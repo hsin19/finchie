@@ -438,9 +438,9 @@ type AccountDetail struct {
 // AccountKind defines model for AccountKind.
 type AccountKind string
 
-// AccountLine A line a statement reports, or the owner's fill of a gap (`fill`): one line for the whole period no
-// statement covers, as a passbook prints one for what went unprinted, dated on its last day, with the
-// fill's memo and the balance it leaves.
+// AccountLine A line a statement reports, a deposit or withdrawal an exchange reports (ADR 0018), or the owner's
+// fill of a gap (`fill`): one line for the whole period no statement covers, as a passbook prints one
+// for what went unprinted, dated on its last day, with the fill's memo and the balance it leaves.
 type AccountLine struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
@@ -466,7 +466,7 @@ type AccountLine struct {
 	Kind string  `json:"kind"`
 	Memo *string `json:"memo,omitempty"`
 
-	// StatementId The statement that reports it; absent for a fill
+	// StatementId The statement that reports it; absent for a fill and an exchange's line
 	StatementId *int64 `json:"statementId,omitempty"`
 
 	// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
@@ -777,7 +777,9 @@ type LineCounterpart struct {
 	Date          openapi_types.Date `json:"date"`
 	Id            int64              `json:"id"`
 	Institution   string             `json:"institution"`
-	StatementId   int64              `json:"statementId"`
+
+	// StatementId The statement that reports it; absent for an exchange's deposit or withdrawal (ADR 0018)
+	StatementId *int64 `json:"statementId,omitempty"`
 }
 
 // LineFill The owner's fill of a gap, as a line

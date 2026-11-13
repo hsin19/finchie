@@ -64,6 +64,8 @@ func TestBinanceListsAWalletByCoinOnlyWhenItsCoinsAddUpToItsValue(t *testing.T) 
 				return
 			}
 			_, _ = w.Write([]byte(binanceWallets))
+		case "/sapi/v1/fiat/orders":
+			_, _ = w.Write([]byte(`{"code": "000000", "data": [], "total": 0, "success": true}`))
 		default:
 			http.NotFound(w, r)
 		}

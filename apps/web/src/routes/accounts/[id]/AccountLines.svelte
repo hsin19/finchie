@@ -19,7 +19,7 @@ import {
  * The owner's fill of a gap is one of them, for the whole period no statement covers, as a passbook prints
  * one for what went unprinted: its memo is written, and it is taken back, here.
  */
-let { accountId, lines, note, trade }: { accountId: number; lines: AccountLine[]; note: string; trade: boolean; } = $props();
+let { accountId, lines, note, trade, empty }: { accountId: number; lines: AccountLine[]; note: string; trade: boolean; empty: string; } = $props();
 
 const lineKey = (line: AccountLine) => line.fill ? `fill:${line.fill.id}` : `line:${line.id}`;
 
@@ -162,7 +162,7 @@ function amountTone(value: string) {
                         </tr>
                     {/if}
                 {:else}
-                    <tr><td colspan="6" class="py-2.5 text-mute">這個帳戶還沒有明細：對帳單只印了它的餘額。</td></tr>
+                    <tr><td colspan="6" class="py-2.5 text-mute">{empty}</td></tr>
                 {/each}
             </tbody>
         </table>

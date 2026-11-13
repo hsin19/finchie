@@ -785,13 +785,13 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 }
 
 const transferLines = `-- name: TransferLines :many
-SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, s.id AS statement_id,
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number,
+       coalesce(t.statement_id, 0)::bigint AS statement_id,
        t.transaction_date, t.kind, t.amount, u.symbol AS unit, t.memo, t.counterparty
 FROM transactions t
-JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
-WHERE a.kind = 'deposit' OR t.kind = 'payment'
+WHERE (t.statement_id IS NOT NULL AND (a.kind = 'deposit' OR t.kind = 'payment')) OR t.external_id IS NOT NULL
 ORDER BY t.id
 `
 
@@ -811,8 +811,9 @@ type TransferLinesRow struct {
 	Counterparty    *string
 }
 
-// The lines a transfer link can join (ADR 0016): every deposit account's lines a statement reports, and card
-// payment lines; never the owner's fill of a gap, which is what moved over months, net.
+// The lines a transfer link can join (ADR 0016): every deposit account's lines a statement reports, card
+// payment lines, and the deposits and withdrawals an exchange reports (ADR 0018), whose statement is 0;
+// never the owner's fill of a gap, which is what moved over months, net.
 func (q *Queries) TransferLines(ctx context.Context) ([]TransferLinesRow, error) {
 	rows, err := q.db.Query(ctx, transferLines)
 	if err != nil {

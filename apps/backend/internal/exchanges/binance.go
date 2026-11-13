@@ -14,7 +14,7 @@ import (
 )
 
 // Binance values every wallet in USDT, and with needBalanceDetail lists each wallet's coins: one call
-// gives both the valuation and the holdings.
+// gives both the valuation and the holdings. Money comes and goes as fiat orders (a SWIFT transfer).
 type Binance struct {
 	apiKey, apiSecret string
 	baseURL           string
@@ -72,7 +72,80 @@ func (b *Binance) Fetch(ctx context.Context) (Snapshot, error) {
 		}
 		wallets = append(wallets, listed)
 	}
-	return fold(ctx, b.Institution(), wallets, usdtPrices(markets)), nil
+	snapshot := fold(ctx, b.Institution(), wallets, usdtPrices(markets))
+	snapshot.Movements, err = b.movements(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+type binanceFiatOrder struct {
+	OrderNo      string `json:"orderNo"`
+	FiatCurrency string `json:"fiatCurrency"`
+	// What was asked for, and what is left of it once the fee is taken.
+	IndicatedAmount decimal `json:"indicatedAmount"`
+	Amount          decimal `json:"amount"`
+	TotalFee        decimal `json:"totalFee"`
+	Method          string  `json:"method"`
+	Status          string  `json:"status"`
+	CreateTime      int64   `json:"createTime"`
+}
+
+// binanceOpened is when Binance opened: fiat orders are asked for from then on, every one each time.
+var binanceOpened = time.Date(2017, 7, 1, 0, 0, 0, 0, time.UTC)
+
+// binancePage is as many fiat orders as Binance lists at once.
+const binancePage = 500
+
+// movements are Binance's fiat deposits and withdrawals that went through: what the bank sent, the
+// fee Binance then took in the memo; what the bank was sent, after the fee.
+func (b *Binance) movements(ctx context.Context) ([]Movement, error) {
+	var moves []Movement
+	for _, deposits := range []bool{true, false} {
+		kind := map[bool]string{true: "0", false: "1"}[deposits]
+		for page := 1; ; page++ {
+			var reply struct {
+				Data  []binanceFiatOrder `json:"data"`
+				Total int                `json:"total"`
+			}
+			query := url.Values{
+				"transactionType": {kind},
+				"beginTime":       {strconv.FormatInt(binanceOpened.UnixMilli(), 10)},
+				"endTime":         {strconv.FormatInt(time.Now().UnixMilli(), 10)},
+				"page":            {strconv.Itoa(page)},
+				"rows":            {strconv.Itoa(binancePage)},
+			}
+			if err := b.signed(ctx, "/sapi/v1/fiat/orders", query, &reply); err != nil {
+				return nil, err
+			}
+			for _, o := range reply.Data {
+				if o.Status != "Successful" && o.Status != "Finished" {
+					continue
+				}
+				printed := o.Amount
+				if deposits {
+					printed = o.IndicatedAmount
+				}
+				amount, err := quantity(string(printed))
+				if err != nil {
+					return nil, fmt.Errorf("binance fiat order %s: %w", o.OrderNo, err)
+				}
+				if !deposits {
+					amount.Neg(amount)
+				}
+				memo := o.Method
+				if fee := feeMemo(string(o.TotalFee), o.FiatCurrency); fee != "" {
+					memo += " · " + fee
+				}
+				moves = append(moves, Movement{ID: o.OrderNo, At: time.UnixMilli(o.CreateTime), Unit: o.FiatCurrency, Amount: amount, Memo: memo})
+			}
+			if len(reply.Data) < binancePage || page*binancePage >= reply.Total {
+				break
+			}
+		}
+	}
+	return moves, nil
 }
 
 // markets are every spot market's last price, from the public ticker.

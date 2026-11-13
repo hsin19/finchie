@@ -193,6 +193,55 @@ func TestAnExchangeLinksTheTwoLegsTheBankPrintsOneReferenceOn(t *testing.T) {
 	}
 }
 
+// exchangeLine is a deposit (positive) or withdrawal (negative) an exchange reports: no statement.
+func exchangeLine(t *testing.T, id int64, on, amount, unit string) transferLine {
+	t.Helper()
+	return transferLine{
+		ID: id, AccountID: 9, AccountKind: domain.Exchange, Institution: "max",
+		TransactionDate: day(t, on), Kind: "other", Amount: money(t, amount), Unit: unit,
+	}
+}
+
+func TestMoneySentToAnExchangeLinksToTheDepositTheExchangeReports(t *testing.T) {
+	cases := map[string]struct {
+		lines []transferLine
+		want  bool
+	}{
+		"a bank's outflow and the exchange's deposit, whatever the bank prints of it": {[]transferLine{
+			depositLine(t, 1, esunSavings, "2026-01-21", "-100000", "805 1234567890***123"),
+			exchangeLine(t, 2, "2026-01-21", "100000", "TWD"),
+		}, true},
+		"a withdrawal from the exchange and a bank's inflow a day later": {[]transferLine{
+			exchangeLine(t, 1, "2026-03-02", "-1500", "USD"),
+			inUnit(depositLine(t, 2, esunSavings, "2026-03-03", "1500", ""), "USD", ""),
+		}, true},
+		"more than three days apart": {[]transferLine{
+			depositLine(t, 1, esunSavings, "2026-01-21", "-100000", ""),
+			exchangeLine(t, 2, "2026-01-25", "100000", "TWD"),
+		}, false},
+		"another amount": {[]transferLine{
+			depositLine(t, 1, esunSavings, "2026-01-21", "-100000", ""),
+			exchangeLine(t, 2, "2026-01-21", "99985", "TWD"),
+		}, false},
+		"another unit": {[]transferLine{
+			depositLine(t, 1, esunSavings, "2026-01-21", "-1500", ""),
+			exchangeLine(t, 2, "2026-01-21", "1500", "USD"),
+		}, false},
+		"the same sign: no money moved between them": {[]transferLine{
+			depositLine(t, 1, esunSavings, "2026-01-21", "100000", ""),
+			exchangeLine(t, 2, "2026-01-21", "100000", "TWD"),
+		}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			pairs := matchTransfers(tc.lines)
+			if linked := pairs[1] == 2 && pairs[2] == 1; linked != tc.want {
+				t.Fatalf("linked = %v, want %v (pairs %v)", linked, tc.want, pairs)
+			}
+		})
+	}
+}
+
 func TestATransferOrPaymentIsInOneUnit(t *testing.T) {
 	pairs := matchTransfers([]transferLine{
 		inUnit(depositLine(t, 1, esunSavings, "2026-07-21", "-500", "812 0087654321***234"), "USD", ""),

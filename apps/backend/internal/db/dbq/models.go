@@ -58,6 +58,7 @@ type CountedLine struct {
 	Balance          pgtype.Numeric
 	CounterpartID    *int64
 	UnitID           int64
+	ExternalID       *string
 }
 
 type Document struct {
@@ -165,6 +166,7 @@ type Transaction struct {
 	Balance          pgtype.Numeric
 	CounterpartID    *int64
 	UnitID           int64
+	ExternalID       *string
 }
 
 type Unit struct {

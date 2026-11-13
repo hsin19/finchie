@@ -149,7 +149,7 @@ func lineCounterpart(id, statementID *int64, date pgtype.Date, accountID *int64,
 		return nil
 	}
 	counterpart := LineCounterpart{
-		Id: *id, StatementId: *statementID, Date: openapi_types.Date{Time: date.Time},
+		Id: *id, StatementId: statementID, Date: openapi_types.Date{Time: date.Time},
 		AccountKind: AccountKind(kind), Institution: *institution, AccountName: name,
 		AccountId: accountID, AccountNumber: number,
 	}

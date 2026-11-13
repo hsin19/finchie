@@ -65,5 +65,8 @@ describe("a transaction's row", () => {
         // A card account is listed now (ADR 0022), but a payment still leads to the bill's line.
         expect(counterpartLink({ id: 4, statementId: 2, date: "2026-10-01", accountKind: "credit_card", institution: "hsbc", accountId: 12 }).href)
             .toBe("/statements/2?line=4");
+        // An exchange's deposit, which no statement reports (ADR 0018): its account.
+        expect(counterpartLink({ id: 9, date: "2026-01-21", accountKind: "exchange", institution: "max", accountId: 30 }))
+            .toEqual({ href: "/accounts/30", text: "MAX" });
     });
 });

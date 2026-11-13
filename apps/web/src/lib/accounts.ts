@@ -269,8 +269,8 @@ export interface AccountPage {
     positions: boolean;
     /** What will lapse by when (ADR 0019). */
     expiring: boolean;
-    /** Its lines, and what their amounts mean; none for a source that reports no lines. */
-    lines?: { note: string; trade: boolean; };
+    /** Its lines, what their amounts mean, and what it means to have none; absent for one kept by hand. */
+    lines?: { note: string; trade: boolean; empty: string; };
     /** Its history: a balance a day (snapshots), or one per statement. */
     history: "days" | "statements";
     /** What a gap in its balances most likely means. */
@@ -282,6 +282,7 @@ export interface AccountPage {
 }
 
 const MISSING_STATEMENT = "這兩個日期之間有錢進出、卻沒有任何明細：多半是少了一期對帳單。上傳那期之後就會接起來。";
+const BALANCE_ONLY = "這個帳戶還沒有明細：對帳單只印了它的餘額。";
 const NO_LINES = "來源只給餘額、沒有明細，接不起來";
 
 const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
@@ -291,7 +292,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         holdings: false,
         positions: false,
         expiring: false,
-        lines: { note: "存入是正數", trade: false },
+        lines: { note: "存入是正數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
         gaps: MISSING_STATEMENT,
         unchecked: NO_LINES,
@@ -303,7 +304,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         holdings: false,
         positions: false,
         expiring: false,
-        lines: { note: "照帳單印的：消費是正數，繳款與退款是負數", trade: false },
+        lines: { note: "照帳單印的：消費是正數，繳款與退款是負數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
         gaps: MISSING_STATEMENT,
         // A bill dates its lines by purchase, which can fall before the bill before it closed (ADR 0022).
@@ -316,7 +317,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         holdings: false,
         positions: false,
         expiring: false,
-        lines: { note: "照對帳單印的", trade: false },
+        lines: { note: "照對帳單印的", trade: false, empty: BALANCE_ONLY },
         history: "statements",
         gaps: MISSING_STATEMENT,
         unchecked: NO_LINES,
@@ -328,21 +329,22 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         holdings: false,
         positions: true,
         expiring: false,
-        lines: { note: "買進的股數是正數", trade: true },
+        lines: { note: "買進的股數是正數", trade: true, empty: BALANCE_ONLY },
         history: "statements",
         gaps: MISSING_STATEMENT,
         unchecked: NO_LINES,
     },
-    // Coins, and nothing but snapshots of them (ADR 0018).
+    // Coins, as snapshots; its lines are the money it took from a bank or gave one (ADR 0018).
     exchange: {
         headline: "worth",
         noWorth: "有幣種沒有價格",
         holdings: true,
         positions: false,
         expiring: false,
+        lines: { note: "只有與銀行之間的入金、出金：入金是正數", trade: false, empty: "還沒有和銀行之間的入金或出金。" },
         history: "days",
         gaps: MISSING_STATEMENT,
-        unchecked: NO_LINES,
+        unchecked: "只讀得到入金與出金，沒有買賣明細，接不起來",
     },
     // Its bills print its programs' balances, their totals as lines, and what will lapse (ADR 0019).
     points: {
@@ -351,7 +353,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         holdings: false,
         positions: false,
         expiring: true,
-        lines: { note: "帳單上每一期的合計，獲得是正數", trade: false },
+        lines: { note: "帳單上每一期的合計，獲得是正數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
         gaps: "這兩期之間少了點數，帳單卻沒列出：多半是點數過期了（過期的點數不會出現在任何欄位），或少了一期帳單。",
         unchecked: NO_LINES,

@@ -17,9 +17,10 @@ import (
 )
 
 // Money that moves between two of the owner's lines is linked (ADR 0016): a deposit account paying a
-// card bill, one account paying into another, or one currency exchanged for another. Banks print no
-// such link either, so like parents it is worked out from amounts, dates, the counterparties they print,
-// and the reference a bank prints on both sides of an exchange.
+// card bill, one account paying into another, one currency exchanged for another, or money sent to an
+// exchange or taken out of it (ADR 0018). Banks print no such link either, so like parents it is worked
+// out from amounts, dates, the counterparties they print, the reference a bank prints on both sides of an
+// exchange of currencies, and an exchange's own records.
 
 const (
 	// A card payment's two lines are at most this many days apart: banks post them on different days.
@@ -94,7 +95,7 @@ func retransfer(ctx context.Context, queries *dbq.Queries) error {
 // matchTransfers returns line ID → counterpart line ID, both ways. Each line is in one link at most:
 // nearer days pair first, then card payments before own transfers and exchanges.
 func matchTransfers(lines []transferLine) map[int64]int64 {
-	var outs, ins, payments []transferLine
+	var outs, ins, payments, moves []transferLine
 	for _, l := range lines {
 		switch {
 		case l.AccountKind == domain.Deposit && amount(l.Amount).Sign() < 0:
@@ -103,6 +104,8 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 			ins = append(ins, l)
 		case l.Kind == domain.Payment:
 			payments = append(payments, l)
+		case l.AccountKind == domain.Exchange:
+			moves = append(moves, l)
 		}
 	}
 
@@ -129,6 +132,26 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 			}
 			if d := daysApart(out.TransactionDate, in.TransactionDate); d <= ownTransferWindowDays && (fits(out.Counterparty, out.Institution, in) || fits(in.Counterparty, in.Institution, out)) {
 				candidates = append(candidates, candidate{out.ID, in.ID, d, false})
+			}
+		}
+	}
+	// Money sent to an exchange or taken out of it (ADR 0018): the exchange's own record of the deposit or
+	// withdrawal is the proof a counterparty gives between two banks, so the amount and the days suffice.
+	for _, m := range moves {
+		banks, deposited := outs, amount(m.Amount).Sign() > 0
+		if !deposited {
+			banks = ins
+		}
+		for _, b := range banks {
+			if b.Unit != m.Unit || new(big.Rat).Neg(amount(b.Amount)).Cmp(amount(m.Amount)) != 0 {
+				continue
+			}
+			if d := daysApart(b.TransactionDate, m.TransactionDate); d <= transferWindowDays {
+				if deposited {
+					candidates = append(candidates, candidate{b.ID, m.ID, d, false})
+				} else {
+					candidates = append(candidates, candidate{m.ID, b.ID, d, false})
+				}
 			}
 		}
 	}

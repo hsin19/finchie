@@ -2,7 +2,7 @@
 
 ## Decision
 
-A crypto exchange is an account (ADR 0013) of kind `exchange`, one per exchange: institution `max`, `binance`, or `bitget`, number empty. Finchie reads what each one holds from the exchange's API, as InTheGreenYet did, and nothing else: trades, swaps between coins, deposits, withdrawals, and interest are not read as lines. An exchange account has balances and no lines, so its continuity is unknown (ADR 0013).
+A crypto exchange is an account (ADR 0013) of kind `exchange`, one per exchange: institution `max`, `binance`, or `bitget`, number empty. Finchie reads what each one holds from the exchange's API, as InTheGreenYet did, and nothing else: trades, swaps between coins, deposits, withdrawals, and interest are not read as lines. (Now deposits and withdrawals of money a bank holds are read as lines: MAX's NT$ ones, `/api/v3/deposits` and `/api/v3/withdrawals`, and Binance's fiat orders, `/sapi/v1/fiat/orders`, each kept by the exchange's id for it, `transactions.external_id`, with no statement. They link to the bank's lines (ADR 0016), so money sent to an exchange is no longer spending; a year's spending showed hundreds of thousands of NT$ that had only gone to MAX. Coins moved, traded, or earned are still not read.) An exchange account has balances and no lines, so its continuity is unknown (ADR 0013). (Its lines are deposits and withdrawals alone, so it still is.)
 
 Exchanges send no statements to forward; their APIs are the only source. Each takes a read-only key without IP restriction (the backend's address is not fixed), set once in the environment; InTheGreenYet ran on such keys without renewing them. ADR 0015 and 0017 turned keyed APIs down because a free source without a key existed; here none does. An exchange whose keys are not all set is not fetched, and setting some of them but not all stops the backend at start.
 
@@ -46,7 +46,7 @@ The API says which one it used. Holdings at Finchie's own rates come first, so a
 ### What it is for
 
 - Net worth adds the exchanges, and the accounts page lists them next to deposits and securities.
-- An exchange's page shows its worth, its holdings, and a history by day; it has no lines to list.
+- An exchange's page shows its worth, its holdings, and a history by day; it has no lines to list. (Now its deposits and withdrawals.)
 
 ## Alternatives considered
 
@@ -61,7 +61,7 @@ The API says which one it used. Holdings at Finchie's own rates come first, so a
 ## Consequences
 
 - `accounts.kind` gains `exchange` and `balances.statement_id` becomes nullable; the backend gains the `valuations` table and the `fetch_exchange` jobs. It calls `max-api.maicoin.com`, `api.binance.com`, and `api.bitget.com`.
-- Money a deposit account sends to MAX has no line on the other side to link to, so it counts as spending (ADR 0016); coins moved between exchanges show only as changed holdings. Both wait for deposits and withdrawals as lines.
+- Money a deposit account sends to MAX has no line on the other side to link to, so it counts as spending (ADR 0016); coins moved between exchanges show only as changed holdings. Both wait for deposits and withdrawals as lines. (The first no longer does: see the decision.)
 - An exchange has a worth, not a return.
 - A coin the rate feed does not list (MAX's own token, BGB, most small coins) has no worth of its own, though the exchange priced it when checking its wallet; only the account's valuation counts it. Keeping each coin's price with the snapshot would give it one (ADR 0020 does: each coin held has the exchange's price, in NT$ or USDT).
 - A snapshot adds one balance per unit and day: a few dozen rows a day.
