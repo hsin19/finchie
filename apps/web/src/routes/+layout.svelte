@@ -81,15 +81,17 @@ let palette = $state(false);
 
 // Switching between statements and transactions keeps the selected month; the overview has none.
 const carried = $derived(carriedLinks(page.route.id, page.url.searchParams));
-const nav: { key: KeyOf<"global">; label: string; href: ResolvedPathname; current: boolean; }[] = $derived([
+type NavItem = { key: KeyOf<"global">; label: string; href: ResolvedPathname; current: boolean; };
+const pages: NavItem[] = $derived([
     { key: "o", label: "總覽", href: resolve("/"), current: page.route.id === "/" },
     { key: "s", label: "帳單", href: carried.statements, current: /^\/statements/.test(page.route.id ?? "") },
     { key: "t", label: "交易", href: carried.transactions, current: page.route.id === "/transactions" },
     { key: "a", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? "") },
-    { key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? "") },
 ]);
-// The last one, documents (where uploads go), sits apart on wide screens.
-const documents = $derived(nav[nav.length - 1]);
+// Documents arrive by mail by themselves: their page is for an upload by hand or a look at what parsing
+// gave, so it is a link of its own, not a tab. What needs a look there the overview says.
+const documents: NavItem = $derived({ key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? "") });
+const nav = $derived([...pages, documents]);
 
 const prompt = $derived(commandLine(page.url.pathname, page.url.searchParams, (page.data as { command?: string; }).command));
 
@@ -159,7 +161,7 @@ function onkeydown(event: KeyboardEvent) {
             {/each}
         </div>
         <nav aria-label="主要" class="hidden gap-1.5 md:flex">
-            {#each nav.slice(0, -1) as item (item.key)}
+            {#each pages as item (item.key)}
                 <a
                     href={item.href}
                     aria-current={item.current ? "page" : undefined}
@@ -170,8 +172,11 @@ function onkeydown(event: KeyboardEvent) {
         <a
             href={documents.href}
             aria-current={documents.current ? "page" : undefined}
-            class="hidden rounded-[4px] border px-3 py-2 text-ink hover:bg-accent/10 hover:text-ink md:block {documents.current ? 'border-accent bg-accent/10' : 'border-accent'}"
-        ><span class="text-accent">[{documents.key}]</span> {documents.label}</a>
+            class="flex min-h-9 items-center gap-1.5 text-[12px] md:text-[13px] {documents.current ? 'text-ink' : 'text-dim hover:text-ink'}"
+        >
+            <span class="hidden text-accent md:inline">[{documents.key}]</span>{documents.label}
+            {#if data.pending.length > 0}<span class="text-accent">● {data.pending.length}</span>{/if}
+        </a>
     </header>
 
     <main class="flex grow flex-col gap-3">
@@ -196,8 +201,8 @@ function onkeydown(event: KeyboardEvent) {
     </footer>
 </div>
 
-<nav aria-label="主要" class="fixed inset-x-0 bottom-0 z-10 grid grid-cols-5 border-t border-line bg-panel pb-[max(env(safe-area-inset-bottom),12px)] md:hidden">
-    {#each nav as item (item.key)}
+<nav aria-label="主要" class="fixed inset-x-0 bottom-0 z-10 grid grid-cols-4 border-t border-line bg-panel pb-[max(env(safe-area-inset-bottom),12px)] md:hidden">
+    {#each pages as item (item.key)}
         <a
             href={item.href}
             aria-current={item.current ? "page" : undefined}

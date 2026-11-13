@@ -8,6 +8,7 @@ import {
     it,
 } from "vitest";
 import {
+    netWorthChange,
     overdueBehind,
     trendColumns,
     trendQuery,
@@ -56,5 +57,17 @@ describe("trendColumns", () => {
 
     it("keeps a flat line at the bottom when everything is zero", () => {
         expect(trendColumns([point("2026-10-31", "0")])).toEqual({ columns: [{ point: point("2026-10-31", "0"), bottom: 0, height: 0, negative: false }], zero: 0 });
+    });
+});
+
+describe("netWorthChange", () => {
+    it("is the last point less the one before", () => {
+        expect(netWorthChange([point("2026-09-30", "900"), point("2026-10-31", "1000"), point("2026-11-13", "1250.50")])).toBe("250.50");
+    });
+
+    it("is none when the two valued a different number of accounts, or there are not two", () => {
+        const then = { ...point("2026-10-31", "1000"), unvalued: 9 };
+        expect(netWorthChange([then, { ...point("2026-11-13", "2000"), unvalued: 4 }])).toBeUndefined();
+        expect(netWorthChange([point("2026-11-13", "2000")])).toBeUndefined();
     });
 });

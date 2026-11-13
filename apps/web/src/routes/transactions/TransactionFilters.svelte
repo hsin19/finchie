@@ -61,7 +61,7 @@ const picked = $derived(pickerValue(filters));
             {/each}
             {#if picked && !options.some(o => o.value === picked)}<option value={picked}>{picked}</option>{/if}
         </select>
-        <div role="group" aria-label="交易種類" class="flex gap-1.5 overflow-x-auto whitespace-nowrap">
+        <div role="group" aria-label="交易種類" class="flex flex-wrap gap-1.5 whitespace-nowrap">
             {#each kindOrder as kind (kind)}
                 {@const on = activeKinds.has(kind)}
                 <button type="button" aria-pressed={on} class="control shrink-0 {on ? 'pressed' : 'text-mute'}" onclick={() => toggleKind(kind)}>

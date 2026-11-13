@@ -12,7 +12,10 @@ import {
     monthOf,
     shiftMonth,
 } from "#lib/dates.js";
-import { approx } from "#lib/money.js";
+import {
+    approx,
+    subtract,
+} from "#lib/money.js";
 
 /**
  * The accounts the figure takes an old balance of because they are overdue as of `today` (accountStatus),
@@ -55,4 +58,15 @@ export function trendColumns(points: readonly NetWorthPoint[]): { columns: Trend
         negative: nets[i] < 0,
     }));
     return { columns, zero };
+}
+
+/**
+ * How net worth moved from the point before the last to the last; none when the two left out a different
+ * number of accounts for want of a price (`unvalued`): one that had no worth then and has one now would
+ * read as money made.
+ */
+export function netWorthChange(points: readonly NetWorthPoint[]): string | undefined {
+    const [before, after] = points.slice(-2);
+    if (!before || !after || before.unvalued !== after.unvalued) return undefined;
+    return subtract(after.net, before.net);
 }

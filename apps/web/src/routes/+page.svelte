@@ -1,85 +1,70 @@
 <script lang="ts">
+import { needs } from "#lib/attention.js";
 import {
     byClosingMonth,
     dueBills,
-    monthlyBills,
     pendingInstitutions,
     percentChange,
     totalDue,
 } from "#lib/bills.js";
-import StatementRow from "#lib/components/StatementRow.svelte";
-import Tag from "#lib/components/Tag.svelte";
-import TrendChart from "#lib/components/TrendChart.svelte";
 import {
-    formatBytes,
+    monthFlows,
+    otherUnits,
+    reportedThrough,
+    yearFlow,
+} from "#lib/cashflow.js";
+import CashflowChart from "#lib/components/CashflowChart.svelte";
+import Needs from "#lib/components/Needs.svelte";
+import {
     type Month,
-    monthsBetween,
     shiftMonth,
     slashDate,
     thisMonth,
     today,
 } from "#lib/dates.js";
-import { documentsById } from "#lib/documents.js";
 import { institutionNames } from "#lib/institutions.js";
 import {
-    divide,
     formatAmount,
-    sum,
+    roundWhole,
+    sign,
 } from "#lib/money.js";
+import { netWorthChange } from "#lib/networth.js";
 import { statementsHref } from "#lib/urls.js";
 import { resolve } from "$app/paths";
 import type { PageProps } from "./$types";
 
 let { data }: PageProps = $props();
 
+// The page is not open across days.
 const now = thisMonth();
+const day = today();
 const lastMonth = shiftMonth(now, -1);
 const monthNumber = (m: Month) => Number(m.slice(5));
 
+// What needs the owner comes first, and only when there is something.
+const found = $derived(needs({ byState: data.documentsByState, accounts: data.accounts, today: day }));
+
+// This month's card bills and last month's, and what is still due.
 const bills = $derived(byClosingMonth(data.statements));
 const billOf = (m: Month) => bills.get(m) ?? [];
-
 const current = $derived(billOf(now));
 const pending = $derived(pendingInstitutions(data.statements, now, lastMonth));
 const last = $derived(billOf(lastMonth));
 const lastChange = $derived(percentChange(totalDue(last), totalDue(billOf(shiftMonth(now, -2)))));
+const due = $derived(dueBills(data.statements, day));
 
-// The page is not open across days.
-const due = $derived(dueBills(data.statements, today()));
+// Net worth, and how it moved since last month's end.
+const net = $derived(data.netWorth.net);
+const moved = $derived(netWorthChange(data.history ?? []));
 
-// This year so far. The average leaves out this month, which is still closing.
-const year = now.slice(0, 4);
-const ytd = $derived.by(() => {
-    const months = [...bills.keys()].filter(m => m.startsWith(year));
-    const complete = months.filter(m => m < now);
-    const completeTotal = sum(complete.map(m => totalDue(billOf(m))));
-    return {
-        total: sum(months.map(m => totalDue(billOf(m)))),
-        average: complete.length > 0 ? divide(completeTotal, complete.length) : undefined,
-        months: complete.length,
-    };
-});
-
-const trend = $derived(monthlyBills(data.statements, monthsBetween(shiftMonth(now, -11), now).toReversed()));
-
-// Documents still parsing or that failed first, so they get noticed; then the newest statements.
-const documents = $derived(documentsById(data.documents, data.pending));
-const parsedDocuments = $derived(new Set(data.statements.map(s => s.documentId)));
-const waiting = $derived([...documents.values()].filter(d => !parsedDocuments.has(d.id) && (d.status === "pending" || d.status === "failed")).sort((a, b) => b.id - a.id));
-const recent = $derived([
-    ...waiting.map(doc => ({ doc, statement: undefined })),
-    ...data.statements.map(statement => ({ doc: documents.get(statement.documentId), statement })),
-].slice(0, 6));
-// Of every document, not the layout's newest.
-const counts = $derived(new Map(data.documentsByState.map(c => [c.state, c.count])));
+// A year of what came in and went out, across every account.
+const base = $derived(data.settings.baseCurrency);
+const flows = $derived(monthFlows(data.months, data.searches, base, reportedThrough(data.accounts, day)));
+const year = $derived({ name: now.slice(0, 4), ...yearFlow(flows, now.slice(0, 4)) });
+const others = $derived(otherUnits(data.searches, base));
 </script>
 
-<div class="flex flex-wrap gap-x-4 gap-y-0.5 rounded-[6px] border border-dashed border-line px-2.5 py-2 text-[12px] text-dim">
-    <span><span class="text-pos">●</span> ok {counts.get("parsed") ?? 0}</span>
-    <span><span class="text-accent">●</span> run {counts.get("pending") ?? 0}</span>
-    <span><span class="text-neg">●</span> chk {counts.get("needs_review") ?? 0}</span>
-    {#if counts.get("failed")}<span><span class="text-neg">●</span> err {counts.get("failed")}</span>{/if}
-</div>
+{#if found.length > 0}<Needs needs={found} />{/if}
 
 <div class="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
     <a href={statementsHref(now)} class="panel flex flex-col gap-1 p-3 text-ink hover:border-line-strong hover:text-ink md:p-3.5">
@@ -102,35 +87,17 @@ const counts = $derived(new Map(data.documentsByState.map(c => [c.state, c.count
     </a>
     <div class="panel flex flex-col gap-1 p-3 md:p-3.5">
         <span class="text-[10px] tracking-[0.12em] text-mute">DUE · 待繳</span>
-        <span class="text-[20px] font-bold text-ink-bright md:text-[24px]">{formatAmount(due.amount)}</span>
-        <span class="text-[11px] text-dim">{due.next ? `next ${slashDate(due.next)} · ${due.count} 張` : "沒有待繳帳單"}</span>
+        <span class="text-[20px] font-bold md:text-[24px] {sign(due.amount) > 0 ? 'text-ink-bright' : 'text-mute'}">{formatAmount(due.amount)}</span>
+        <span class="text-[11px] text-dim">{due.next ? `${slashDate(due.next)} 到期 · ${due.count} 張` : "沒有待繳帳單"}</span>
     </div>
-    <div class="panel flex flex-col gap-1 p-3 md:p-3.5">
-        <span class="text-[10px] tracking-[0.12em] text-mute">YTD · {year} 年</span>
-        <span class="text-[20px] font-bold text-ink-bright md:text-[24px]">{formatAmount(ytd.total)}</span>
-        <span class="text-[11px] text-dim">{ytd.average ? `月均 ${formatAmount(ytd.average)} · ${ytd.months} 個月` : "今年還沒有出完帳的月份"}</span>
-    </div>
+    <!-- An estimate (ADR 0023): sources report on days of their own. -->
+    <a href={resolve("/accounts")} class="panel flex flex-col gap-1 p-3 text-ink hover:border-line-strong hover:text-ink md:p-3.5">
+        <span class="text-[10px] tracking-[0.12em] text-mute">NET · 淨值</span>
+        <span class="text-[20px] font-bold md:text-[24px] {sign(net) < 0 ? 'text-neg' : 'text-ink-bright'}">≈ {formatAmount(roundWhole(net))}</span>
+        <span class="text-[11px] {moved === undefined ? 'text-mute' : sign(moved) < 0 ? 'text-neg' : 'text-pos'}">
+            {moved === undefined ? "資產減負債" : `${formatAmount(roundWhole(moved), { signed: true })} vs ${monthNumber(lastMonth)} 月底`}
+        </span>
+    </a>
 </div>
 
-<div class="grid items-start gap-3 md:grid-cols-[1.35fr_1fr]">
-    <TrendChart bills={trend} partial={pending.length > 0 ? now : undefined} />
-
-    <section class="panel p-3 md:p-3.5">
-        <div class="mb-1 flex items-baseline justify-between">
-            <h2 class="label">STATEMENTS · 最近的帳單</h2>
-            <a href={statementsHref("all")} class="text-[12px]">all →</a>
-        </div>
-        {#each recent as { doc, statement } (statement ? `s${statement.id}` : `d${doc?.id}`)}
-            {#if statement}
-                <StatementRow {statement} {doc} />
-            {:else if doc}
-                <a href={resolve("/documents/[id]", { id: String(doc.id) })} class="flex min-h-11 flex-col gap-0.5 border-t border-rule py-2.5 text-ink hover:text-ink">
-                    <span><Tag status={doc.status} /> {doc.filename}</span>
-                    <span class="text-[12px] text-mute">{doc.status === "pending" ? `parsing… · ${formatBytes(doc.sizeBytes)}` : (doc.error ?? doc.status)}</span>
-                </a>
-            {/if}
-        {:else}
-            <p class="m-0 border-t border-rule pt-2.5 text-mute">還沒有帳單。<a href={resolve("/documents")}>上傳第一份 →</a></p>
-        {/each}
-    </section>
-</div>
+<CashflowChart {flows} {year} {others} />

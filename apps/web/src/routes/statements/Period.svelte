@@ -2,6 +2,7 @@
 import {
     byClosingMonth,
     fxFeeShare,
+    monthlyBills,
     pendingInstitutions,
     percentChange,
     reward,
@@ -11,8 +12,10 @@ import {
 import Bar from "#lib/components/Bar.svelte";
 import MonthSelect from "#lib/components/MonthSelect.svelte";
 import StatementRow from "#lib/components/StatementRow.svelte";
+import TrendChart from "#lib/components/TrendChart.svelte";
 import {
     type Month,
+    monthsBetween,
     shiftMonth,
     thisMonth,
 } from "#lib/dates.js";
@@ -80,6 +83,9 @@ const topCard = $derived(Math.max(...cards.map(c => approx(c.amount)), 1));
 
 // This month while some bank has not closed yet: a part of a bill against a whole one says nothing.
 const partial = $derived(closing && missing.length > 0);
+
+// The year of bills up to this one.
+const trend = $derived(monthlyBills(data.statements, monthsBetween(shiftMonth(data.month, -11), data.month).toReversed()));
 
 function changeText(change: number | undefined): string {
     if (partial) return `還沒出齊，先不比`;
@@ -192,3 +198,5 @@ function changeTone(change: number | undefined): string {
         {/if}
     </section>
 </div>
+
+<TrendChart bills={trend} partial={partial ? data.month : undefined} />

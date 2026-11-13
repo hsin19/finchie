@@ -15,7 +15,7 @@ A self-hosted personal finance platform. It turns bank and credit card statement
 | [`apps/backend`](apps/backend/) | Go. The only public service: API, document ingestion, background jobs, and the web app (embedded). Owns the database. | ✅ Upload, parse, and read statements |
 | [`apps/parser`](apps/parser/) | Python. Stateless parser behind gRPC: a raw statement goes in, structured data comes out. Internal only. | ✅ 4 banks |
 | [`apps/mailbox`](apps/mailbox/) | Cloudflare Email Worker. Takes statements Gmail forwards to an address on Email Routing and uploads them to the backend. Deployed by hand | ✅ Automatic ingestion |
-| [`apps/web`](apps/web/) | SvelteKit single-page app. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend) | ✅ Overview, statements, transactions, accounts, upload; installs to a home screen |
+| [`apps/web`](apps/web/) | SvelteKit single-page app. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend) | ✅ Overview (what needs a look, bills, net worth, a year of income and spending), statements, transactions, accounts, upload; installs to a home screen |
 
 **Shared**
 
