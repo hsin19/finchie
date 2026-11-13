@@ -2,7 +2,7 @@
 
 ## Decision
 
-What the owner had on any day since Finchie started is worked out from what it already keeps, never stored: each account's newest balance on or before the day, each unit's newest price on or before the end of that day in Taipei, and each account's worth as on any day (`domain.Assess`, ADR 0022 for liabilities). `GET /api/net-worth?on=` gives one day, `GET /api/net-worth/history?from=&to=&step=` a series, by day or by month end.
+What the owner had on any day since Finchie started is worked out from what it already keeps, never stored: each account's newest balance on or before the day (with the lines after it up to the day, the owner's fill of a gap among them: migration 00021), each unit's newest price on or before the end of that day in Taipei, and each account's worth as on any day (`domain.Assess`, ADR 0022 for liabilities). `GET /api/net-worth?on=` gives one day, `GET /api/net-worth/history?from=&to=&step=` a series, by day or by month end.
 
 - **One price rule for every day.** `price_at(unit, moment)` (migration 00020) is a unit's newest price at a moment, from any source, through its quote unit's newest price at that moment when that one is in NT$ (ADR 0020). The newest prices are `price_at` at no moment in particular; a day's are `price_at` at its end.
 - **History is never deleted.** Balances and prices are kept as their sources gave them (ADR 0020); a price the owner withdraws is kept, marked withdrawn, and counts for the days before it was (migration 00019).

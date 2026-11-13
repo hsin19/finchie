@@ -8,7 +8,7 @@ FROM (SELECT unnest(@line_nos::integer[]) AS line_no, unnest(@categories::text[]
              unnest(@prices::numeric[]) AS price, unnest(@amounts::numeric[]) AS amount,
              unnest(@fees::numeric[]) AS fee, unnest(@taxes::numeric[]) AS tax, unnest(@nets::numeric[]) AS net,
              unnest(@prepaids::numeric[]) AS prepaid) r
-JOIN transactions t ON t.statement_id = @statement_id AND t.line_no = r.line_no;
+JOIN transactions t ON t.statement_id = @statement_id::bigint AND t.line_no = r.line_no;
 
 -- name: ClearEmptyHoldings :exec
 -- The zero balances ImplyEmptyHoldings derives, to work out again: a statement lists no security it

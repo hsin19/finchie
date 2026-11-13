@@ -49,11 +49,15 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	for _, b := range rows {
 		history = append(history, toBalance(b.Unit, b.AsOf, b.Amount, b.StatementID))
 	}
+	fills, err := gapFills(ctx, queries, request.Id)
+	if err != nil {
+		return nil, err
+	}
 	detail := AccountDetail{
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Side: account.Side, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, Balances: account.Balances,
 		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
-		Gaps: account.Gaps, Expiries: account.Expiries, History: history,
+		Gaps: account.Gaps, Expiries: account.Expiries, History: history, Fills: fills,
 	}
 	if domain.AccountKind(account.Kind) == domain.Securities {
 		held, err := readPositions(ctx, queries, request.Id, rows, account.Balances)
@@ -244,8 +248,11 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 	for _, r := range rows {
 		line := AccountLine{
 			Id: r.ID, StatementId: r.StatementID, Date: openapi_types.Date{Time: r.TransactionDate.Time},
-			Description: r.Description, Memo: r.Memo, Counterparty: r.Counterparty, Kind: string(r.Kind), Unit: r.Unit,
+			Description: r.Description, Memo: r.Memo, Counterparty: r.Counterparty, Kind: r.Kind, Unit: r.Unit,
 			Amount: numeric.String(r.Amount),
+		}
+		if domain.LineKind(r.Kind) == domain.Fill {
+			line.Fill = &LineFill{Id: r.ID, From: openapi_types.Date{Time: r.FillFrom.Time}, To: openapi_types.Date{Time: r.FillTo.Time}}
 		}
 		if r.Balance.Valid {
 			line.Balance = ptr(numeric.String(r.Balance))

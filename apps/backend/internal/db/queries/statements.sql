@@ -30,7 +30,7 @@ WHERE s.id = @statement_id
 -- name: TrimStatementLines :exec
 -- A statement's lines of an account in a currency on the days another statement keeps.
 DELETE FROM transactions
-WHERE statement_id = @statement_id
+WHERE statement_id = @statement_id::bigint
   AND account_id = @account_id
   AND unit_id = @unit_id
   AND transaction_date BETWEEN @from_date AND @to_date;
@@ -88,7 +88,7 @@ SELECT EXISTS (SELECT 1 FROM statements WHERE id = @id AND kind = 'credit_card')
 -- name: ListTransactions :many
 -- The lines as printed, each with its parent (parent_id) and its children, which may be on other
 -- statements.
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
@@ -124,7 +124,7 @@ LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE c.parent_id = t.id) kids ON true
-WHERE t.statement_id = @statement_id
+WHERE t.statement_id = @statement_id::bigint
 ORDER BY t.line_no;
 
 -- name: InsertStatementChecks :exec

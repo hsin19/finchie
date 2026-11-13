@@ -391,6 +391,9 @@ type AccountDetail struct {
 	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
 	Expiries []Expiry `json:"expiries"`
 
+	// Fills The owner's fills of its gaps that count, newest first: the gaps they fill are not in `gaps`
+	Fills []GapFill `json:"fills"`
+
 	// FullNumber Its full number, where the owner gave one (ADR 0016)
 	FullNumber *string      `json:"fullNumber,omitempty"`
 	Gaps       []BalanceGap `json:"gaps"`
@@ -435,7 +438,9 @@ type AccountDetail struct {
 // AccountKind defines model for AccountKind.
 type AccountKind string
 
-// AccountLine defines model for AccountLine.
+// AccountLine A line a statement reports, or the owner's fill of a gap (`fill`): one line for the whole period no
+// statement covers, as a passbook prints one for what went unprinted, dated on its last day, with the
+// fill's memo and the balance it leaves.
 type AccountLine struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
 	//
@@ -450,12 +455,19 @@ type AccountLine struct {
 	Counterparty *string            `json:"counterparty,omitempty"`
 	Date         openapi_types.Date `json:"date"`
 	Description  string             `json:"description"`
-	Id           int64              `json:"id"`
+
+	// Fill The owner's fill of a gap, as a line
+	Fill *LineFill `json:"fill,omitempty"`
+
+	// Id The line's, or the fill's for a fill
+	Id int64 `json:"id"`
 
 	// Kind A card line's kind, or interest, fee, or other on a deposit account
-	Kind        string  `json:"kind"`
-	Memo        *string `json:"memo,omitempty"`
-	StatementId int64   `json:"statementId"`
+	Kind string  `json:"kind"`
+	Memo *string `json:"memo,omitempty"`
+
+	// StatementId The statement that reports it; absent for a fill
+	StatementId *int64 `json:"statementId,omitempty"`
 
 	// Trade A trade's money; its line's amount is the shares, its unit the security (ADR 0017)
 	Trade *Trade `json:"trade,omitempty"`
@@ -660,6 +672,44 @@ type Expiry struct {
 	Unit string `json:"unit"`
 }
 
+// GapFill What the owner made up for a gap between two balances
+type GapFill struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal `json:"amount"`
+
+	// From The day of the balance before
+	From openapi_types.Date `json:"from"`
+	Id   int64              `json:"id"`
+
+	// Memo What the owner wrote about it; absent when nothing
+	Memo *string `json:"memo,omitempty"`
+
+	// On The day it counts as moved
+	On openapi_types.Date `json:"on"`
+
+	// To The day of the balance after
+	To   openapi_types.Date `json:"to"`
+	Unit string             `json:"unit"`
+}
+
+// GapFillCreate One of the account's gaps, as `gaps` lists it
+type GapFillCreate struct {
+	From openapi_types.Date `json:"from"`
+
+	// Memo What the owner writes about it; absent or empty keeps what the same gap's fill had
+	Memo *string            `json:"memo,omitempty"`
+	To   openapi_types.Date `json:"to"`
+	Unit string             `json:"unit"`
+}
+
+// GapFillUpdate defines model for GapFillUpdate.
+type GapFillUpdate struct {
+	// Memo Trimmed; empty clears it
+	Memo string `json:"memo"`
+}
+
 // HistoryStep Every day, or the last day of each month
 type HistoryStep string
 
@@ -728,6 +778,16 @@ type LineCounterpart struct {
 	Id            int64              `json:"id"`
 	Institution   string             `json:"institution"`
 	StatementId   int64              `json:"statementId"`
+}
+
+// LineFill The owner's fill of a gap, as a line
+type LineFill struct {
+	// From The day of the balance before
+	From openapi_types.Date `json:"from"`
+	Id   int64              `json:"id"`
+
+	// To The day of the balance after
+	To openapi_types.Date `json:"to"`
 }
 
 // NetWorth defines model for NetWorth.
@@ -1207,6 +1267,12 @@ type CreateAccountJSONRequestBody = AccountCreate
 // UpdateAccountJSONRequestBody defines body for UpdateAccount for application/json ContentType.
 type UpdateAccountJSONRequestBody = AccountUpdate
 
+// FillGapJSONRequestBody defines body for FillGap for application/json ContentType.
+type FillGapJSONRequestBody = GapFillCreate
+
+// UpdateGapFillJSONRequestBody defines body for UpdateGapFill for application/json ContentType.
+type UpdateGapFillJSONRequestBody = GapFillUpdate
+
 // UpdateHoldingsJSONRequestBody defines body for UpdateHoldings for application/json ContentType.
 type UpdateHoldingsJSONRequestBody = HoldingsUpdate
 
@@ -1230,6 +1296,15 @@ type ServerInterface interface {
 	// UpdateAccount The owner's details of an account, its own name and its full number
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx *echo.Context, id Id) error
+	// FillGap Make up for one of an account's gaps with what it lacks
+	// (POST /api/accounts/{id}/fills)
+	FillGap(ctx *echo.Context, id Id) error
+	// DeleteGapFill Take a fill back; the gap shows again
+	// (DELETE /api/accounts/{id}/fills/{fillId})
+	DeleteGapFill(ctx *echo.Context, id Id, fillId int64) error
+	// UpdateGapFill What the owner writes about a fill; empty clears it
+	// (PATCH /api/accounts/{id}/fills/{fillId})
+	UpdateGapFill(ctx *echo.Context, id Id, fillId int64) error
 	// UpdateHoldings What an account the owner keeps holds today, and what will lapse
 	// (PUT /api/accounts/{id}/holdings)
 	UpdateHoldings(ctx *echo.Context, id Id) error
@@ -1356,6 +1431,70 @@ func (w *ServerInterfaceWrapper) UpdateAccount(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.UpdateAccount(ctx, id)
+	return err
+}
+
+// FillGap converts echo context to params.
+func (w *ServerInterfaceWrapper) FillGap(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.FillGap(ctx, id)
+	return err
+}
+
+// DeleteGapFill converts echo context to params.
+func (w *ServerInterfaceWrapper) DeleteGapFill(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// ------------- Path parameter "fillId" -------------
+	var fillId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fillId", ctx.Param("fillId"), &fillId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter fillId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.DeleteGapFill(ctx, id, fillId)
+	return err
+}
+
+// UpdateGapFill converts echo context to params.
+func (w *ServerInterfaceWrapper) UpdateGapFill(ctx *echo.Context) error {
+	var err error
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", ctx.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter id: %s", err))
+	}
+
+	// ------------- Path parameter "fillId" -------------
+	var fillId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fillId", ctx.Param("fillId"), &fillId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: ctx.Request().URL.RawPath == ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter fillId: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.UpdateGapFill(ctx, id, fillId)
 	return err
 }
 
@@ -1963,6 +2102,9 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/units", wrapper.ListUnits, options.OperationMiddlewares["listUnits"]...)
 	router.DELETE(options.BaseURL+"/api/units/:id/price", wrapper.ClearUnitPrice, options.OperationMiddlewares["clearUnitPrice"]...)
 	router.PUT(options.BaseURL+"/api/units/:id/price", wrapper.SetUnitPrice, options.OperationMiddlewares["setUnitPrice"]...)
+	router.POST(options.BaseURL+"/api/accounts/:id/fills", wrapper.FillGap, options.OperationMiddlewares["fillGap"]...)
+	router.DELETE(options.BaseURL+"/api/accounts/:id/fills/:fillId", wrapper.DeleteGapFill, options.OperationMiddlewares["deleteGapFill"]...)
+	router.PATCH(options.BaseURL+"/api/accounts/:id/fills/:fillId", wrapper.UpdateGapFill, options.OperationMiddlewares["updateGapFill"]...)
 	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
 	router.GET(options.BaseURL+"/api/net-worth", wrapper.GetNetWorth, options.OperationMiddlewares["getNetWorth"]...)
 	router.GET(options.BaseURL+"/api/net-worth/history", wrapper.GetNetWorthHistory, options.OperationMiddlewares["getNetWorthHistory"]...)
@@ -2140,6 +2282,120 @@ func (response UpdateAccount409JSONResponse) VisitUpdateAccountResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FillGapRequestObject struct {
+	Id   Id `json:"id"`
+	Body *FillGapJSONRequestBody
+}
+
+type FillGapResponseObject interface {
+	VisitFillGapResponse(w http.ResponseWriter) error
+}
+
+type FillGap201JSONResponse GapFill
+
+func (response FillGap201JSONResponse) VisitFillGapResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FillGap404JSONResponse struct{ ProblemJSONResponse }
+
+func (response FillGap404JSONResponse) VisitFillGapResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FillGap409JSONResponse Problem
+
+func (response FillGap409JSONResponse) VisitFillGapResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteGapFillRequestObject struct {
+	Id     Id    `json:"id"`
+	FillId int64 `json:"fillId"`
+}
+
+type DeleteGapFillResponseObject interface {
+	VisitDeleteGapFillResponse(w http.ResponseWriter) error
+}
+
+type DeleteGapFill204Response struct {
+}
+
+func (response DeleteGapFill204Response) VisitDeleteGapFillResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteGapFill404JSONResponse struct{ ProblemJSONResponse }
+
+func (response DeleteGapFill404JSONResponse) VisitDeleteGapFillResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateGapFillRequestObject struct {
+	Id     Id    `json:"id"`
+	FillId int64 `json:"fillId"`
+	Body   *UpdateGapFillJSONRequestBody
+}
+
+type UpdateGapFillResponseObject interface {
+	VisitUpdateGapFillResponse(w http.ResponseWriter) error
+}
+
+type UpdateGapFill204Response struct {
+}
+
+func (response UpdateGapFill204Response) VisitUpdateGapFillResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UpdateGapFill404JSONResponse struct{ ProblemJSONResponse }
+
+func (response UpdateGapFill404JSONResponse) VisitUpdateGapFillResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3216,6 +3472,15 @@ type StrictServerInterface interface {
 	// UpdateAccount The owner's details of an account, its own name and its full number
 	// (PATCH /api/accounts/{id})
 	UpdateAccount(ctx context.Context, request UpdateAccountRequestObject) (UpdateAccountResponseObject, error)
+	// FillGap Make up for one of an account's gaps with what it lacks
+	// (POST /api/accounts/{id}/fills)
+	FillGap(ctx context.Context, request FillGapRequestObject) (FillGapResponseObject, error)
+	// DeleteGapFill Take a fill back; the gap shows again
+	// (DELETE /api/accounts/{id}/fills/{fillId})
+	DeleteGapFill(ctx context.Context, request DeleteGapFillRequestObject) (DeleteGapFillResponseObject, error)
+	// UpdateGapFill What the owner writes about a fill; empty clears it
+	// (PATCH /api/accounts/{id}/fills/{fillId})
+	UpdateGapFill(ctx context.Context, request UpdateGapFillRequestObject) (UpdateGapFillResponseObject, error)
 	// UpdateHoldings What an account the owner keeps holds today, and what will lapse
 	// (PUT /api/accounts/{id}/holdings)
 	UpdateHoldings(ctx context.Context, request UpdateHoldingsRequestObject) (UpdateHoldingsResponseObject, error)
@@ -3438,6 +3703,129 @@ func (sh *strictHandler) UpdateAccount(ctx *echo.Context, id Id) error {
 		return err
 	} else if validResponse, ok := response.(UpdateAccountResponseObject); ok {
 		return validResponse.VisitUpdateAccountResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// FillGap operation middleware
+func (sh *strictHandler) FillGap(ctx *echo.Context, id Id) error {
+	var request FillGapRequestObject
+
+	request.Id = id
+
+	var body FillGapJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.FillGap(ctx.Request().Context(), request.(FillGapRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FillGap")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(FillGapResponseObject); ok {
+		return validResponse.VisitFillGapResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// DeleteGapFill operation middleware
+func (sh *strictHandler) DeleteGapFill(ctx *echo.Context, id Id, fillId int64) error {
+	var request DeleteGapFillRequestObject
+
+	request.Id = id
+	request.FillId = fillId
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteGapFill(ctx.Request().Context(), request.(DeleteGapFillRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteGapFill")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(DeleteGapFillResponseObject); ok {
+		return validResponse.VisitDeleteGapFillResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// UpdateGapFill operation middleware
+func (sh *strictHandler) UpdateGapFill(ctx *echo.Context, id Id, fillId int64) error {
+	var request UpdateGapFillRequestObject
+
+	request.Id = id
+	request.FillId = fillId
+
+	var body UpdateGapFillJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateGapFill(ctx.Request().Context(), request.(UpdateGapFillRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateGapFill")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UpdateGapFillResponseObject); ok {
+		return validResponse.VisitUpdateGapFillResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

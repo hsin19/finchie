@@ -55,7 +55,7 @@ func TestAccountGapsCountsAccountsWhoseBalancesDoNotJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := queries.InsertTransactions(ctx, []dbq.InsertTransactionsParams{{
-		StatementID: statement, AccountID: account, UnitID: twd, TransactionDate: day("2026-09-10"),
+		StatementID: &statement, AccountID: account, UnitID: twd, TransactionDate: day("2026-09-10"),
 		Description: "轉入", Kind: "other", Amount: hundred,
 	}}); err != nil {
 		t.Fatal(err)

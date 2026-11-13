@@ -164,7 +164,7 @@ func (q *Queries) KindTotals(ctx context.Context, arg KindTotalsParams) ([]KindT
 }
 
 const linkLines = `-- name: LinkLines :many
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.card_last4
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
@@ -248,7 +248,7 @@ WITH matched AS (
                        overseas => $13::boolean, of_account_kind => $14::text,
                        hide_transfers => $15::boolean, query => $16::text)
 )
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
@@ -493,7 +493,7 @@ func (q *Queries) SetParents(ctx context.Context, arg SetParentsParams) error {
 }
 
 const transactionFamily = `-- name: TransactionFamily :many
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
@@ -785,9 +785,10 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 }
 
 const transferLines = `-- name: TransferLines :many
-SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, s.id AS statement_id,
        t.transaction_date, t.kind, t.amount, u.symbol AS unit, t.memo, t.counterparty
 FROM transactions t
+JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
 WHERE a.kind = 'deposit' OR t.kind = 'payment'
@@ -810,7 +811,8 @@ type TransferLinesRow struct {
 	Counterparty    *string
 }
 
-// The lines a transfer link can join (ADR 0016): every deposit account's lines, and card payment lines.
+// The lines a transfer link can join (ADR 0016): every deposit account's lines a statement reports, and card
+// payment lines; never the owner's fill of a gap, which is what moved over months, net.
 func (q *Queries) TransferLines(ctx context.Context) ([]TransferLinesRow, error) {
 	rows, err := q.db.Query(ctx, transferLines)
 	if err != nil {

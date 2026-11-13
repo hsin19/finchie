@@ -11,10 +11,12 @@ import (
 	"maps"
 	"math/big"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
@@ -152,12 +154,110 @@ func Gaps(ctx context.Context, queries *dbq.Queries, accountID *int64) ([]domain
 	}
 	gaps := make([]domain.Gap, 0, len(rows))
 	for _, r := range rows {
-		gaps = append(gaps, domain.Gap{
-			AccountID: r.AccountID, Unit: r.Unit, From: r.FromDate.Time, To: r.ToDate.Time,
-			Unseen: numeric.ToRat(r.Unseen), Itemized: r.Itemized,
-		})
+		gaps = append(gaps, toGap(r))
 	}
 	return gaps, nil
+}
+
+func toGap(r dbq.AccountGapsRow) domain.Gap {
+	return domain.Gap{
+		AccountID: r.AccountID, Unit: r.Unit, From: r.FromDate.Time, To: r.ToDate.Time,
+		Unseen: numeric.ToRat(r.Unseen), Itemized: r.Itemized, ReportedFrom: r.ReportedFrom.Time,
+	}
+}
+
+// ErrNoGap means the account has no such gap to fill: its two balances join up (a fill among their lines
+// included), are no longer consecutive, or no source could show what moved between them.
+var ErrNoGap = errors.New("no such gap")
+
+// Fill is what the owner made up for a gap: a line of its own.
+type Fill struct {
+	ID  int64
+	Gap domain.Gap
+	// What the owner wrote about it; nil when nothing.
+	Memo *string
+}
+
+// FillGap makes up for one of an account's gaps, named by its unit and its two balances' days, with a line
+// for what it lacks, on the day domain.Gap.FilledOn gives, with the balance it leaves. A memo, when there
+// is one, goes with it. A fill already dated between the two balances, one a statement found later set
+// aside among them, is the one filled again, with its own memo unless another is given.
+func FillGap(ctx context.Context, pool *pgxpool.Pool, accountID int64, unit string, from, to time.Time, memo *string) (Fill, error) {
+	var fill Fill
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		queries := dbq.New(tx)
+		rows, err := queries.AccountGaps(ctx, dbq.AccountGapsParams{
+			AccountID:       &accountID,
+			Itemized:        domain.KindsWhere(domain.AccountKind.Itemized),
+			EveryLineListed: domain.KindsWhere(domain.AccountKind.EveryLineListed),
+		})
+		if err != nil {
+			return fmt.Errorf("account gaps: %w", err)
+		}
+		i := slices.IndexFunc(rows, func(r dbq.AccountGapsRow) bool {
+			return r.Unit == unit && r.FromDate.Time.Equal(from) && r.ToDate.Time.Equal(to)
+		})
+		if i < 0 {
+			return ErrNoGap
+		}
+		r := rows[i]
+		gap := toGap(r)
+		if !gap.Itemized || !gap.From.Before(gap.To) {
+			return ErrNoGap
+		}
+		on := pgtype.Date{Time: gap.FilledOn(), Valid: true}
+		balance := numeric.Add(r.FromAmount, r.Unseen)
+		id, err := queries.FillLineIn(ctx, dbq.FillLineInParams{AccountID: accountID, UnitID: r.UnitID, FromDate: r.FromDate, ToDate: r.ToDate})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			line, err := queries.InsertFillLine(ctx, dbq.InsertFillLineParams{
+				OnDate: on, Amount: r.Unseen, AccountID: accountID, UnitID: r.UnitID, Memo: fillMemo(memo), Balance: balance,
+			})
+			if err != nil {
+				return fmt.Errorf("insert fill line: %w", err)
+			}
+			fill = Fill{ID: line.ID, Gap: gap, Memo: line.Memo}
+		case err != nil:
+			return fmt.Errorf("fill of the gap: %w", err)
+		default:
+			line, err := queries.UpdateFillLine(ctx, dbq.UpdateFillLineParams{ID: id, OnDate: on, Amount: r.Unseen, Balance: balance, Memo: fillMemo(memo)})
+			if err != nil {
+				return fmt.Errorf("update fill line: %w", err)
+			}
+			fill = Fill{ID: line.ID, Gap: gap, Memo: line.Memo}
+		}
+		return nil
+	})
+	if err != nil {
+		return Fill{}, fmt.Errorf("fill gap: %w", err)
+	}
+	return fill, nil
+}
+
+// ErrNoFill means the account has no fill with the id.
+var ErrNoFill = errors.New("no such fill")
+
+// SetFillMemo replaces what the owner wrote about a fill; an empty memo clears it.
+func SetFillMemo(ctx context.Context, queries *dbq.Queries, accountID, fillID int64, memo string) error {
+	updated, err := queries.SetFillMemo(ctx, dbq.SetFillMemoParams{ID: fillID, AccountID: accountID, Memo: fillMemo(&memo)})
+	if err != nil {
+		return fmt.Errorf("set memo of fill %d: %w", fillID, err)
+	}
+	if updated == 0 {
+		return ErrNoFill
+	}
+	return nil
+}
+
+// fillMemo is a memo as stored: trimmed, and nil when there is nothing left.
+func fillMemo(memo *string) *string {
+	if memo == nil {
+		return nil
+	}
+	if trimmed := strings.TrimSpace(*memo); trimmed != "" {
+		return &trimmed
+	}
+	return nil
 }
 
 var (

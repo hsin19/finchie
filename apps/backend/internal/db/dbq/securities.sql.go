@@ -108,7 +108,7 @@ FROM (SELECT unnest($1::integer[]) AS line_no, unnest($2::text[]) AS category,
              unnest($3::numeric[]) AS price, unnest($4::numeric[]) AS amount,
              unnest($5::numeric[]) AS fee, unnest($6::numeric[]) AS tax, unnest($7::numeric[]) AS net,
              unnest($8::numeric[]) AS prepaid) r
-JOIN transactions t ON t.statement_id = $9 AND t.line_no = r.line_no
+JOIN transactions t ON t.statement_id = $9::bigint AND t.line_no = r.line_no
 `
 
 type InsertTradesParams struct {

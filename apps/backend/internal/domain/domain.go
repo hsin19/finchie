@@ -161,6 +161,8 @@ const (
 	Earn   LineKind = "earn"
 	Adjust LineKind = "adjust"
 	Redeem LineKind = "redeem"
+	// The owner's fill of a gap, of any itemized account: no statement reports it (migration 00021).
+	Fill LineKind = "fill"
 )
 
 // Numbered reports whether its source tells accounts of this kind apart by number: a bank has many deposit

@@ -143,7 +143,7 @@ func insert(ctx context.Context, queries *dbq.Queries, result stored) error {
 		}
 		found = append(found, foundAccount{storedAccount: reported, id: accountID, units: units})
 		for _, line := range reported.lines {
-			line.StatementID, line.AccountID, line.UnitID = statementID, accountID, reported.unitID(units, line.unit)
+			line.StatementID, line.AccountID, line.UnitID = &statementID, accountID, reported.unitID(units, line.unit)
 			lines = append(lines, line.InsertTransactionsParams)
 		}
 		for _, balance := range reported.balances {

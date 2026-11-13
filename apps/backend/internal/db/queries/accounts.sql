@@ -78,10 +78,13 @@ ORDER BY b.as_of DESC, u.symbol, b.id DESC;
 -- there is one no source shows, not a gap. A securities statement lists every trade, so a security
 -- never traded is itemized all the same: a stock dividend is a gap. A points account's bills list every
 -- movement but points that lapse, so a gap there is points lost (ADR 0019).
+-- The lines between them are those that count (counted_lines), so a gap the owner filled joins up and is
+-- none. With the first day the later balance's statement reports, before which no report covers it.
 WITH ordered AS (
-    SELECT b.account_id, b.unit_id, b.as_of, b.amount,
+    SELECT b.account_id, b.unit_id, b.statement_id, b.as_of, b.amount,
            (a.kind = ANY (@every_line_listed::text[]) OR EXISTS (
-               SELECT 1 FROM transactions t WHERE t.account_id = b.account_id AND t.unit_id = b.unit_id))::boolean AS itemized,
+               SELECT 1 FROM transactions t
+               WHERE t.account_id = b.account_id AND t.unit_id = b.unit_id AND t.statement_id IS NOT NULL))::boolean AS itemized,
            lag(b.as_of) OVER w AS prev_as_of,
            lag(b.amount) OVER w AS prev_amount
     FROM balances b
@@ -90,21 +93,67 @@ WITH ordered AS (
       AND (sqlc.narg(account_id)::bigint IS NULL OR b.account_id = sqlc.narg(account_id)::bigint)
     WINDOW w AS (PARTITION BY b.account_id, b.unit_id ORDER BY b.as_of, b.id)
 )
-SELECT o.account_id, u.symbol AS unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
-       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen, o.itemized
+SELECT o.account_id, o.unit_id, u.symbol AS unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
+       o.prev_amount::numeric AS from_amount,
+       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen, o.itemized,
+       st.period_start AS reported_from
 FROM ordered o
 JOIN units u ON u.id = o.unit_id
+JOIN statements st ON st.id = o.statement_id
 LEFT JOIN LATERAL (SELECT sum(t.amount) AS amount
-                   FROM transactions t
+                   FROM counted_lines t
                    WHERE t.account_id = o.account_id AND t.unit_id = o.unit_id
                      AND t.transaction_date > o.prev_as_of AND t.transaction_date <= o.as_of) seen ON true
 WHERE o.prev_as_of IS NOT NULL
   AND o.amount - o.prev_amount <> coalesce(seen.amount, 0)
 ORDER BY o.account_id, u.symbol, o.as_of;
 
+-- name: FillLineIn :one
+-- A fill dated between two days, counting or not: the one to fill the gap between them again.
+SELECT id
+FROM transactions
+WHERE account_id = @account_id AND unit_id = @unit_id AND kind = 'fill'
+  AND transaction_date > @from_date AND transaction_date <= @to_date
+ORDER BY id
+LIMIT 1;
+
+-- name: InsertFillLine :one
+-- A fill as a line: on its day, with the balance it leaves.
+INSERT INTO transactions (statement_id, line_no, transaction_date, description, kind, amount, account_id, unit_id, memo, balance)
+VALUES (NULL, 0, @on_date, '', 'fill', @amount, @account_id, @unit_id, sqlc.narg(memo), @balance)
+RETURNING id, memo;
+
+-- name: UpdateFillLine :one
+-- A gap filled again: what it lacks now, and what the owner wrote unless they write something else.
+UPDATE transactions
+SET transaction_date = @on_date, amount = @amount, balance = @balance, memo = coalesce(sqlc.narg(memo), memo)
+WHERE id = @id AND kind = 'fill'
+RETURNING id, memo;
+
+-- name: SetFillMemo :execrows
+UPDATE transactions
+SET memo = sqlc.narg(memo)
+WHERE id = @id AND account_id = @account_id AND kind = 'fill';
+
+-- name: DeleteFillLine :execrows
+DELETE FROM transactions
+WHERE id = @id AND account_id = @account_id AND kind = 'fill';
+
+-- name: AccountFills :many
+-- An account's fills that count (counted_lines), the newest first, with the two balances each falls
+-- between.
+SELECT t.id, u.symbol AS unit, s.from_date::date AS from_date, s.to_date, t.transaction_date AS on_date, t.amount, t.memo
+FROM counted_lines t
+JOIN units u ON u.id = t.unit_id
+JOIN balance_steps s ON s.account_id = t.account_id AND s.unit_id = t.unit_id
+                    AND s.from_date < t.transaction_date AND t.transaction_date <= s.to_date
+WHERE t.account_id = @account_id AND t.kind = 'fill'
+ORDER BY t.transaction_date DESC, u.symbol;
+
 -- name: AccountLines :many
--- Newest first. Amounts as the source reports them: money in is positive on a deposit account, a
--- purchase is positive on a card bill.
+-- Newest first, the lines that count (counted_lines). Amounts as the source reports them: money in is
+-- positive on a deposit account, a purchase is positive on a card bill. A fill is one line for the whole
+-- period no statement covers, with no statement, below a statement's lines of the same day.
 SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, u.symbol AS unit,
        t.amount, t.balance,
        -- A trade's money (ADR 0017).
@@ -114,19 +163,28 @@ SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counte
        c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
        coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
-       ca.full_number AS counterpart_full_number
-FROM transactions t
+       ca.full_number AS counterpart_full_number,
+       -- The two balances a fill falls between.
+       step.from_date AS fill_from, step.to_date AS fill_to
+FROM counted_lines t
 JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
+LEFT JOIN LATERAL (SELECT s.from_date::date AS from_date, s.to_date
+                   FROM balance_steps s
+                   WHERE t.kind = 'fill' AND s.account_id = t.account_id AND s.unit_id = t.unit_id
+                     AND s.from_date < t.transaction_date AND t.transaction_date <= s.to_date
+                   ORDER BY s.to_date
+                   LIMIT 1) step ON true
 WHERE t.account_id = @account_id
-ORDER BY t.transaction_date DESC, t.statement_id DESC, t.line_no DESC
+ORDER BY t.transaction_date DESC, t.statement_id DESC NULLS LAST, t.line_no DESC
 LIMIT @row_limit OFFSET @row_offset;
 
 -- name: BalancesOn :many
 -- What each account held of each unit at the end of each day (ADR 0023): its newest balance on or before
--- the day, and for the itemized kinds the lines dated after that balance up to the day; with its worth in
+-- the day, and for the itemized kinds the lines that count (counted_lines, a fill of a gap among them) dated
+-- after that balance up to the day; with its worth in
 -- NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
 WITH days AS (
     SELECT d::date AS day FROM unnest(@days::date[]) d
@@ -138,7 +196,7 @@ WITH days AS (
 ), moved AS (
     SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
            (h.amount + CASE WHEN a.kind = ANY (@itemized::text[]) THEN coalesce((
-               SELECT sum(t.amount) FROM transactions t
+               SELECT sum(t.amount) FROM counted_lines t
                WHERE t.account_id = h.account_id AND t.unit_id = h.unit_id
                  AND t.transaction_date > h.as_of AND t.transaction_date <= h.day), 0) ELSE 0 END)::numeric AS amount
     FROM held h

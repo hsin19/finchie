@@ -54,11 +54,62 @@ func (q *Queries) AccountBalances(ctx context.Context, accountID int64) ([]Accou
 	return items, nil
 }
 
+const accountFills = `-- name: AccountFills :many
+SELECT t.id, u.symbol AS unit, s.from_date::date AS from_date, s.to_date, t.transaction_date AS on_date, t.amount, t.memo
+FROM counted_lines t
+JOIN units u ON u.id = t.unit_id
+JOIN balance_steps s ON s.account_id = t.account_id AND s.unit_id = t.unit_id
+                    AND s.from_date < t.transaction_date AND t.transaction_date <= s.to_date
+WHERE t.account_id = $1 AND t.kind = 'fill'
+ORDER BY t.transaction_date DESC, u.symbol
+`
+
+type AccountFillsRow struct {
+	ID       int64
+	Unit     string
+	FromDate pgtype.Date
+	ToDate   pgtype.Date
+	OnDate   pgtype.Date
+	Amount   pgtype.Numeric
+	Memo     *string
+}
+
+// An account's fills that count (counted_lines), the newest first, with the two balances each falls
+// between.
+func (q *Queries) AccountFills(ctx context.Context, accountID int64) ([]AccountFillsRow, error) {
+	rows, err := q.db.Query(ctx, accountFills, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountFillsRow
+	for rows.Next() {
+		var i AccountFillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Unit,
+			&i.FromDate,
+			&i.ToDate,
+			&i.OnDate,
+			&i.Amount,
+			&i.Memo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const accountGaps = `-- name: AccountGaps :many
 WITH ordered AS (
-    SELECT b.account_id, b.unit_id, b.as_of, b.amount,
+    SELECT b.account_id, b.unit_id, b.statement_id, b.as_of, b.amount,
            (a.kind = ANY ($1::text[]) OR EXISTS (
-               SELECT 1 FROM transactions t WHERE t.account_id = b.account_id AND t.unit_id = b.unit_id))::boolean AS itemized,
+               SELECT 1 FROM transactions t
+               WHERE t.account_id = b.account_id AND t.unit_id = b.unit_id AND t.statement_id IS NOT NULL))::boolean AS itemized,
            lag(b.as_of) OVER w AS prev_as_of,
            lag(b.amount) OVER w AS prev_amount
     FROM balances b
@@ -67,12 +118,15 @@ WITH ordered AS (
       AND ($3::bigint IS NULL OR b.account_id = $3::bigint)
     WINDOW w AS (PARTITION BY b.account_id, b.unit_id ORDER BY b.as_of, b.id)
 )
-SELECT o.account_id, u.symbol AS unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
-       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen, o.itemized
+SELECT o.account_id, o.unit_id, u.symbol AS unit, o.prev_as_of::date AS from_date, o.as_of AS to_date,
+       o.prev_amount::numeric AS from_amount,
+       (o.amount - o.prev_amount - coalesce(seen.amount, 0))::numeric AS unseen, o.itemized,
+       st.period_start AS reported_from
 FROM ordered o
 JOIN units u ON u.id = o.unit_id
+JOIN statements st ON st.id = o.statement_id
 LEFT JOIN LATERAL (SELECT sum(t.amount) AS amount
-                   FROM transactions t
+                   FROM counted_lines t
                    WHERE t.account_id = o.account_id AND t.unit_id = o.unit_id
                      AND t.transaction_date > o.prev_as_of AND t.transaction_date <= o.as_of) seen ON true
 WHERE o.prev_as_of IS NOT NULL
@@ -87,12 +141,15 @@ type AccountGapsParams struct {
 }
 
 type AccountGapsRow struct {
-	AccountID int64
-	Unit      string
-	FromDate  pgtype.Date
-	ToDate    pgtype.Date
-	Unseen    pgtype.Numeric
-	Itemized  bool
+	AccountID    int64
+	UnitID       int64
+	Unit         string
+	FromDate     pgtype.Date
+	ToDate       pgtype.Date
+	FromAmount   pgtype.Numeric
+	Unseen       pgtype.Numeric
+	Itemized     bool
+	ReportedFrom pgtype.Date
 }
 
 // Where an account's balances do not join up (ADR 0013): two consecutive balances in one unit whose
@@ -106,6 +163,8 @@ type AccountGapsRow struct {
 // there is one no source shows, not a gap. A securities statement lists every trade, so a security
 // never traded is itemized all the same: a stock dividend is a gap. A points account's bills list every
 // movement but points that lapse, so a gap there is points lost (ADR 0019).
+// The lines between them are those that count (counted_lines), so a gap the owner filled joins up and is
+// none. With the first day the later balance's statement reports, before which no report covers it.
 func (q *Queries) AccountGaps(ctx context.Context, arg AccountGapsParams) ([]AccountGapsRow, error) {
 	rows, err := q.db.Query(ctx, accountGaps, arg.EveryLineListed, arg.Itemized, arg.AccountID)
 	if err != nil {
@@ -117,11 +176,14 @@ func (q *Queries) AccountGaps(ctx context.Context, arg AccountGapsParams) ([]Acc
 		var i AccountGapsRow
 		if err := rows.Scan(
 			&i.AccountID,
+			&i.UnitID,
 			&i.Unit,
 			&i.FromDate,
 			&i.ToDate,
+			&i.FromAmount,
 			&i.Unseen,
 			&i.Itemized,
+			&i.ReportedFrom,
 		); err != nil {
 			return nil, err
 		}
@@ -143,14 +205,22 @@ SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counte
        c.id AS counterpart_id, c.statement_id AS counterpart_statement_id, c.transaction_date AS counterpart_date,
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
        coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
-       ca.full_number AS counterpart_full_number
-FROM transactions t
+       ca.full_number AS counterpart_full_number,
+       -- The two balances a fill falls between.
+       step.from_date AS fill_from, step.to_date AS fill_to
+FROM counted_lines t
 JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
+LEFT JOIN LATERAL (SELECT s.from_date::date AS from_date, s.to_date
+                   FROM balance_steps s
+                   WHERE t.kind = 'fill' AND s.account_id = t.account_id AND s.unit_id = t.unit_id
+                     AND s.from_date < t.transaction_date AND t.transaction_date <= s.to_date
+                   ORDER BY s.to_date
+                   LIMIT 1) step ON true
 WHERE t.account_id = $1
-ORDER BY t.transaction_date DESC, t.statement_id DESC, t.line_no DESC
+ORDER BY t.transaction_date DESC, t.statement_id DESC NULLS LAST, t.line_no DESC
 LIMIT $3 OFFSET $2
 `
 
@@ -162,12 +232,12 @@ type AccountLinesParams struct {
 
 type AccountLinesRow struct {
 	ID                       int64
-	StatementID              int64
+	StatementID              *int64
 	TransactionDate          pgtype.Date
 	Description              string
 	Memo                     *string
 	Counterparty             *string
-	Kind                     domain.LineKind
+	Kind                     string
 	Unit                     string
 	Amount                   pgtype.Numeric
 	Balance                  pgtype.Numeric
@@ -187,10 +257,13 @@ type AccountLinesRow struct {
 	CounterpartAccountName   *string
 	CounterpartAccountNumber *string
 	CounterpartFullNumber    *string
+	FillFrom                 pgtype.Date
+	FillTo                   pgtype.Date
 }
 
-// Newest first. Amounts as the source reports them: money in is positive on a deposit account, a
-// purchase is positive on a card bill.
+// Newest first, the lines that count (counted_lines). Amounts as the source reports them: money in is
+// positive on a deposit account, a purchase is positive on a card bill. A fill is one line for the whole
+// period no statement covers, with no statement, below a statement's lines of the same day.
 func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]AccountLinesRow, error) {
 	rows, err := q.db.Query(ctx, accountLines, arg.AccountID, arg.RowOffset, arg.RowLimit)
 	if err != nil {
@@ -227,6 +300,8 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 			&i.CounterpartAccountName,
 			&i.CounterpartAccountNumber,
 			&i.CounterpartFullNumber,
+			&i.FillFrom,
+			&i.FillTo,
 		); err != nil {
 			return nil, err
 		}
@@ -249,7 +324,7 @@ WITH days AS (
 ), moved AS (
     SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
            (h.amount + CASE WHEN a.kind = ANY ($2::text[]) THEN coalesce((
-               SELECT sum(t.amount) FROM transactions t
+               SELECT sum(t.amount) FROM counted_lines t
                WHERE t.account_id = h.account_id AND t.unit_id = h.unit_id
                  AND t.transaction_date > h.as_of AND t.transaction_date <= h.day), 0) ELSE 0 END)::numeric AS amount
     FROM held h
@@ -280,7 +355,8 @@ type BalancesOnRow struct {
 }
 
 // What each account held of each unit at the end of each day (ADR 0023): its newest balance on or before
-// the day, and for the itemized kinds the lines dated after that balance up to the day; with its worth in
+// the day, and for the itemized kinds the lines that count (counted_lines, a fill of a gap among them) dated
+// after that balance up to the day; with its worth in
 // NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
 func (q *Queries) BalancesOn(ctx context.Context, arg BalancesOnParams) ([]BalancesOnRow, error) {
 	rows, err := q.db.Query(ctx, balancesOn, arg.Days, arg.Itemized)
@@ -308,6 +384,53 @@ func (q *Queries) BalancesOn(ctx context.Context, arg BalancesOnParams) ([]Balan
 		return nil, err
 	}
 	return items, nil
+}
+
+const deleteFillLine = `-- name: DeleteFillLine :execrows
+DELETE FROM transactions
+WHERE id = $1 AND account_id = $2 AND kind = 'fill'
+`
+
+type DeleteFillLineParams struct {
+	ID        int64
+	AccountID int64
+}
+
+func (q *Queries) DeleteFillLine(ctx context.Context, arg DeleteFillLineParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFillLine, arg.ID, arg.AccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const fillLineIn = `-- name: FillLineIn :one
+SELECT id
+FROM transactions
+WHERE account_id = $1 AND unit_id = $2 AND kind = 'fill'
+  AND transaction_date > $3 AND transaction_date <= $4
+ORDER BY id
+LIMIT 1
+`
+
+type FillLineInParams struct {
+	AccountID int64
+	UnitID    int64
+	FromDate  pgtype.Date
+	ToDate    pgtype.Date
+}
+
+// A fill dated between two days, counting or not: the one to fill the gap between them again.
+func (q *Queries) FillLineIn(ctx context.Context, arg FillLineInParams) (int64, error) {
+	row := q.db.QueryRow(ctx, fillLineIn,
+		arg.AccountID,
+		arg.UnitID,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getAccount = `-- name: GetAccount :one
@@ -364,6 +487,41 @@ func (q *Queries) InsertBalance(ctx context.Context, arg InsertBalanceParams) er
 		arg.StatementID,
 	)
 	return err
+}
+
+const insertFillLine = `-- name: InsertFillLine :one
+INSERT INTO transactions (statement_id, line_no, transaction_date, description, kind, amount, account_id, unit_id, memo, balance)
+VALUES (NULL, 0, $1, '', 'fill', $2, $3, $4, $5, $6)
+RETURNING id, memo
+`
+
+type InsertFillLineParams struct {
+	OnDate    pgtype.Date
+	Amount    pgtype.Numeric
+	AccountID int64
+	UnitID    int64
+	Memo      *string
+	Balance   pgtype.Numeric
+}
+
+type InsertFillLineRow struct {
+	ID   int64
+	Memo *string
+}
+
+// A fill as a line: on its day, with the balance it leaves.
+func (q *Queries) InsertFillLine(ctx context.Context, arg InsertFillLineParams) (InsertFillLineRow, error) {
+	row := q.db.QueryRow(ctx, insertFillLine,
+		arg.OnDate,
+		arg.Amount,
+		arg.AccountID,
+		arg.UnitID,
+		arg.Memo,
+		arg.Balance,
+	)
+	var i InsertFillLineRow
+	err := row.Scan(&i.ID, &i.Memo)
+	return i, err
 }
 
 const latestBalances = `-- name: LatestBalances :many
@@ -525,6 +683,26 @@ func (q *Queries) ListAccounts(ctx context.Context, id *int64) ([]ListAccountsRo
 	return items, nil
 }
 
+const setFillMemo = `-- name: SetFillMemo :execrows
+UPDATE transactions
+SET memo = $1
+WHERE id = $2 AND account_id = $3 AND kind = 'fill'
+`
+
+type SetFillMemoParams struct {
+	Memo      *string
+	ID        int64
+	AccountID int64
+}
+
+func (q *Queries) SetFillMemo(ctx context.Context, arg SetFillMemoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setFillMemo, arg.Memo, arg.ID, arg.AccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateAccountDetails = `-- name: UpdateAccountDetails :one
 UPDATE accounts
 SET name        = CASE WHEN $1::boolean THEN $2::text ELSE name END,
@@ -553,6 +731,40 @@ func (q *Queries) UpdateAccountDetails(ctx context.Context, arg UpdateAccountDet
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateFillLine = `-- name: UpdateFillLine :one
+UPDATE transactions
+SET transaction_date = $1, amount = $2, balance = $3, memo = coalesce($4, memo)
+WHERE id = $5 AND kind = 'fill'
+RETURNING id, memo
+`
+
+type UpdateFillLineParams struct {
+	OnDate  pgtype.Date
+	Amount  pgtype.Numeric
+	Balance pgtype.Numeric
+	Memo    *string
+	ID      int64
+}
+
+type UpdateFillLineRow struct {
+	ID   int64
+	Memo *string
+}
+
+// A gap filled again: what it lacks now, and what the owner wrote unless they write something else.
+func (q *Queries) UpdateFillLine(ctx context.Context, arg UpdateFillLineParams) (UpdateFillLineRow, error) {
+	row := q.db.QueryRow(ctx, updateFillLine,
+		arg.OnDate,
+		arg.Amount,
+		arg.Balance,
+		arg.Memo,
+		arg.ID,
+	)
+	var i UpdateFillLineRow
+	err := row.Scan(&i.ID, &i.Memo)
+	return i, err
 }
 
 const upsertAccount = `-- name: UpsertAccount :one

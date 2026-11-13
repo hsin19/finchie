@@ -23,7 +23,7 @@ WITH matched AS (
                        overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
                        hide_transfers => @hide_transfers::boolean, query => sqlc.narg(query)::text)
 )
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
@@ -148,7 +148,7 @@ ORDER BY t.kind;
 -- name: TransactionFamily :many
 -- A line with its parent and its children, whichever statements they are on; the same columns as
 -- ListTransactions.
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
@@ -197,7 +197,7 @@ SELECT pg_advisory_xact_lock(4243711);
 
 -- name: LinkLines :many
 -- The lines of these kinds, which a parent link can start or end at.
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.card_last4
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
@@ -213,10 +213,12 @@ FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@parent_ids::bigint[]) AS pare
 WHERE t.id = l.id;
 
 -- name: TransferLines :many
--- The lines a transfer link can join (ADR 0016): every deposit account's lines, and card payment lines.
-SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, t.statement_id,
+-- The lines a transfer link can join (ADR 0016): every deposit account's lines a statement reports, and card
+-- payment lines; never the owner's fill of a gap, which is what moved over months, net.
+SELECT t.id, t.account_id, a.kind AS account_kind, a.institution, a.number, a.full_number, s.id AS statement_id,
        t.transaction_date, t.kind, t.amount, u.symbol AS unit, t.memo, t.counterparty
 FROM transactions t
+JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
 WHERE a.kind = 'deposit' OR t.kind = 'payment'

@@ -48,7 +48,7 @@ Sources skip: a combined statement can be missing for a month without activity, 
 | Result | Meaning | Shown |
 |---|---|---|
 | Joins | Nothing happened that no source reported | Nothing |
-| Does not join | A report is missing, or a balance was misread | The account is flagged with the two balances between which money moved unseen; `finchie.accounts.gaps` counts flagged accounts for alerting (ADR 0011) |
+| Does not join | A report is missing, or a balance was misread | The account is flagged with the two balances between which money moved unseen; `finchie.accounts.gaps` counts flagged accounts for alerting (ADR 0011) (unless the owner filled the gap once its reports were lost for good: a line of kind `fill`, migration 00021) |
 | Unknown | Nothing reports the movements between them (balance-only snapshots) | Nothing (also when a deposit account's balance moves in a unit no statement has listed a line of: CTBC lists only the balance of a passbook savings account, 活儲有摺, so whatever moves it, interest included, no statement shows. A balance that never moved still joins; a securities statement lists every trade, so a security never traded is still checked.) |
 
 Like links (ADR 0009), continuity is derived, not kept by hand: reports arrive in any order, so an account's is worked out again whenever one of its balances is stored. (It is worked out on every read instead, by `domain.Assess`, so it is never stale.)

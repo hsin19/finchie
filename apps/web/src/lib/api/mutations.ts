@@ -42,6 +42,32 @@ export function reparse(id: number) {
     return change(api().POST("/api/documents/{id}/reparse", { params: { path: { id } } }));
 }
 
+/** One of an account's gaps, as the account lists it. */
+export interface GapRef {
+    unit: string;
+    from: string;
+    to: string;
+}
+
+/**
+ * Makes up for a gap whose reports are lost with what it lacks: its two balances join up, and it
+ * counts from the last day no report covers. A report found later takes over by itself.
+ */
+export function fillGap(accountId: number, gap: GapRef) {
+    const { unit, from, to } = gap;
+    return change(api().POST("/api/accounts/{id}/fills", { params: { path: { id: accountId } }, body: { unit, from, to } }));
+}
+
+/** What the owner writes about a fill, such as why its reports are lost; empty clears it. */
+export function setFillMemo(accountId: number, fillId: number, memo: string) {
+    return change(api().PATCH("/api/accounts/{id}/fills/{fillId}", { params: { path: { id: accountId, fillId } }, body: { memo } }));
+}
+
+/** Takes a fill back: the gap shows again. */
+export function unfillGap(accountId: number, fillId: number) {
+    return change(api().DELETE("/api/accounts/{id}/fills/{fillId}", { params: { path: { id: accountId, fillId } } }));
+}
+
 /**
  * Deletes a document that holds nothing of the ledger (`deletable`), its original included, and goes to
  * `then`: the document's own page would have nothing to show.

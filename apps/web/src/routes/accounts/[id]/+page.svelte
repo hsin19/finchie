@@ -3,14 +3,12 @@ import { accountPage } from "#lib/accounts.js";
 import HoldingsForm from "#lib/components/HoldingsForm.svelte";
 import UnitPrices from "#lib/components/UnitPrices.svelte";
 import { today } from "#lib/dates.js";
-import {
-    formatAmount,
-    sign,
-} from "#lib/money.js";
+import { formatAmount } from "#lib/money.js";
 import type { PageProps } from "./$types";
 import AccountHeader from "./AccountHeader.svelte";
 import AccountLines from "./AccountLines.svelte";
 import BalanceHistory from "./BalanceHistory.svelte";
+import Gaps from "./Gaps.svelte";
 import Holdings from "./Holdings.svelte";
 import Positions from "./Positions.svelte";
 
@@ -24,23 +22,7 @@ const layout = $derived(accountPage(account));
 
 <AccountHeader {account} {layout} today={today()} {base} />
 
-{#if account.gaps.length > 0}
-    <section class="panel border-neg px-3.5 py-2.5">
-        <h2 class="label text-neg">GAPS · 餘額接不起來</h2>
-        <p class="mt-1 text-dim">{layout.gaps}</p>
-        <table class="mt-1.5 border-collapse">
-            <tbody>
-                {#each account.gaps as gap (`${gap.unit}:${gap.to}`)}
-                    <tr class="border-t border-rule">
-                        <td class="py-1.5 pr-4">{gap.from} → {gap.to}</td>
-                        <td class="py-1.5 pr-2 text-right {sign(gap.unseen) < 0 ? 'text-neg' : sign(gap.unseen) > 0 ? 'text-pos' : 'text-dim'}">{formatAmount(gap.unseen, { signed: true })}</td>
-                        <td class="py-1.5 text-mute">{gap.unit} 沒有明細</td>
-                    </tr>
-                {/each}
-            </tbody>
-        </table>
-    </section>
-{/if}
+<Gaps {account} explanation={layout.gaps} />
 
 {#if layout.holdings}
     <Holdings {account} {base} intervalHours={data.settings.sourceIntervalHours} />
@@ -80,7 +62,7 @@ const layout = $derived(accountPage(account));
 
 <!-- An exchange reports no lines at all (ADR 0018), nor does the owner of an account they keep (ADR 0019). -->
 {#if layout.lines}
-    <AccountLines lines={data.lines} note={layout.lines.note} trade={layout.lines.trade} />
+    <AccountLines accountId={account.id} lines={data.lines} note={layout.lines.note} trade={layout.lines.trade} />
 {/if}
 
 <BalanceHistory {account} by={layout.history} />

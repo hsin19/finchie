@@ -38,6 +38,21 @@ type Gap struct {
 	// Some statement lists lines of the account in the unit, or lists every line whether any moved
 	// (EveryLineListed). A move in a unit no statement itemizes is one no source could show: not a gap.
 	Itemized bool
+	// The first day the statement of the later balance covers; zero when it prints none.
+	ReportedFrom time.Time
+}
+
+// FilledOn is the day the owner's fill of the gap counts as moved: the last day no report
+// covers, the day before the later statement's first, where reports are missing between the two
+// balances; else the later balance's day, since the money moved somewhere up to it.
+func (g Gap) FilledOn() time.Time {
+	if g.ReportedFrom.IsZero() {
+		return g.To
+	}
+	if last := g.ReportedFrom.AddDate(0, 0, -1); last.After(g.From) && !last.After(g.To) {
+		return last
+	}
+	return g.To
 }
 
 // Gaps is what an account's balances say about its continuity.

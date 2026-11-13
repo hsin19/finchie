@@ -40,7 +40,7 @@ A program has no exchange rate: a points account has no worth until its program 
 
 ### Next
 
-- **Making up a gap by hand**, as lapsed points, and **reminders** of points about to lapse, are left for later.
+- **Making up a gap by hand**, as lapsed points, and **reminders** of points about to lapse, are left for later. (Filling a gap by hand came later, for any itemized account: a line of kind `fill`, migration 00021.)
 - **Working out what lapses when**, ahead of the bills, is left for later too: points as lots, each with a date it lapses by (as a source reports it, by a program's rule, or as the owner enters it), used oldest first. Cathay's bills already allow it: each month's twelve-month total, less the points used, grows by the month that enters the window, which gives every month's lapsing points a year ahead. Worked out from the owner's bills, it matched what each of the 38 bills said would lapse that month.
 - **A program's rule** would be the unit's, not an account's or a balance's: points earned in a period lapse together a fixed time later (Cathay's apparently by the end of the 35th month after the one they were earned in, to be confirmed against its terms), or all at once a while after the account last moved (common for hotels and airlines). A bank's rule would come from its parser, the owner's be set once. Each lot's date would be worked out on every read, never stored, so a rule set or corrected later applies to every line; what a bill prints would check it, a mismatch a warning like an unbalanced statement.
 

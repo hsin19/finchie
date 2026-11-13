@@ -431,6 +431,71 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
 
+  /api/accounts/{id}/fills:
+    post:
+      operationId: fillGap
+      summary: Make up for one of an account's gaps with what it lacks
+      description: |
+        For a gap in `gaps`, named by its unit and its two balances' days, once the reports that would
+        show what moved are lost. What it lacks becomes a line of the account with no statement (kind
+        `fill`), on the last day no report covers, for the whole period: the two balances join up, and
+        net worth counts it from that day. No search, total, or transfer sees it: it is what moved over
+        the period, net. It counts while those two balances are consecutive and lack exactly that, so a
+        report found later, or a balance read differently, sets it aside; filling the same two balances
+        again brings it back. 409 when there is no such gap to fill.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GapFillCreate" }
+      responses:
+        "201":
+          description: Filled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GapFill" }
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+
+  /api/accounts/{id}/fills/{fillId}:
+    patch:
+      operationId: updateGapFill
+      summary: What the owner writes about a fill; empty clears it
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: fillId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GapFillUpdate" }
+      responses:
+        "204":
+          description: Updated
+        "404":
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteGapFill
+      summary: Take a fill back; the gap shows again
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: fillId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/Problem"
+
   /api/accounts/{id}/lines:
     get:
       operationId: listAccountLines
@@ -879,12 +944,16 @@ components:
       allOf:
         - $ref: "#/components/schemas/Account"
         - type: object
-          required: [history]
+          required: [history, fills]
           properties:
             history:
               type: array
               description: Every balance its sources reported, statements and snapshots, newest first
               items: { $ref: "#/components/schemas/Balance" }
+            fills:
+              type: array
+              description: "The owner's fills of its gaps that count, newest first: the gaps they fill are not in `gaps`"
+              items: { $ref: "#/components/schemas/GapFill" }
             positions:
               type: array
               description: "A securities account's: every security it holds or has traded, by name (ADR 0017)"
@@ -993,6 +1062,35 @@ components:
         to: { type: string, format: date }
         unseen: { $ref: "#/components/schemas/Decimal", description: Money that moved between them that no line shows }
 
+    GapFillCreate:
+      type: object
+      description: One of the account's gaps, as `gaps` lists it
+      required: [unit, from, to]
+      properties:
+        unit: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        memo: { type: string, description: "What the owner writes about it; absent or empty keeps what the same gap's fill had" }
+
+    GapFillUpdate:
+      type: object
+      required: [memo]
+      properties:
+        memo: { type: string, description: "Trimmed; empty clears it" }
+
+    GapFill:
+      type: object
+      description: What the owner made up for a gap between two balances
+      required: [id, unit, from, to, "on", amount]
+      properties:
+        id: { type: integer, format: int64 }
+        unit: { type: string }
+        from: { type: string, format: date, description: The day of the balance before }
+        to: { type: string, format: date, description: The day of the balance after }
+        "on": { type: string, format: date, description: The day it counts as moved, the last no report covers }
+        amount: { $ref: "#/components/schemas/Decimal", description: "What moved unseen, as a line's amount would be: money in positive" }
+        memo: { type: string, description: What the owner wrote about it; absent when nothing }
+
     AccountCreate:
       type: object
       required: [kind, name]
@@ -1062,10 +1160,15 @@ components:
 
     AccountLine:
       type: object
-      required: [id, statementId, date, description, kind, unit, amount]
+      description: |
+        A line a statement reports, or the owner's fill of a gap (`fill`): one line for the whole period no
+        statement covers, as a passbook prints one for what went unprinted, dated on its last day, with the
+        fill's memo and the balance it leaves.
+      required: [id, date, description, kind, unit, amount]
       properties:
-        id: { type: integer, format: int64 }
-        statementId: { type: integer, format: int64 }
+        id: { type: integer, format: int64, description: "The line's, or the fill's for a fill" }
+        statementId: { type: integer, format: int64, description: The statement that reports it; absent for a fill }
+        fill: { $ref: "#/components/schemas/LineFill" }
         date: { type: string, format: date }
         description: { type: string }
         memo: { type: string, nullable: true }
@@ -1076,6 +1179,15 @@ components:
         balance: { allOf: [{ $ref: "#/components/schemas/Decimal" }], nullable: true, description: "The running balance, when printed" }
         counterpart: { $ref: "#/components/schemas/LineCounterpart" }
         trade: { $ref: "#/components/schemas/Trade" }
+
+    LineFill:
+      type: object
+      description: The owner's fill of a gap, as a line
+      required: [id, from, to]
+      properties:
+        id: { type: integer, format: int64 }
+        from: { type: string, format: date, description: The day of the balance before }
+        to: { type: string, format: date, description: The day of the balance after }
 
     Trade:
       type: object

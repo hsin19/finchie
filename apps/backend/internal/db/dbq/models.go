@@ -29,6 +29,37 @@ type Balance struct {
 	UnitID      int64
 }
 
+type BalanceStep struct {
+	AccountID   int64
+	UnitID      int64
+	StatementID *int64
+	FromDate    interface{}
+	ToDate      pgtype.Date
+	Moved       int32
+}
+
+type CountedLine struct {
+	ID               int64
+	StatementID      *int64
+	LineNo           int32
+	TransactionDate  pgtype.Date
+	PostingDate      pgtype.Date
+	Description      string
+	Kind             string
+	Amount           pgtype.Numeric
+	OriginalAmount   pgtype.Numeric
+	OriginalCurrency *string
+	Country          *string
+	CardLast4        *string
+	ParentID         *int64
+	AccountID        int64
+	Memo             *string
+	Counterparty     *string
+	Balance          pgtype.Numeric
+	CounterpartID    *int64
+	UnitID           int64
+}
+
 type Document struct {
 	ID             int64
 	Sha256         []byte
@@ -116,7 +147,7 @@ type Trade struct {
 
 type Transaction struct {
 	ID               int64
-	StatementID      int64
+	StatementID      *int64
 	LineNo           int32
 	TransactionDate  pgtype.Date
 	PostingDate      pgtype.Date

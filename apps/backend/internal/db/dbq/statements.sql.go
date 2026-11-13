@@ -188,7 +188,7 @@ func (q *Queries) InsertStatementChecks(ctx context.Context, arg InsertStatement
 }
 
 type InsertTransactionsParams struct {
-	StatementID      int64
+	StatementID      *int64
 	AccountID        int64
 	UnitID           int64
 	LineNo           int32
@@ -262,7 +262,7 @@ func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListSta
 }
 
 const listTransactions = `-- name: ListTransactions :many
-SELECT t.id, t.statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
+SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
@@ -296,7 +296,7 @@ LEFT JOIN LATERAL (SELECT NULL::numeric AS amount,
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE c.parent_id = t.id) kids ON true
-WHERE t.statement_id = $1
+WHERE t.statement_id = $1::bigint
 ORDER BY t.line_no
 `
 
@@ -553,7 +553,7 @@ func (q *Queries) TrimStatementBalances(ctx context.Context, arg TrimStatementBa
 
 const trimStatementLines = `-- name: TrimStatementLines :exec
 DELETE FROM transactions
-WHERE statement_id = $1
+WHERE statement_id = $1::bigint
   AND account_id = $2
   AND unit_id = $3
   AND transaction_date BETWEEN $4 AND $5

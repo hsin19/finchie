@@ -2,6 +2,7 @@ package domain
 
 import (
 	"testing"
+	"time"
 )
 
 // Synthetic figures (ADR 0006).
@@ -80,6 +81,24 @@ func TestOnlyMoneyThatMovedInAUnitAStatementItemizesIsAGap(t *testing.T) {
 	}
 	if n := GappedAccounts(gaps); n != 2 {
 		t.Fatalf("gapped accounts = %d, want 2", n)
+	}
+}
+
+func TestAFillCountsOnTheLastDayNoReportCovers(t *testing.T) {
+	// July's statement closed 7/31 and September's covers 9/1 to 9/30: August's is the one missing.
+	gap := Gap{From: on("2026-07-31"), To: on("2026-09-30"), ReportedFrom: on("2026-09-01")}
+	if got := gap.FilledOn(); !got.Equal(on("2026-08-31")) {
+		t.Fatalf("filled on %s, want the day before September's statement starts", got.Format(time.DateOnly))
+	}
+	// A statement that prints no first day, or one that starts right after the balance before: the gap is
+	// somewhere up to its closing.
+	for _, gap := range []Gap{
+		{From: on("2026-07-31"), To: on("2026-09-30")},
+		{From: on("2026-07-31"), To: on("2026-09-30"), ReportedFrom: on("2026-08-01")},
+	} {
+		if got := gap.FilledOn(); !got.Equal(on("2026-09-30")) {
+			t.Fatalf("%+v filled on %s, want its closing day", gap, got.Format(time.DateOnly))
+		}
 	}
 }
 

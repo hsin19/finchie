@@ -297,6 +297,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts/{id}/fills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make up for one of an account's gaps with what it lacks
+         * @description For a gap in `gaps`, named by its unit and its two balances' days, once the reports that would
+         *     show what moved are lost. What it lacks becomes a line of the account with no statement (kind
+         *     `fill`), on the last day no report covers, for the whole period: the two balances join up, and
+         *     net worth counts it from that day. No search, total, or transfer sees it: it is what moved over
+         *     the period, net. It counts while those two balances are consecutive and lack exactly that, so a
+         *     report found later, or a balance read differently, sets it aside; filling the same two balances
+         *     again brings it back. 409 when there is no such gap to fill.
+         */
+        post: operations["fillGap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{id}/fills/{fillId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Take a fill back; the gap shows again */
+        delete: operations["deleteGapFill"];
+        options?: never;
+        head?: never;
+        /** What the owner writes about a fill; empty clears it */
+        patch: operations["updateGapFill"];
+        trace?: never;
+    };
     "/api/accounts/{id}/lines": {
         parameters: {
             query?: never;
@@ -663,6 +707,8 @@ export interface components {
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Every balance its sources reported, statements and snapshots, newest first */
             history: components["schemas"]["Balance"][];
+            /** @description The owner's fills of its gaps that count, newest first: the gaps they fill are not in `gaps` */
+            fills: components["schemas"]["GapFill"][];
             /** @description A securities account's: every security it holds or has traded, by name (ADR 0017) */
             positions?: components["schemas"]["Position"][];
         };
@@ -789,6 +835,45 @@ export interface components {
             /** @description Money that moved between them that no line shows */
             unseen: components["schemas"]["Decimal"];
         };
+        /** @description One of the account's gaps, as `gaps` lists it */
+        GapFillCreate: {
+            unit: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** @description What the owner writes about it; absent or empty keeps what the same gap's fill had */
+            memo?: string;
+        };
+        GapFillUpdate: {
+            /** @description Trimmed; empty clears it */
+            memo: string;
+        };
+        /** @description What the owner made up for a gap between two balances */
+        GapFill: {
+            /** Format: int64 */
+            id: number;
+            unit: string;
+            /**
+             * Format: date
+             * @description The day of the balance before
+             */
+            from: string;
+            /**
+             * Format: date
+             * @description The day of the balance after
+             */
+            to: string;
+            /**
+             * Format: date
+             * @description The day it counts as moved
+             */
+            on: string;
+            /** @description What moved unseen, as a line's amount would be: money in positive */
+            amount: components["schemas"]["Decimal"];
+            /** @description What the owner wrote about it; absent when nothing */
+            memo?: string;
+        };
         AccountCreate: {
             /** @description Any but credit_card */
             kind: components["schemas"]["AccountKind"];
@@ -849,11 +934,23 @@ export interface components {
             /** @description Its full number where given, else as printed */
             accountNumber?: string;
         };
+        /**
+         * @description A line a statement reports, or the owner's fill of a gap (`fill`): one line for the whole period no
+         *     statement covers, as a passbook prints one for what went unprinted, dated on its last day, with the
+         *     fill's memo and the balance it leaves.
+         */
         AccountLine: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The line's, or the fill's for a fill
+             */
             id: number;
-            /** Format: int64 */
-            statementId: number;
+            /**
+             * Format: int64
+             * @description The statement that reports it; absent for a fill
+             */
+            statementId?: number;
+            fill?: components["schemas"]["LineFill"];
             /** Format: date */
             date: string;
             description: string;
@@ -867,6 +964,21 @@ export interface components {
             balance?: components["schemas"]["Decimal"] | null;
             counterpart?: components["schemas"]["LineCounterpart"];
             trade?: components["schemas"]["Trade"];
+        };
+        /** @description The owner's fill of a gap, as a line */
+        LineFill: {
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: date
+             * @description The day of the balance before
+             */
+            from: string;
+            /**
+             * Format: date
+             * @description The day of the balance after
+             */
+            to: string;
         };
         /** @description A trade's money; its line's amount is the shares, its unit the security (ADR 0017) */
         Trade: {
@@ -1538,6 +1650,82 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Cleared */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    fillGap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GapFillCreate"];
+            };
+        };
+        responses: {
+            /** @description Filled */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapFill"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    deleteGapFill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                fillId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    updateGapFill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                fillId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GapFillUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
             204: {
                 headers: {
                     [name: string]: unknown;
