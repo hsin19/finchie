@@ -697,7 +697,7 @@ export interface components {
              * Format: date
              * @description The day the owner said to look again whether it is current: an account with no lines gets no
              *     statement, so its newest balance can be old though nothing is wrong. Until then an old balance
-             *     is no sign of a statement that never came.
+             *     is no sign of a statement that never came. A statement with a newer balance clears it.
              */
             checkAgainOn?: string;
             /** @description The newest balance in each unit */
@@ -710,6 +710,14 @@ export interface components {
             gaps: components["schemas"]["BalanceGap"][];
             /** @description What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019) */
             expiries: components["schemas"]["Expiry"][];
+            /**
+             * @description Of a points program whose lapse rule is known, what its bills come to (ADR 0019): its points held
+             *     in lots, soonest to lapse first, adding up to its newest balance, each by the day the rule gives
+             *     the bill that added it, a day's together. A day already gone means the rule is wrong for them.
+             */
+            lots?: components["schemas"]["PointsLot"][];
+            /** @description Points that lapsed between two bills by their program's rule, oldest first; the gaps they leave are not in `gaps` */
+            lapsed?: components["schemas"]["LapsedPoints"][];
         };
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Every balance its sources reported, statements and snapshots, newest first */
@@ -747,6 +755,25 @@ export interface components {
             amount: components["schemas"]["Decimal"];
             /** Format: date */
             by: string;
+        };
+        /** @description Points that lapse together (ADR 0019) */
+        PointsLot: {
+            /** @example 小樹點(信用卡) */
+            unit: string;
+            /** Format: date */
+            by: string;
+            amount: components["schemas"]["Decimal"];
+            /** @description Held before the first bill: added on days not known, so lapsing no later than `by` */
+            unaged?: boolean;
+        };
+        /** @description Points that lapsed between two bills, their balances' days (ADR 0019) */
+        LapsedPoints: {
+            unit: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            amount: components["schemas"]["Decimal"];
         };
         /**
          * @description What the account's worth came from (ADR 0018): its holdings at Finchie's rates and closes, or its source's valuation

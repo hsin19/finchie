@@ -21,6 +21,7 @@ from finchie_parser.model import (
     Check,
     DepositLine,
     Expiry,
+    LapseRule,
     Line,
     LineKind,
     ParseResult,
@@ -75,6 +76,7 @@ def report(kind: AccountKind, *lines: Line) -> AccountReport:
         balances=[Balance("TWD", DAY, D("100.50"))],
         lines=list(lines),
         expiries=[Expiry("小樹點(信用卡)", D(88), date(2026, 4, 30))],
+        lapse_rules=[LapseRule("小樹點(信用卡)", months_after_closing=35)],
     )
 
 
@@ -155,6 +157,21 @@ def test_a_line_carries_its_amount_date_kind_and_detail() -> None:
         "996074",
     )
     assert (points.unit, points.description, points.WhichOneof("detail")) == ("小樹點(信用卡)", "本期兌/轉換", None)
+
+
+def test_a_lapse_rule_carries_its_months_or_its_yearly_purge() -> None:
+    months, yearly = (
+        convert._lapse_rule(LapseRule("a", months_after_closing=35)),
+        convert._lapse_rule(LapseRule("b", purge_last_month=12, purge_years=2)),
+    )
+    assert (months.unit, months.WhichOneof("rule"), months.months_after_closing) == ("a", "months_after_closing", 35)
+    assert (yearly.WhichOneof("rule"), yearly.yearly_purge.last_month, yearly.yearly_purge.years) == (
+        "yearly_purge",
+        12,
+        2,
+    )
+    with pytest.raises(ValueError, match="lapse rule"):
+        convert._lapse_rule(LapseRule("c", purge_last_month=12))
 
 
 def test_a_card_bill_carries_its_due_date_and_total_due() -> None:

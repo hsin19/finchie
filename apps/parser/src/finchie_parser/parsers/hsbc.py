@@ -11,7 +11,7 @@ from finchie_parser.ocr import Ocr, OcrLine
 from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.card import card_bill, card_line, check
 from finchie_parser.parsers.kinds import by_sign, card_kind, card_kind_by_words, is_charge
-from finchie_parser.parsers.points import Program, earned, points_program, used
+from finchie_parser.parsers.points import Program, earned, lapse_months_after_closing, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ISO_DATE, amount, iso_date, month_day, next_month_end, token
@@ -41,6 +41,10 @@ _DESCRIPTION_LEFT, _DESCRIPTION_RIGHT = 120.0, 335.0
 # figures are read by position, top to bottom: 上月結餘積分, 本期新增積分, 本期使用積分(含調整), 本期積分總結餘,
 # 次月到期點數. In PDF points: right of the summary's figures, above the notice under it.
 _POINTS_NAME = "滙豐旅遊積分"
+# 旅遊積分計劃: points last three years at most (36 months from the period they are added in), a card that
+# expires sooner taking them with it. The period starts in the month before the closing's: 36 months on
+# from it is 35 after the closing's. The bill's next month's figure checks it.
+_POINTS_LAPSE_MONTHS = 35
 _POINTS_LEFT, _POINTS_BOTTOM = 450.0, 330.0
 
 
@@ -56,7 +60,7 @@ class _Row:
 
 class HsbcParser(StatementParser):
     name = "hsbc.credit_card"
-    version = "5"
+    version = "6"
     institution = "hsbc"
     # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
     sender_domains = ("hsbc.com.tw",)
@@ -189,5 +193,6 @@ def _points(document: Document, closing: date, warnings: list[str]) -> list[Prog
             moves=(earned("本期新增積分", added), used("本期使用積分(含調整)", spent)),
             closing=balance,
             expiries=[Expiry(_POINTS_NAME, lapsing, next_month_end(closing))],
+            lapse=lapse_months_after_closing(_POINTS_NAME, _POINTS_LAPSE_MONTHS),
         )
     ]

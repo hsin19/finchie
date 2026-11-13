@@ -165,3 +165,90 @@ func (q *Queries) LatestExpiries(ctx context.Context, accountID *int64) ([]Lates
 	}
 	return items, nil
 }
+
+const pointsBills = `-- name: PointsBills :many
+SELECT b.account_id, u.symbol AS unit, b.as_of AS closing, b.amount AS balance,
+       coalesce(sum(t.amount) FILTER (WHERE t.amount > 0), 0)::numeric AS added,
+       coalesce(-sum(t.amount) FILTER (WHERE t.amount < 0), 0)::numeric AS used,
+       u.lapse_months, u.lapse_purge_month, u.lapse_purge_years
+FROM balances b
+JOIN accounts a ON a.id = b.account_id
+JOIN units u ON u.id = b.unit_id
+LEFT JOIN transactions t ON t.statement_id = b.statement_id AND t.account_id = b.account_id AND t.unit_id = b.unit_id
+WHERE a.kind = 'points' AND b.statement_id IS NOT NULL
+  AND (u.lapse_months IS NOT NULL OR u.lapse_purge_month IS NOT NULL)
+  AND ($1::bigint IS NULL OR b.account_id = $1::bigint)
+GROUP BY b.id, b.account_id, u.symbol, b.as_of, b.amount, u.lapse_months, u.lapse_purge_month, u.lapse_purge_years
+ORDER BY b.account_id, u.symbol, b.as_of, b.id
+`
+
+type PointsBillsRow struct {
+	AccountID       int64
+	Unit            string
+	Closing         pgtype.Date
+	Balance         pgtype.Numeric
+	Added           pgtype.Numeric
+	Used            pgtype.Numeric
+	LapseMonths     *int16
+	LapsePurgeMonth *int16
+	LapsePurgeYears *int16
+}
+
+// Each bill's report of each program a points account holds and has a lapse rule for, oldest first: the
+// balance it closed on, what its lines added and used (both positive), and the rule. Of one account, or
+// with none, of all.
+func (q *Queries) PointsBills(ctx context.Context, accountID *int64) ([]PointsBillsRow, error) {
+	rows, err := q.db.Query(ctx, pointsBills, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PointsBillsRow
+	for rows.Next() {
+		var i PointsBillsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Unit,
+			&i.Closing,
+			&i.Balance,
+			&i.Added,
+			&i.Used,
+			&i.LapseMonths,
+			&i.LapsePurgeMonth,
+			&i.LapsePurgeYears,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setLapseRule = `-- name: SetLapseRule :exec
+UPDATE units
+SET lapse_months      = $1::smallint,
+    lapse_purge_month = $2::smallint,
+    lapse_purge_years = $3::smallint
+WHERE id = $4
+`
+
+type SetLapseRuleParams struct {
+	Months     *int16
+	PurgeMonth *int16
+	PurgeYears *int16
+	ID         int64
+}
+
+// How a program's points lapse, as the bill just stored reports it; none clears it.
+func (q *Queries) SetLapseRule(ctx context.Context, arg SetLapseRuleParams) error {
+	_, err := q.db.Exec(ctx, setLapseRule,
+		arg.Months,
+		arg.PurgeMonth,
+		arg.PurgeYears,
+		arg.ID,
+	)
+	return err
+}

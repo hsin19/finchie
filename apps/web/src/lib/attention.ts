@@ -7,6 +7,7 @@ import {
     checkAgainDefault,
     daysAgo,
     lapsesSoon,
+    nextLapse,
 } from "#lib/accounts.js";
 import type {
     Account,
@@ -69,16 +70,19 @@ export function needs({ byState, accounts, today }: { byState: readonly StateCou
         });
     }
 
-    const lapsing = accounts.filter(a => a.expiries[0] && lapsesSoon(a.expiries[0].by, today));
+    const lapsing = accounts.flatMap(a => {
+        const next = nextLapse(a, today);
+        return next && lapsesSoon(next.by, today) ? [{ a, next }] : [];
+    });
     if (lapsing.length > 0) {
         found.push({
             key: "lapsing",
             text: "點數快到期",
             href: resolve("/accounts"),
-            names: lapsing.map(a => {
-                const next = a.expiries[0];
-                return { text: `${named(a)} ${formatAmount(next.amount)} ${next.unit} ${slashDate(next.by)} 前`, href: accountHref(a) };
-            }),
+            names: lapsing.map(({ a, next }) => ({
+                text: `${named(a)} ${formatAmount(next.amount)} ${next.unit} ${slashDate(next.by)} 前${next.estimated ? "（推算）" : ""}`,
+                href: accountHref(a),
+            })),
         });
     }
     return found;

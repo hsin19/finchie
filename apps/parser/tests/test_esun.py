@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fakes import FakeDocument, account, card, card_detail, card_lines, check
 
-from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LineKind, Statement
+from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LapseRule, LineKind, Statement
 from finchie_parser.parsers.esun import EsunParser
 
 PAGE_1 = """親愛的 王＊明 您好：
@@ -110,6 +110,8 @@ def test_esun_reads_its_e_points_and_each_months_expiring_ones() -> None:
         Expiry("e point", Decimal(0), date(2026, 4, 30)),
         Expiry("e point", Decimal(35), date(2026, 5, 31)),
     ]
+    # A year from the day added, in the month before the bill's or its own: by the 11th month's end at most.
+    assert points.lapse_rules == [LapseRule("e point", months_after_closing=11)]
     program = check(statement, "e point")
     assert (program.unit, program.computed, program.stated, program.balanced) == (
         "e point",

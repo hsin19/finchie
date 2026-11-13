@@ -106,6 +106,19 @@ class Expiry:
 
 
 @dataclass(frozen=True)
+class LapseRule:
+    """How a program's points lapse by its terms (ADR 0019), from what each bill adds, dated on its closing
+    date: at the end of the month `months_after_closing` after the closing month, or once a year, what the
+    bills of a year ending with month `purge_last_month` add, at the end of the month after it
+    `purge_years` later."""
+
+    unit: str
+    months_after_closing: int | None = None
+    purge_last_month: int | None = None
+    purge_years: int | None = None
+
+
+@dataclass(frozen=True)
 class AccountReport:
     kind: AccountKind
     # Empty for a bank's card and points accounts.
@@ -114,6 +127,7 @@ class AccountReport:
     balances: list[Balance] = field(default_factory=list)
     lines: list[Line] = field(default_factory=list)
     expiries: list[Expiry] = field(default_factory=list)
+    lapse_rules: list[LapseRule] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

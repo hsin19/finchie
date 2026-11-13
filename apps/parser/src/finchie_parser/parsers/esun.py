@@ -5,7 +5,7 @@ from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.card import card_bill, card_line, check, new_charges
 from finchie_parser.parsers.kinds import card_kind
-from finchie_parser.parsers.points import adjusted, earned, points_program, used
+from finchie_parser.parsers.points import adjusted, earned, lapse_months_after_closing, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, amount, clean, either_date, find, month_day, month_end
@@ -37,13 +37,17 @@ _POINTS = re.compile(
     rf" (?P<closing>{INTEGER}) 點$"
 )
 _POINTS_NAME = "e point"
+# e point lasts a year from the day it is added (玉山 e point FAQ: 點數效期1年). A bill adds what came in
+# since the last one closed, a month before: a year on, the end of the 11th month after the closing's is
+# the latest any of it lapses by, or a few days early for what came in on the closing month.
+_POINTS_LAPSE_MONTHS = 11
 # "※您有e point點數即將到期：2026/10共0點、2026/11共0點，…": each month's, by its last day.
 _POINTS_EXPIRING = re.compile(r"(?P<y>\d{4})/(?P<m>\d{1,2})共(?P<n>[\d,]+)點")
 
 
 class EsunParser(StatementParser):
     name = "esun.credit_card"
-    version = "5"
+    version = "6"
     institution = "esun"
     # 玉山銀行2026年09月信用卡電子帳單; the combined (deposit) statement, 玉山銀行2026年09月綜合對帳單,
     # comes from the same address.
@@ -122,6 +126,7 @@ class EsunParser(StatementParser):
                     ),
                     closing=amount(program["closing"]),
                     expiries=expiries,
+                    lapse=lapse_months_after_closing(_POINTS_NAME, _POINTS_LAPSE_MONTHS),
                 )
             )
 

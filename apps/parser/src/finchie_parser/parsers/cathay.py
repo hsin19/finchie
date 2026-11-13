@@ -8,7 +8,7 @@ from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.card import card_bill, card_line, check, new_charges, payments
 from finchie_parser.parsers.kinds import card_kind
-from finchie_parser.parsers.points import earned, points_program, used
+from finchie_parser.parsers.points import earned, lapse_months_after_closing, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import (
@@ -25,6 +25,10 @@ from finchie_parser.text import (
 
 # 信用卡回饋總覽, its headings unmapped glyphs (ADR 0019): "<program> <上期累計> <本期新增/扣除> <本期贈送>
 # <本期兌/轉換> <本期結餘>", e.g. "小樹點(信用卡) 3,190 64 0 1 3,253".
+# 小樹點(信用卡)累積辦法: points last three years by month, counted from the month after they are added
+# (added 2026/1/27, they lapse on 2029/1/31). A bill closes at the start of a month, on what was added in
+# the month before: 36 months after that month is 35 after the closing's.
+_POINTS_LAPSE_MONTHS = 35
 _POINTS = re.compile(
     rf"^(?P<name>\S*(?:點|里數)\S*) (?P<opening>{INTEGER}) (?P<added>{INTEGER}) (?P<gift>{INTEGER})"
     rf" (?P<used>{INTEGER}) (?P<closing>{INTEGER})$"
@@ -60,7 +64,7 @@ _PAYMENT = re.compile(r"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<desc>.+?)
 
 class CathayParser(StatementParser):
     name = "cathay.credit_card"
-    version = "7"
+    version = "8"
     institution = "cathay"
     sender_domains = ("cathaybk.com.tw",)
     subject_terms = ("信用卡", "電子帳單")
@@ -137,6 +141,7 @@ class CathayParser(StatementParser):
                 ),
                 closing=amount(m["closing"]),
                 expiries=expiring.get(m["name"], ()),
+                lapse=lapse_months_after_closing(m["name"], _POINTS_LAPSE_MONTHS),
             )
             for m in program_rows
         ]

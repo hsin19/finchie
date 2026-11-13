@@ -142,7 +142,8 @@ func StorePrices(ctx context.Context, queries *dbq.Queries, source domain.PriceS
 	return nil
 }
 
-// Gaps reads where accounts' balances do not join up (ADR 0013), of one account or, with none, of all.
+// Gaps reads where accounts' balances do not join up (ADR 0013), of one account or, with none, of all; points
+// that lapsed by their program's rule leave none (ADR 0019).
 func Gaps(ctx context.Context, queries *dbq.Queries, accountID *int64) ([]domain.Gap, error) {
 	rows, err := queries.AccountGaps(ctx, dbq.AccountGapsParams{
 		AccountID:       accountID,
@@ -156,7 +157,7 @@ func Gaps(ctx context.Context, queries *dbq.Queries, accountID *int64) ([]domain
 	for _, r := range rows {
 		gaps = append(gaps, toGap(r))
 	}
-	return gaps, nil
+	return explainLapses(ctx, queries, accountID, gaps)
 }
 
 func toGap(r dbq.AccountGapsRow) domain.Gap {

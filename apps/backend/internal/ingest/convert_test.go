@@ -88,7 +88,19 @@ func TestConvertRejectsResponsesThatBreakTheContract(t *testing.T) {
 			s.Accounts[0].Lines = nil
 		},
 		"an account reported twice": func(s *parserv2.Statement) { s.Accounts = append(s.Accounts, s.Accounts[0]) },
-		"no accounts":               func(s *parserv2.Statement) { s.Accounts = nil },
+		"a lapse rule without its unit": func(s *parserv2.Statement) {
+			s.Accounts[0].LapseRules = []*parserv2.LapseRule{{Rule: &parserv2.LapseRule_MonthsAfterClosing{MonthsAfterClosing: 35}}}
+		},
+		"a lapse rule without a rule": func(s *parserv2.Statement) {
+			s.Accounts[0].LapseRules = []*parserv2.LapseRule{{Unit: "e point"}}
+		},
+		"a lapse rule of no months": func(s *parserv2.Statement) {
+			s.Accounts[0].LapseRules = []*parserv2.LapseRule{{Unit: "e point", Rule: &parserv2.LapseRule_MonthsAfterClosing{}}}
+		},
+		"a yearly purge after month 13": func(s *parserv2.Statement) {
+			s.Accounts[0].LapseRules = []*parserv2.LapseRule{{Unit: "e point", Rule: &parserv2.LapseRule_YearlyPurge{YearlyPurge: &parserv2.YearlyPurge{LastMonth: 13, Years: 2}}}}
+		},
+		"no accounts": func(s *parserv2.Statement) { s.Accounts = nil },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {

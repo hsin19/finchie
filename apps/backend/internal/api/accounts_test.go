@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -669,4 +670,63 @@ func mustRat(t *testing.T, s Decimal) *big.Rat {
 		t.Fatalf("%q is not a number", s)
 	}
 	return r
+}
+
+// withRule gives a bill's points program the rule its parser reports: lapsing at the end of the month
+// `months` after the bill's closing month.
+func withRule(response *parserv2.ParseDocumentResponse, unit string, months int32) *parserv2.ParseDocumentResponse {
+	for _, a := range response.GetStatement().GetAccounts() {
+		if a.GetKind() == parserv2.AccountKind_ACCOUNT_KIND_POINTS {
+			a.LapseRules = append(a.LapseRules, &parserv2.LapseRule{Unit: unit, Rule: &parserv2.LapseRule_MonthsAfterClosing{MonthsAfterClosing: months}})
+		}
+	}
+	return response
+}
+
+func TestPointsThatLapseByTheirProgramsRuleLeaveNoGapAndTheRestAreLots(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	const tree = "小樹點(信用卡)"
+	earn := func(n string) pointsMove {
+		return pointsLine("本期新增/扣除", parserv2.LineKind_LINE_KIND_EARN, n)
+	}
+	// Each bill's points lapse at the end of the second month after its closing month.
+	store(t, pool, "january", withRule(cathayBill(1, withLines(program(tree, "110"), earn("10"))), tree, 2))
+	store(t, pool, "february", withRule(cathayBill(2, withLines(program(tree, "80"), earn("20"),
+		pointsLine("本期兌/轉換", parserv2.LineKind_LINE_KIND_REDEEM, "-30"))), tree, 2))
+	store(t, pool, "april", withRule(cathayBill(4, withLines(program(tree, "25"), earn("5"))), tree, 2))
+	store(t, pool, "may", withRule(cathayBill(5, program(tree, "3")), tree, 2))
+
+	var points Account
+	for _, a := range decode[[]Account](t, get(t, e, "/api/accounts")) {
+		if a.Kind == AccountKindPoints {
+			points = a
+		}
+	}
+	// 20 and then 50 of the 100 held before January's bill; January's 10 by March; February's 20 by April.
+	// Two more vanished by May that no rule explains: that much is still a gap.
+	if len(points.Gaps) != 1 || points.Gaps[0].Unseen != "-2" || points.Gaps[0].From.String() != "2026-04-01" {
+		t.Fatalf("gaps = %+v", points.Gaps)
+	}
+	var lapsed []string
+	for _, l := range orNone(points.Lapsed) {
+		lapsed = append(lapsed, fmt.Sprintf("%s..%s %s", l.From, l.To, l.Amount))
+	}
+	if want := []string{"2026-01-01..2026-02-01 20", "2026-02-01..2026-04-01 60", "2026-04-01..2026-05-01 20"}; !slices.Equal(lapsed, want) {
+		t.Fatalf("lapsed = %v, want %v", lapsed, want)
+	}
+	// April's 3 left, lapsing by June's end.
+	if lots := orNone(points.Lots); len(lots) != 1 || lots[0].By.String() != "2026-06-30" || lots[0].Amount != "3" || lots[0].Unit != tree {
+		t.Fatalf("lots = %+v", lots)
+	}
+	detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", points.Id)))
+	if detail.Lots == nil || detail.Lapsed == nil || len(detail.Gaps) != 1 {
+		t.Fatalf("detail: lots %v, lapsed %v, gaps %v", detail.Lots, detail.Lapsed, detail.Gaps)
+	}
+}
+
+func orNone[T any](items *[]T) []T {
+	if items == nil {
+		return nil
+	}
+	return *items
 }

@@ -36,8 +36,9 @@ type storedAccount struct {
 	account  dbq.UpsertAccountParams
 	lines    []storedLine
 	balances []storedBalance
-	// What will lapse of a points account's units (ADR 0019).
-	expiries []storedExpiry
+	// What will lapse of a points account's units, and how its programs' points lapse (ADR 0019).
+	expiries   []storedExpiry
+	lapseRules []storedLapseRule
 }
 
 // Store replaces everything previously derived from the document with the parser's result, in one
@@ -178,6 +179,11 @@ func insert(ctx context.Context, queries *dbq.Queries, result stored) error {
 			expiry.StatementID, expiry.AccountID, expiry.UnitID = statementID, accountID, reported.unitID(units, expiry.unit)
 			if err := queries.InsertExpiry(ctx, expiry.InsertExpiryParams); err != nil {
 				return fmt.Errorf("record expiry: %w", err)
+			}
+		}
+		for _, lapse := range reported.lapseRules {
+			if err := queries.SetLapseRule(ctx, lapse.params(reported.unitID(units, lapse.unit))); err != nil {
+				return fmt.Errorf("record lapse rule: %w", err)
 			}
 		}
 	}

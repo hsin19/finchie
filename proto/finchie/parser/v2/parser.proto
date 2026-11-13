@@ -167,6 +167,9 @@ message AccountReport {
   repeated Line lines = 5;
   // Points the statement says will lapse (ADR 0019).
   repeated Expiry expiries = 6;
+  // Points: how each program's points lapse by its terms, where the parser
+  // knows them (ADR 0019).
+  repeated LapseRule lapse_rules = 7;
 }
 
 // What the statement prints the account held of a unit at the end of a day:
@@ -270,6 +273,29 @@ message Expiry {
   string unit = 1;
   google.type.Decimal amount = 2;
   google.type.Date by = 3;
+}
+
+// How a program's points lapse by its terms, worked out from what each bill
+// adds, which the bill dates on its closing date.
+message LapseRule {
+  // As for Balance: the program's name as printed.
+  string unit = 1;
+  oneof rule {
+    // At the end of the month this many months after the bill's closing
+    // month.
+    int32 months_after_closing = 2;
+    // Once a year, together.
+    YearlyPurge yearly_purge = 3;
+  }
+}
+
+// What the bills of one year add lapse together, some years on: at the end of
+// the month after the year's last.
+message YearlyPurge {
+  // The year's last month (1 to 12), by the bills' closing dates.
+  int32 last_month = 1;
+  // How many years after it they lapse.
+  int32 years = 2;
 }
 
 // A figure the statement prints and what the lines it covers come to.

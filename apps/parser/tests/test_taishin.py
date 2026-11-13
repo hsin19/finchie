@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from fakes import FakeDocument, account, card, card_detail, card_lines, check
 
-from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LineKind, Statement
+from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LapseRule, LineKind, Statement
 from finchie_parser.parsers.taishin import TaishinParser
 
 PAGE_1 = """115年 03月 信用卡電子帳單
@@ -155,6 +155,8 @@ def test_taishin_reads_its_points_with_used_points_printed_negative() -> None:
         ("台新Point(信用卡)", "本期使用點數/里數", LineKind.REDEEM, Decimal(-2175)),
     ]
     assert points.expiries == [Expiry("台新Point(信用卡)", Decimal(129), date(2028, 1, 31))]
+    # Two years, purged yearly at the end of the month the reminder dates: a year ends the month before.
+    assert points.lapse_rules == [LapseRule("台新Point(信用卡)", purge_last_month=12, purge_years=2)]
     assert [c.name for c in statement.checks] == ["本期新增款項", "台新Point(信用卡)"]
     assert statement.balanced
     assert parsed.warnings == []
@@ -185,6 +187,8 @@ def test_taishin_reads_each_column_with_figures_as_a_program_under_its_name_of_t
         ("亞洲萬里通里數", Decimal(900)),
     ]
     assert points.expiries == [Expiry("大集大利點數", Decimal(0), date(2021, 1, 31))]
+    # Neither the old program's terms nor the miles' are known.
+    assert points.lapse_rules == []
     assert [(line.unit, line.amount) for line in points.lines] == [
         ("亞洲萬里通里數", Decimal(200)),
         ("亞洲萬里通里數", Decimal(-300)),

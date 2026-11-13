@@ -132,6 +132,14 @@ func convertResponse(documentID int64, response *parserv2.ParseDocumentResponse)
 			expiry.LapsesBy, errs = requiredDate(e.GetBy(), at+" date", errs)
 			account.expiries = append(account.expiries, expiry)
 		}
+		for j, r := range a.GetLapseRules() {
+			rule, err := lapseRule(r)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s lapse rule %d: %w", where, j, err))
+				continue
+			}
+			account.lapseRules = append(account.lapseRules, storedLapseRule{unit: r.GetUnit(), rule: rule})
+		}
 		result.accounts = append(result.accounts, account)
 	}
 	switch {
@@ -233,4 +241,27 @@ func convertLine(at string, account domain.AccountKind, lineNo int32, l *parserv
 		errs = append(errs, fmt.Errorf("%s: a trade without its money", at))
 	}
 	return line, traded, errs
+}
+
+// lapseRule reads how a program's points lapse (ADR 0019): months after a bill's closing, or a yearly
+// purge, each within its range.
+func lapseRule(r *parserv2.LapseRule) (domain.LapseRule, error) {
+	if r.GetUnit() == "" {
+		return domain.LapseRule{}, errors.New("unit is missing")
+	}
+	switch rule := r.GetRule().(type) {
+	case *parserv2.LapseRule_MonthsAfterClosing:
+		if rule.MonthsAfterClosing <= 0 || rule.MonthsAfterClosing > 1200 {
+			return domain.LapseRule{}, fmt.Errorf("%d months after closing", rule.MonthsAfterClosing)
+		}
+		return domain.LapseRule{MonthsAfterClosing: int(rule.MonthsAfterClosing)}, nil
+	case *parserv2.LapseRule_YearlyPurge:
+		last, years := rule.YearlyPurge.GetLastMonth(), rule.YearlyPurge.GetYears()
+		if last < 1 || last > 12 || years <= 0 || years > 100 {
+			return domain.LapseRule{}, fmt.Errorf("a yearly purge after month %d, %d years on", last, years)
+		}
+		return domain.LapseRule{PurgeLastMonth: int(last), PurgeYears: int(years)}, nil
+	default:
+		return domain.LapseRule{}, errors.New("no rule")
+	}
 }

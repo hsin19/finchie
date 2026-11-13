@@ -30,6 +30,32 @@ WHERE r.amount > 0 AND r.lapses_by >= (now() AT TIME ZONE 'Asia/Taipei')::date
   AND (sqlc.narg(account_id)::bigint IS NULL OR r.account_id = sqlc.narg(account_id)::bigint)
 ORDER BY r.account_id, r.lapses_by, u.symbol;
 
+-- name: SetLapseRule :exec
+-- How a program's points lapse, as the bill just stored reports it; none clears it.
+UPDATE units
+SET lapse_months      = sqlc.narg(months)::smallint,
+    lapse_purge_month = sqlc.narg(purge_month)::smallint,
+    lapse_purge_years = sqlc.narg(purge_years)::smallint
+WHERE id = @id;
+
+-- name: PointsBills :many
+-- Each bill's report of each program a points account holds and has a lapse rule for, oldest first: the
+-- balance it closed on, what its lines added and used (both positive), and the rule. Of one account, or
+-- with none, of all.
+SELECT b.account_id, u.symbol AS unit, b.as_of AS closing, b.amount AS balance,
+       coalesce(sum(t.amount) FILTER (WHERE t.amount > 0), 0)::numeric AS added,
+       coalesce(-sum(t.amount) FILTER (WHERE t.amount < 0), 0)::numeric AS used,
+       u.lapse_months, u.lapse_purge_month, u.lapse_purge_years
+FROM balances b
+JOIN accounts a ON a.id = b.account_id
+JOIN units u ON u.id = b.unit_id
+LEFT JOIN transactions t ON t.statement_id = b.statement_id AND t.account_id = b.account_id AND t.unit_id = b.unit_id
+WHERE a.kind = 'points' AND b.statement_id IS NOT NULL
+  AND (u.lapse_months IS NOT NULL OR u.lapse_purge_month IS NOT NULL)
+  AND (sqlc.narg(account_id)::bigint IS NULL OR b.account_id = sqlc.narg(account_id)::bigint)
+GROUP BY b.id, b.account_id, u.symbol, b.as_of, b.amount, u.lapse_months, u.lapse_purge_month, u.lapse_purge_years
+ORDER BY b.account_id, u.symbol, b.as_of, b.id;
+
 -- Accounts the owner keeps (ADR 0019).
 
 -- name: CreateOwnerAccount :one

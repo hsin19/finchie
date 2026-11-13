@@ -5,7 +5,7 @@ import pytest
 from fakes import FakeDocument, account, card, card_detail, card_lines, check
 
 from finchie_parser.errors import LayoutError
-from finchie_parser.model import AccountKind, Balance, CardBill, Check, Expiry, LineKind, Statement
+from finchie_parser.model import AccountKind, Balance, CardBill, Check, Expiry, LapseRule, LineKind, Statement
 from finchie_parser.parsers.cathay import CathayParser
 
 PAGE_1 = """信用卡帳單 115年04月
@@ -170,6 +170,8 @@ def test_cathay_reads_its_points_and_what_lapses_by_when() -> None:
         Expiry("小樹點(信用卡)", Decimal(88), date(2026, 4, 30)),
         Expiry("小樹點(信用卡)", Decimal(669), date(2027, 3, 31)),
     ]
+    # Three years by month from the month after they are added: the month before a bill closing on the 1st.
+    assert points.lapse_rules == [LapseRule("小樹點(信用卡)", months_after_closing=35)]
     assert check(statement, "小樹點(信用卡)").balanced
     assert parsed.warnings == []
 

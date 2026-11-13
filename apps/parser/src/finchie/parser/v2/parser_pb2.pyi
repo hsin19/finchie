@@ -173,20 +173,22 @@ class CardBill(_message.Message):
     def __init__(self, due_date: _Optional[_Union[_date_pb2.Date, _Mapping]] = ..., currency: _Optional[str] = ..., total_due: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ...) -> None: ...
 
 class AccountReport(_message.Message):
-    __slots__ = ("kind", "number", "name", "balances", "lines", "expiries")
+    __slots__ = ("kind", "number", "name", "balances", "lines", "expiries", "lapse_rules")
     KIND_FIELD_NUMBER: _ClassVar[int]
     NUMBER_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     BALANCES_FIELD_NUMBER: _ClassVar[int]
     LINES_FIELD_NUMBER: _ClassVar[int]
     EXPIRIES_FIELD_NUMBER: _ClassVar[int]
+    LAPSE_RULES_FIELD_NUMBER: _ClassVar[int]
     kind: AccountKind
     number: str
     name: str
     balances: _containers.RepeatedCompositeFieldContainer[Balance]
     lines: _containers.RepeatedCompositeFieldContainer[Line]
     expiries: _containers.RepeatedCompositeFieldContainer[Expiry]
-    def __init__(self, kind: _Optional[_Union[AccountKind, str]] = ..., number: _Optional[str] = ..., name: _Optional[str] = ..., balances: _Optional[_Iterable[_Union[Balance, _Mapping]]] = ..., lines: _Optional[_Iterable[_Union[Line, _Mapping]]] = ..., expiries: _Optional[_Iterable[_Union[Expiry, _Mapping]]] = ...) -> None: ...
+    lapse_rules: _containers.RepeatedCompositeFieldContainer[LapseRule]
+    def __init__(self, kind: _Optional[_Union[AccountKind, str]] = ..., number: _Optional[str] = ..., name: _Optional[str] = ..., balances: _Optional[_Iterable[_Union[Balance, _Mapping]]] = ..., lines: _Optional[_Iterable[_Union[Line, _Mapping]]] = ..., expiries: _Optional[_Iterable[_Union[Expiry, _Mapping]]] = ..., lapse_rules: _Optional[_Iterable[_Union[LapseRule, _Mapping]]] = ...) -> None: ...
 
 class Balance(_message.Message):
     __slots__ = ("unit", "as_of", "amount")
@@ -269,6 +271,24 @@ class Expiry(_message.Message):
     amount: _decimal_pb2.Decimal
     by: _date_pb2.Date
     def __init__(self, unit: _Optional[str] = ..., amount: _Optional[_Union[_decimal_pb2.Decimal, _Mapping]] = ..., by: _Optional[_Union[_date_pb2.Date, _Mapping]] = ...) -> None: ...
+
+class LapseRule(_message.Message):
+    __slots__ = ("unit", "months_after_closing", "yearly_purge")
+    UNIT_FIELD_NUMBER: _ClassVar[int]
+    MONTHS_AFTER_CLOSING_FIELD_NUMBER: _ClassVar[int]
+    YEARLY_PURGE_FIELD_NUMBER: _ClassVar[int]
+    unit: str
+    months_after_closing: int
+    yearly_purge: YearlyPurge
+    def __init__(self, unit: _Optional[str] = ..., months_after_closing: _Optional[int] = ..., yearly_purge: _Optional[_Union[YearlyPurge, _Mapping]] = ...) -> None: ...
+
+class YearlyPurge(_message.Message):
+    __slots__ = ("last_month", "years")
+    LAST_MONTH_FIELD_NUMBER: _ClassVar[int]
+    YEARS_FIELD_NUMBER: _ClassVar[int]
+    last_month: int
+    years: int
+    def __init__(self, last_month: _Optional[int] = ..., years: _Optional[int] = ...) -> None: ...
 
 class Check(_message.Message):
     __slots__ = ("name", "unit", "computed", "stated", "balanced")

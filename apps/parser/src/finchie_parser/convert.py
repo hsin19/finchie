@@ -18,6 +18,7 @@ from finchie_parser.model import (
     Check,
     DepositLine,
     Expiry,
+    LapseRule,
     Line,
     LineKind,
     ParseResult,
@@ -107,6 +108,7 @@ def _account(account: AccountReport) -> pb.AccountReport:
         balances=[_balance(balance) for balance in account.balances],
         lines=[_line(line) for line in account.lines],
         expiries=[_expiry(expiry) for expiry in account.expiries],
+        lapse_rules=[_lapse_rule(rule) for rule in account.lapse_rules],
     )
 
 
@@ -116,6 +118,15 @@ def _balance(balance: Balance) -> pb.Balance:
 
 def _expiry(expiry: Expiry) -> pb.Expiry:
     return pb.Expiry(unit=expiry.unit, amount=_decimal(expiry.amount), by=_date(expiry.by))
+
+
+def _lapse_rule(rule: LapseRule) -> pb.LapseRule:
+    if rule.months_after_closing is not None:
+        return pb.LapseRule(unit=rule.unit, months_after_closing=rule.months_after_closing)
+    if rule.purge_last_month is None or rule.purge_years is None:
+        raise ValueError(f"{rule.unit}: a lapse rule needs months after closing, or a yearly purge's month and years")
+    purge = pb.YearlyPurge(last_month=rule.purge_last_month, years=rule.purge_years)
+    return pb.LapseRule(unit=rule.unit, yearly_purge=purge)
 
 
 def _check(check: Check) -> pb.Check:

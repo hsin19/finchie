@@ -171,11 +171,14 @@ type Transaction struct {
 }
 
 type Unit struct {
-	ID     int64
-	Kind   domain.UnitKind
-	Symbol string
-	Code   *string
-	Market *string
+	ID              int64
+	Kind            domain.UnitKind
+	Symbol          string
+	Code            *string
+	Market          *string
+	LapseMonths     *int16
+	LapsePurgeMonth *int16
+	LapsePurgeYears *int16
 }
 
 type Valuation struct {

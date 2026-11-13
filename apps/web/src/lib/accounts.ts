@@ -209,6 +209,27 @@ export function shownNumber(account: Pick<Account, "number" | "fullNumber">): st
     return account.fullNumber ?? account.number;
 }
 
+/** Points to lapse by a day: worked out by the program's rule (`estimated`), or as the newest bill says. */
+export interface NextLapse {
+    unit: string;
+    amount: string;
+    by: string;
+    estimated: boolean;
+}
+
+/**
+ * The soonest points to lapse from `today` on, of the account's lots by their program's rule (ADR 0019)
+ * and what its newest bills say will lapse; none when neither has any. The soonest wins: a bill may know
+ * of lapses the rule cannot place, points held from before the first bill.
+ */
+export function nextLapse(account: Pick<Account, "lots" | "expiries">, today: string): NextLapse | undefined {
+    const ahead: NextLapse[] = [
+        ...(account.lots ?? []).filter(l => l.by >= today).map(l => ({ unit: l.unit, amount: l.amount, by: l.by, estimated: true })),
+        ...account.expiries.map(e => ({ unit: e.unit, amount: e.amount, by: e.by, estimated: false })),
+    ];
+    return ahead.sort((a, b) => a.by.localeCompare(b.by) || Number(a.estimated) - Number(b.estimated))[0];
+}
+
 /** Whether points lapse within this many days of `today` (YYYY-MM-DD): soon enough to stand out. */
 export function lapsesSoon(by: string, today: string, days = 60): boolean {
     const limit = new Date(`${today}T00:00:00Z`);
@@ -384,7 +405,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         expiring: true,
         lines: { note: "帳單上每一期的合計，獲得是正數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
-        gaps: "這兩期之間少了點數，帳單卻沒列出：多半是點數過期了（過期的點數不會出現在任何欄位），或少了一期帳單。",
+        gaps: "這兩期之間少了點數，帳單卻沒列出，照效期規則也不該過期：可能是少了一期帳單、效期規則不對，或是沒有規則的點數過期了（過期的點數不會出現在任何欄位）。",
         unchecked: NO_LINES,
     },
 };

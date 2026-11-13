@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,7 +58,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Side: account.Side, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, CheckAgainOn: account.CheckAgainOn, Balances: account.Balances,
 		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
-		Gaps: account.Gaps, Expiries: account.Expiries, History: history, Fills: fills,
+		Gaps: account.Gaps, Expiries: account.Expiries, Lots: account.Lots, Lapsed: account.Lapsed, History: history, Fills: fills,
 	}
 	if domain.AccountKind(account.Kind) == domain.Securities {
 		held, err := readPositions(ctx, queries, request.Id, rows, account.Balances)
@@ -92,6 +93,11 @@ func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Accou
 	if err != nil {
 		return nil, nil, fmt.Errorf("latest expiries: %w", err)
 	}
+	programs, err := ledger.PointsLots(ctx, queries, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	lotsOf, lapsedOf := pointsLots(programs)
 
 	balancesOf := map[int64][]dbq.LatestBalancesRow{}
 	for _, b := range latest {
@@ -116,10 +122,51 @@ func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Accou
 		}
 		account, standing := toAccount(row, balancesOf[row.ID], gapsOf[row.ID], valuation)
 		account.Expiries = append(account.Expiries, expiriesOf[row.ID]...)
+		if lots := lotsOf[row.ID]; len(lots) > 0 {
+			account.Lots = &lots
+		}
+		if lapsed := lapsedOf[row.ID]; len(lapsed) > 0 {
+			account.Lapsed = &lapsed
+		}
 		accounts = append(accounts, account)
 		worths = append(worths, domain.Worth{Kind: row.Kind, Worth: standing.Worth})
 	}
 	return accounts, worths, nil
+}
+
+// pointsLots shows each account's points programs' lots, a day's together, soonest first, and what
+// lapsed, oldest first.
+func pointsLots(programs []ledger.ProgramLots) (map[int64][]PointsLot, map[int64][]LapsedPoints) {
+	lotsOf, lapsedOf := map[int64][]PointsLot{}, map[int64][]LapsedPoints{}
+	for _, p := range programs {
+		var days []domain.Lot
+		for _, l := range p.Held {
+			if n := len(days); n > 0 && days[n-1].By.Equal(l.By) && days[n-1].Unaged == l.Unaged {
+				days[n-1].Amount = new(big.Rat).Add(days[n-1].Amount, l.Amount)
+				continue
+			}
+			days = append(days, l)
+		}
+		for _, l := range days {
+			lot := PointsLot{Unit: p.Unit, By: openapi_types.Date{Time: l.By}, Amount: numeric.Exact(l.Amount)}
+			if l.Unaged {
+				lot.Unaged = &l.Unaged
+			}
+			lotsOf[p.AccountID] = append(lotsOf[p.AccountID], lot)
+		}
+		for _, l := range p.Lapsed {
+			lapsedOf[p.AccountID] = append(lapsedOf[p.AccountID], LapsedPoints{
+				Unit: p.Unit, From: openapi_types.Date{Time: l.From}, To: openapi_types.Date{Time: l.To}, Amount: numeric.Exact(l.Amount),
+			})
+		}
+	}
+	for _, lots := range lotsOf {
+		slices.SortStableFunc(lots, func(a, b PointsLot) int { return a.By.Compare(b.By.Time) })
+	}
+	for _, lapsed := range lapsedOf {
+		slices.SortStableFunc(lapsed, func(a, b LapsedPoints) int { return a.To.Compare(b.To.Time) })
+	}
+	return lotsOf, lapsedOf
 }
 
 // toAccount shows an account as the domain assesses it (domain.Assess).

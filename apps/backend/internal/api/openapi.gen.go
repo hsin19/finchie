@@ -345,6 +345,14 @@ type Account struct {
 	// Example: 臺幣活存
 	Label *string `json:"label,omitempty"`
 
+	// Lapsed Points that lapsed between two bills by their program's rule, oldest first; the gaps they leave are not in `gaps`
+	Lapsed *[]LapsedPoints `json:"lapsed,omitempty"`
+
+	// Lots Of a points program whose lapse rule is known, what its bills come to (ADR 0019): its points held
+	// in lots, soonest to lapse first, adding up to its newest balance, each by the day the rule gives
+	// the bill that added it, a day's together. A day already gone means the rule is wrong for them.
+	Lots *[]PointsLot `json:"lots,omitempty"`
+
 	// Name The owner's name for it
 	Name *string `json:"name,omitempty"`
 
@@ -420,6 +428,14 @@ type AccountDetail struct {
 	//
 	// Example: 臺幣活存
 	Label *string `json:"label,omitempty"`
+
+	// Lapsed Points that lapsed between two bills by their program's rule, oldest first; the gaps they leave are not in `gaps`
+	Lapsed *[]LapsedPoints `json:"lapsed,omitempty"`
+
+	// Lots Of a points program whose lapse rule is known, what its bills come to (ADR 0019): its points held
+	// in lots, soonest to lapse first, adding up to its newest balance, each by the day the rule gives
+	// the bill that added it, a day's together. A day already gone means the rule is wrong for them.
+	Lots *[]PointsLot `json:"lots,omitempty"`
 
 	// Name The owner's name for it
 	Name *string `json:"name,omitempty"`
@@ -776,6 +792,17 @@ type KindWorth struct {
 	Worth Decimal `json:"worth"`
 }
 
+// LapsedPoints Points that lapsed between two bills, their balances' days (ADR 0019)
+type LapsedPoints struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal            `json:"amount"`
+	From   openapi_types.Date `json:"from"`
+	To     openapi_types.Date `json:"to"`
+	Unit   string             `json:"unit"`
+}
+
 // LineCounterpart The other line of a transfer or card payment (ADR 0016)
 type LineCounterpart struct {
 	// AccountId A deposit account; absent for a card bill
@@ -853,6 +880,21 @@ type NetWorthPoint struct {
 	Net      Decimal            `json:"net"`
 	On       openapi_types.Date `json:"on"`
 	Unvalued int                `json:"unvalued"`
+}
+
+// PointsLot Points that lapse together (ADR 0019)
+type PointsLot struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount Decimal            `json:"amount"`
+	By     openapi_types.Date `json:"by"`
+
+	// Unaged Held before the first bill: added on days not known, so lapsing no later than `by`
+	Unaged *bool `json:"unaged,omitempty"`
+
+	// Unit Example: 小樹點(信用卡)
+	Unit string `json:"unit"`
 }
 
 // Position A security in a securities account. Its cost is the average cost of the shares held: a buy adds its amount and fee, a sale takes off the average cost of the shares it sold. Known only from a day the account held none of it with no gap since; never estimated (ADR 0017).

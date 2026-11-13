@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 from fakes import FakeDocument, account, baseline, card, card_detail, card_lines, check
 
-from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LineKind, Statement
+from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LapseRule, LineKind, Statement
 from finchie_parser.ocr import OcrLine
 from finchie_parser.parsers import Parsed
 from finchie_parser.parsers.hsbc import HsbcParser
@@ -199,6 +199,8 @@ def test_hsbc_reads_its_travel_points_box_by_position() -> None:
     assert [(line.description, line.amount) for line in points.lines] == [("本期新增積分", Decimal(18077))]
     # Next month's expiring points, by its last day.
     assert points.expiries == [Expiry("滙豐旅遊積分", Decimal(120), date(2026, 5, 31))]
+    # Three years from the period they are added in, which starts in the month before the closing's.
+    assert points.lapse_rules == [LapseRule("滙豐旅遊積分", months_after_closing=35)]
     assert check(statement, "滙豐旅遊積分").balanced
     assert not any("滙豐旅遊積分" in w for w in parsed.warnings)
 

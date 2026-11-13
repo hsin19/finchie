@@ -946,6 +946,17 @@ components:
           type: array
           description: "What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)"
           items: { $ref: "#/components/schemas/Expiry" }
+        lots:
+          type: array
+          description: |
+            Of a points program whose lapse rule is known, what its bills come to (ADR 0019): its points held
+            in lots, soonest to lapse first, adding up to its newest balance, each by the day the rule gives
+            the bill that added it, a day's together. A day already gone means the rule is wrong for them.
+          items: { $ref: "#/components/schemas/PointsLot" }
+        lapsed:
+          type: array
+          description: Points that lapsed between two bills by their program's rule, oldest first; the gaps they leave are not in `gaps`
+          items: { $ref: "#/components/schemas/LapsedPoints" }
 
     AccountDetail:
       allOf:
@@ -993,6 +1004,26 @@ components:
         unit: { type: string, example: 小樹點(信用卡) }
         amount: { $ref: "#/components/schemas/Decimal" }
         by: { type: string, format: date }
+
+    PointsLot:
+      type: object
+      description: Points that lapse together (ADR 0019)
+      required: [unit, by, amount]
+      properties:
+        unit: { type: string, example: 小樹點(信用卡) }
+        by: { type: string, format: date }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        unaged: { type: boolean, description: "Held before the first bill: added on days not known, so lapsing no later than `by`" }
+
+    LapsedPoints:
+      type: object
+      description: Points that lapsed between two bills, their balances' days (ADR 0019)
+      required: [unit, from, to, amount]
+      properties:
+        unit: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        amount: { $ref: "#/components/schemas/Decimal" }
 
     WorthFrom:
       type: string

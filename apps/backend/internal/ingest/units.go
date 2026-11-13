@@ -24,7 +24,25 @@ type (
 		unit string
 		dbq.InsertExpiryParams
 	}
+	storedLapseRule struct {
+		unit string
+		rule domain.LapseRule
+	}
 )
+
+// params are the rule as its unit keeps it.
+func (r storedLapseRule) params(unitID int64) dbq.SetLapseRuleParams {
+	short := func(n int) *int16 {
+		if n == 0 {
+			return nil
+		}
+		v := int16(n) //nolint:gosec // within range: lapseRule checks it
+		return &v
+	}
+	return dbq.SetLapseRuleParams{
+		ID: unitID, Months: short(r.rule.MonthsAfterClosing), PurgeMonth: short(r.rule.PurgeLastMonth), PurgeYears: short(r.rule.PurgeYears),
+	}
+}
 
 // unitIDs finds, or creates, the units of everything an account reports (ADR 0020).
 func (a storedAccount) unitIDs(ctx context.Context, queries *dbq.Queries) (map[string]int64, error) {
@@ -37,6 +55,9 @@ func (a storedAccount) unitIDs(ctx context.Context, queries *dbq.Queries) (map[s
 	}
 	for _, e := range a.expiries {
 		symbols = append(symbols, e.unit)
+	}
+	for _, r := range a.lapseRules {
+		symbols = append(symbols, r.unit)
 	}
 	return ledger.Units(ctx, queries, a.account.Kind.UnitKind(), symbols...)
 }

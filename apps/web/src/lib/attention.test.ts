@@ -52,6 +52,11 @@ describe("needs", () => {
         expect(needs({ byState: [], accounts: [{ ...quiet, checkAgainOn: "2027-01-02" }], today })).toEqual([]);
     });
 
+    it("reminds of points the rule says lapse soon, as worked out", () => {
+        const points = account(5, { kind: "points", label: "點數", lots: [{ unit: "e point", by: "2026-12-31", amount: "28" }] });
+        expect(needs({ byState: [], accounts: [points], today })[0].names[0].text).toBe("玉山 點數 28 e point 12/31 前（推算）");
+    });
+
     it("says only the kind of document trouble there is", () => {
         expect(needs({ byState: [{ state: "needs_review", count: 2 }], accounts: [], today })[0].text).toBe("2 份文件要處理：2 份對不起來");
     });

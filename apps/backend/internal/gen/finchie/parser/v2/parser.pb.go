@@ -899,7 +899,10 @@ type AccountReport struct {
 	Balances []*Balance `protobuf:"bytes,4,rep,name=balances,proto3" json:"balances,omitempty"`
 	Lines    []*Line    `protobuf:"bytes,5,rep,name=lines,proto3" json:"lines,omitempty"`
 	// Points the statement says will lapse (ADR 0019).
-	Expiries      []*Expiry `protobuf:"bytes,6,rep,name=expiries,proto3" json:"expiries,omitempty"`
+	Expiries []*Expiry `protobuf:"bytes,6,rep,name=expiries,proto3" json:"expiries,omitempty"`
+	// Points: how each program's points lapse by its terms, where the parser
+	// knows them (ADR 0019).
+	LapseRules    []*LapseRule `protobuf:"bytes,7,rep,name=lapse_rules,json=lapseRules,proto3" json:"lapse_rules,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -972,6 +975,13 @@ func (x *AccountReport) GetLines() []*Line {
 func (x *AccountReport) GetExpiries() []*Expiry {
 	if x != nil {
 		return x.Expiries
+	}
+	return nil
+}
+
+func (x *AccountReport) GetLapseRules() []*LapseRule {
+	if x != nil {
+		return x.LapseRules
 	}
 	return nil
 }
@@ -1491,6 +1501,158 @@ func (x *Expiry) GetBy() *date.Date {
 	return nil
 }
 
+// How a program's points lapse by its terms, worked out from what each bill
+// adds, which the bill dates on its closing date.
+type LapseRule struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// As for Balance: the program's name as printed.
+	Unit string `protobuf:"bytes,1,opt,name=unit,proto3" json:"unit,omitempty"`
+	// Types that are valid to be assigned to Rule:
+	//
+	//	*LapseRule_MonthsAfterClosing
+	//	*LapseRule_YearlyPurge
+	Rule          isLapseRule_Rule `protobuf_oneof:"rule"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LapseRule) Reset() {
+	*x = LapseRule{}
+	mi := &file_finchie_parser_v2_parser_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LapseRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LapseRule) ProtoMessage() {}
+
+func (x *LapseRule) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v2_parser_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LapseRule.ProtoReflect.Descriptor instead.
+func (*LapseRule) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v2_parser_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *LapseRule) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *LapseRule) GetRule() isLapseRule_Rule {
+	if x != nil {
+		return x.Rule
+	}
+	return nil
+}
+
+func (x *LapseRule) GetMonthsAfterClosing() int32 {
+	if x != nil {
+		if x, ok := x.Rule.(*LapseRule_MonthsAfterClosing); ok {
+			return x.MonthsAfterClosing
+		}
+	}
+	return 0
+}
+
+func (x *LapseRule) GetYearlyPurge() *YearlyPurge {
+	if x != nil {
+		if x, ok := x.Rule.(*LapseRule_YearlyPurge); ok {
+			return x.YearlyPurge
+		}
+	}
+	return nil
+}
+
+type isLapseRule_Rule interface {
+	isLapseRule_Rule()
+}
+
+type LapseRule_MonthsAfterClosing struct {
+	// At the end of the month this many months after the bill's closing
+	// month.
+	MonthsAfterClosing int32 `protobuf:"varint,2,opt,name=months_after_closing,json=monthsAfterClosing,proto3,oneof"`
+}
+
+type LapseRule_YearlyPurge struct {
+	// Once a year, together.
+	YearlyPurge *YearlyPurge `protobuf:"bytes,3,opt,name=yearly_purge,json=yearlyPurge,proto3,oneof"`
+}
+
+func (*LapseRule_MonthsAfterClosing) isLapseRule_Rule() {}
+
+func (*LapseRule_YearlyPurge) isLapseRule_Rule() {}
+
+// What the bills of one year add lapse together, some years on: at the end of
+// the month after the year's last.
+type YearlyPurge struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The year's last month (1 to 12), by the bills' closing dates.
+	LastMonth int32 `protobuf:"varint,1,opt,name=last_month,json=lastMonth,proto3" json:"last_month,omitempty"`
+	// How many years after it they lapse.
+	Years         int32 `protobuf:"varint,2,opt,name=years,proto3" json:"years,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *YearlyPurge) Reset() {
+	*x = YearlyPurge{}
+	mi := &file_finchie_parser_v2_parser_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *YearlyPurge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*YearlyPurge) ProtoMessage() {}
+
+func (x *YearlyPurge) ProtoReflect() protoreflect.Message {
+	mi := &file_finchie_parser_v2_parser_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use YearlyPurge.ProtoReflect.Descriptor instead.
+func (*YearlyPurge) Descriptor() ([]byte, []int) {
+	return file_finchie_parser_v2_parser_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *YearlyPurge) GetLastMonth() int32 {
+	if x != nil {
+		return x.LastMonth
+	}
+	return 0
+}
+
+func (x *YearlyPurge) GetYears() int32 {
+	if x != nil {
+		return x.Years
+	}
+	return 0
+}
+
 // A figure the statement prints and what the lines it covers come to.
 type Check struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1507,7 +1669,7 @@ type Check struct {
 
 func (x *Check) Reset() {
 	*x = Check{}
-	mi := &file_finchie_parser_v2_parser_proto_msgTypes[18]
+	mi := &file_finchie_parser_v2_parser_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1519,7 +1681,7 @@ func (x *Check) String() string {
 func (*Check) ProtoMessage() {}
 
 func (x *Check) ProtoReflect() protoreflect.Message {
-	mi := &file_finchie_parser_v2_parser_proto_msgTypes[18]
+	mi := &file_finchie_parser_v2_parser_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1532,7 +1694,7 @@ func (x *Check) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Check.ProtoReflect.Descriptor instead.
 func (*Check) Descriptor() ([]byte, []int) {
-	return file_finchie_parser_v2_parser_proto_rawDescGZIP(), []int{18}
+	return file_finchie_parser_v2_parser_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Check) GetName() string {
@@ -1621,14 +1783,16 @@ const file_finchie_parser_v2_parser_proto_rawDesc = "" +
 	"\bCardBill\x12,\n" +
 	"\bdue_date\x18\x01 \x01(\v2\x11.google.type.DateR\adueDate\x12\x1a\n" +
 	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x121\n" +
-	"\ttotal_due\x18\x03 \x01(\v2\x14.google.type.DecimalR\btotalDue\"\x8d\x02\n" +
+	"\ttotal_due\x18\x03 \x01(\v2\x14.google.type.DecimalR\btotalDue\"\xcc\x02\n" +
 	"\rAccountReport\x122\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1e.finchie.parser.v2.AccountKindR\x04kind\x12\x16\n" +
 	"\x06number\x18\x02 \x01(\tR\x06number\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x126\n" +
 	"\bbalances\x18\x04 \x03(\v2\x1a.finchie.parser.v2.BalanceR\bbalances\x12-\n" +
 	"\x05lines\x18\x05 \x03(\v2\x17.finchie.parser.v2.LineR\x05lines\x125\n" +
-	"\bexpiries\x18\x06 \x03(\v2\x19.finchie.parser.v2.ExpiryR\bexpiries\"s\n" +
+	"\bexpiries\x18\x06 \x03(\v2\x19.finchie.parser.v2.ExpiryR\bexpiries\x12=\n" +
+	"\vlapse_rules\x18\a \x03(\v2\x1c.finchie.parser.v2.LapseRuleR\n" +
+	"lapseRules\"s\n" +
 	"\aBalance\x12\x12\n" +
 	"\x04unit\x18\x01 \x01(\tR\x04unit\x12&\n" +
 	"\x05as_of\x18\x02 \x01(\v2\x11.google.type.DateR\x04asOf\x12,\n" +
@@ -1666,7 +1830,16 @@ const file_finchie_parser_v2_parser_proto_rawDesc = "" +
 	"\x06Expiry\x12\x12\n" +
 	"\x04unit\x18\x01 \x01(\tR\x04unit\x12,\n" +
 	"\x06amount\x18\x02 \x01(\v2\x14.google.type.DecimalR\x06amount\x12!\n" +
-	"\x02by\x18\x03 \x01(\v2\x11.google.type.DateR\x02by\"\xab\x01\n" +
+	"\x02by\x18\x03 \x01(\v2\x11.google.type.DateR\x02by\"\xa0\x01\n" +
+	"\tLapseRule\x12\x12\n" +
+	"\x04unit\x18\x01 \x01(\tR\x04unit\x122\n" +
+	"\x14months_after_closing\x18\x02 \x01(\x05H\x00R\x12monthsAfterClosing\x12C\n" +
+	"\fyearly_purge\x18\x03 \x01(\v2\x1e.finchie.parser.v2.YearlyPurgeH\x00R\vyearlyPurgeB\x06\n" +
+	"\x04rule\"B\n" +
+	"\vYearlyPurge\x12\x1d\n" +
+	"\n" +
+	"last_month\x18\x01 \x01(\x05R\tlastMonth\x12\x14\n" +
+	"\x05years\x18\x02 \x01(\x05R\x05years\"\xab\x01\n" +
 	"\x05Check\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04unit\x18\x02 \x01(\tR\x04unit\x120\n" +
@@ -1716,7 +1889,7 @@ func file_finchie_parser_v2_parser_proto_rawDescGZIP() []byte {
 }
 
 var file_finchie_parser_v2_parser_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_finchie_parser_v2_parser_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_finchie_parser_v2_parser_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_finchie_parser_v2_parser_proto_goTypes = []any{
 	(AccountKind)(0),                // 0: finchie.parser.v2.AccountKind
 	(LineKind)(0),                   // 1: finchie.parser.v2.LineKind
@@ -1738,60 +1911,64 @@ var file_finchie_parser_v2_parser_proto_goTypes = []any{
 	(*DepositLine)(nil),             // 17: finchie.parser.v2.DepositLine
 	(*Trade)(nil),                   // 18: finchie.parser.v2.Trade
 	(*Expiry)(nil),                  // 19: finchie.parser.v2.Expiry
-	(*Check)(nil),                   // 20: finchie.parser.v2.Check
-	(*timestamppb.Timestamp)(nil),   // 21: google.protobuf.Timestamp
-	(*date.Date)(nil),               // 22: google.type.Date
-	(*decimal.Decimal)(nil),         // 23: google.type.Decimal
+	(*LapseRule)(nil),               // 20: finchie.parser.v2.LapseRule
+	(*YearlyPurge)(nil),             // 21: finchie.parser.v2.YearlyPurge
+	(*Check)(nil),                   // 22: finchie.parser.v2.Check
+	(*timestamppb.Timestamp)(nil),   // 23: google.protobuf.Timestamp
+	(*date.Date)(nil),               // 24: google.type.Date
+	(*decimal.Decimal)(nil),         // 25: google.type.Decimal
 }
 var file_finchie_parser_v2_parser_proto_depIdxs = []int32{
 	4,  // 0: finchie.parser.v2.DescribeParsersResponse.parsers:type_name -> finchie.parser.v2.ParserVersion
 	8,  // 1: finchie.parser.v2.OpenDocumentResponse.email:type_name -> finchie.parser.v2.Email
 	9,  // 2: finchie.parser.v2.OpenDocumentResponse.files:type_name -> finchie.parser.v2.File
-	21, // 3: finchie.parser.v2.Email.date:type_name -> google.protobuf.Timestamp
+	23, // 3: finchie.parser.v2.Email.date:type_name -> google.protobuf.Timestamp
 	11, // 4: finchie.parser.v2.ParseDocumentResponse.statement:type_name -> finchie.parser.v2.Statement
-	22, // 5: finchie.parser.v2.Statement.period_start:type_name -> google.type.Date
-	22, // 6: finchie.parser.v2.Statement.closing_date:type_name -> google.type.Date
+	24, // 5: finchie.parser.v2.Statement.period_start:type_name -> google.type.Date
+	24, // 6: finchie.parser.v2.Statement.closing_date:type_name -> google.type.Date
 	13, // 7: finchie.parser.v2.Statement.accounts:type_name -> finchie.parser.v2.AccountReport
-	20, // 8: finchie.parser.v2.Statement.checks:type_name -> finchie.parser.v2.Check
+	22, // 8: finchie.parser.v2.Statement.checks:type_name -> finchie.parser.v2.Check
 	12, // 9: finchie.parser.v2.Statement.card_bill:type_name -> finchie.parser.v2.CardBill
-	22, // 10: finchie.parser.v2.CardBill.due_date:type_name -> google.type.Date
-	23, // 11: finchie.parser.v2.CardBill.total_due:type_name -> google.type.Decimal
+	24, // 10: finchie.parser.v2.CardBill.due_date:type_name -> google.type.Date
+	25, // 11: finchie.parser.v2.CardBill.total_due:type_name -> google.type.Decimal
 	0,  // 12: finchie.parser.v2.AccountReport.kind:type_name -> finchie.parser.v2.AccountKind
 	14, // 13: finchie.parser.v2.AccountReport.balances:type_name -> finchie.parser.v2.Balance
 	15, // 14: finchie.parser.v2.AccountReport.lines:type_name -> finchie.parser.v2.Line
 	19, // 15: finchie.parser.v2.AccountReport.expiries:type_name -> finchie.parser.v2.Expiry
-	22, // 16: finchie.parser.v2.Balance.as_of:type_name -> google.type.Date
-	23, // 17: finchie.parser.v2.Balance.amount:type_name -> google.type.Decimal
-	22, // 18: finchie.parser.v2.Line.date:type_name -> google.type.Date
-	23, // 19: finchie.parser.v2.Line.amount:type_name -> google.type.Decimal
-	1,  // 20: finchie.parser.v2.Line.kind:type_name -> finchie.parser.v2.LineKind
-	16, // 21: finchie.parser.v2.Line.card:type_name -> finchie.parser.v2.CardLine
-	17, // 22: finchie.parser.v2.Line.deposit:type_name -> finchie.parser.v2.DepositLine
-	18, // 23: finchie.parser.v2.Line.trade:type_name -> finchie.parser.v2.Trade
-	22, // 24: finchie.parser.v2.CardLine.posting_date:type_name -> google.type.Date
-	23, // 25: finchie.parser.v2.CardLine.original_amount:type_name -> google.type.Decimal
-	23, // 26: finchie.parser.v2.DepositLine.balance:type_name -> google.type.Decimal
-	23, // 27: finchie.parser.v2.Trade.price:type_name -> google.type.Decimal
-	23, // 28: finchie.parser.v2.Trade.amount:type_name -> google.type.Decimal
-	23, // 29: finchie.parser.v2.Trade.fee:type_name -> google.type.Decimal
-	23, // 30: finchie.parser.v2.Trade.tax:type_name -> google.type.Decimal
-	23, // 31: finchie.parser.v2.Trade.net:type_name -> google.type.Decimal
-	23, // 32: finchie.parser.v2.Trade.prepaid:type_name -> google.type.Decimal
-	23, // 33: finchie.parser.v2.Expiry.amount:type_name -> google.type.Decimal
-	22, // 34: finchie.parser.v2.Expiry.by:type_name -> google.type.Date
-	23, // 35: finchie.parser.v2.Check.computed:type_name -> google.type.Decimal
-	23, // 36: finchie.parser.v2.Check.stated:type_name -> google.type.Decimal
-	5,  // 37: finchie.parser.v2.ParserService.ParseDocument:input_type -> finchie.parser.v2.ParseDocumentRequest
-	6,  // 38: finchie.parser.v2.ParserService.OpenDocument:input_type -> finchie.parser.v2.OpenDocumentRequest
-	2,  // 39: finchie.parser.v2.ParserService.DescribeParsers:input_type -> finchie.parser.v2.DescribeParsersRequest
-	10, // 40: finchie.parser.v2.ParserService.ParseDocument:output_type -> finchie.parser.v2.ParseDocumentResponse
-	7,  // 41: finchie.parser.v2.ParserService.OpenDocument:output_type -> finchie.parser.v2.OpenDocumentResponse
-	3,  // 42: finchie.parser.v2.ParserService.DescribeParsers:output_type -> finchie.parser.v2.DescribeParsersResponse
-	40, // [40:43] is the sub-list for method output_type
-	37, // [37:40] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	20, // 16: finchie.parser.v2.AccountReport.lapse_rules:type_name -> finchie.parser.v2.LapseRule
+	24, // 17: finchie.parser.v2.Balance.as_of:type_name -> google.type.Date
+	25, // 18: finchie.parser.v2.Balance.amount:type_name -> google.type.Decimal
+	24, // 19: finchie.parser.v2.Line.date:type_name -> google.type.Date
+	25, // 20: finchie.parser.v2.Line.amount:type_name -> google.type.Decimal
+	1,  // 21: finchie.parser.v2.Line.kind:type_name -> finchie.parser.v2.LineKind
+	16, // 22: finchie.parser.v2.Line.card:type_name -> finchie.parser.v2.CardLine
+	17, // 23: finchie.parser.v2.Line.deposit:type_name -> finchie.parser.v2.DepositLine
+	18, // 24: finchie.parser.v2.Line.trade:type_name -> finchie.parser.v2.Trade
+	24, // 25: finchie.parser.v2.CardLine.posting_date:type_name -> google.type.Date
+	25, // 26: finchie.parser.v2.CardLine.original_amount:type_name -> google.type.Decimal
+	25, // 27: finchie.parser.v2.DepositLine.balance:type_name -> google.type.Decimal
+	25, // 28: finchie.parser.v2.Trade.price:type_name -> google.type.Decimal
+	25, // 29: finchie.parser.v2.Trade.amount:type_name -> google.type.Decimal
+	25, // 30: finchie.parser.v2.Trade.fee:type_name -> google.type.Decimal
+	25, // 31: finchie.parser.v2.Trade.tax:type_name -> google.type.Decimal
+	25, // 32: finchie.parser.v2.Trade.net:type_name -> google.type.Decimal
+	25, // 33: finchie.parser.v2.Trade.prepaid:type_name -> google.type.Decimal
+	25, // 34: finchie.parser.v2.Expiry.amount:type_name -> google.type.Decimal
+	24, // 35: finchie.parser.v2.Expiry.by:type_name -> google.type.Date
+	21, // 36: finchie.parser.v2.LapseRule.yearly_purge:type_name -> finchie.parser.v2.YearlyPurge
+	25, // 37: finchie.parser.v2.Check.computed:type_name -> google.type.Decimal
+	25, // 38: finchie.parser.v2.Check.stated:type_name -> google.type.Decimal
+	5,  // 39: finchie.parser.v2.ParserService.ParseDocument:input_type -> finchie.parser.v2.ParseDocumentRequest
+	6,  // 40: finchie.parser.v2.ParserService.OpenDocument:input_type -> finchie.parser.v2.OpenDocumentRequest
+	2,  // 41: finchie.parser.v2.ParserService.DescribeParsers:input_type -> finchie.parser.v2.DescribeParsersRequest
+	10, // 42: finchie.parser.v2.ParserService.ParseDocument:output_type -> finchie.parser.v2.ParseDocumentResponse
+	7,  // 43: finchie.parser.v2.ParserService.OpenDocument:output_type -> finchie.parser.v2.OpenDocumentResponse
+	3,  // 44: finchie.parser.v2.ParserService.DescribeParsers:output_type -> finchie.parser.v2.DescribeParsersResponse
+	42, // [42:45] is the sub-list for method output_type
+	39, // [39:42] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_finchie_parser_v2_parser_proto_init() }
@@ -1804,13 +1981,17 @@ func file_finchie_parser_v2_parser_proto_init() {
 		(*Line_Deposit)(nil),
 		(*Line_Trade)(nil),
 	}
+	file_finchie_parser_v2_parser_proto_msgTypes[18].OneofWrappers = []any{
+		(*LapseRule_MonthsAfterClosing)(nil),
+		(*LapseRule_YearlyPurge)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_finchie_parser_v2_parser_proto_rawDesc), len(file_finchie_parser_v2_parser_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from finchie_parser.model import AccountKind, AccountReport, Balance, Check, Expiry, Line, LineKind
+from finchie_parser.model import AccountKind, AccountReport, Balance, Check, Expiry, LapseRule, Line, LineKind
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,19 @@ class Program:
     moves: list[Move]
     closing: Decimal
     expiries: list[Expiry]
+    # How its points lapse by its terms, where known.
+    lapse: LapseRule | None = None
+
+
+def lapse_months_after_closing(name: str, months: int) -> LapseRule:
+    """Each bill's points lapse at the end of the month `months` after its closing month."""
+    return LapseRule(name, months_after_closing=months)
+
+
+def lapse_yearly(name: str, *, last_month: int, years: int) -> LapseRule:
+    """What the bills of a year ending with `last_month` add lapse together, at the end of the month after
+    it, `years` later."""
+    return LapseRule(name, purge_last_month=last_month, purge_years=years)
 
 
 def earned(label: str, value: Decimal) -> Move:
@@ -44,10 +57,16 @@ def used(label: str, value: Decimal) -> Move:
 
 
 def points_program(
-    name: str, *, opening: Decimal, moves: Iterable[Move], closing: Decimal, expiries: Sequence[Expiry] = ()
+    name: str,
+    *,
+    opening: Decimal,
+    moves: Iterable[Move],
+    closing: Decimal,
+    expiries: Sequence[Expiry] = (),
+    lapse: LapseRule | None = None,
 ) -> Program:
     """A program as the bill prints it. Only columns with a figure are lines."""
-    return Program(name, opening, [move for move in moves if move.amount != 0], closing, list(expiries))
+    return Program(name, opening, [move for move in moves if move.amount != 0], closing, list(expiries), lapse)
 
 
 def points_account(programs: Sequence[Program], closing_date: date) -> tuple[list[AccountReport], list[Check]]:
@@ -63,6 +82,7 @@ def points_account(programs: Sequence[Program], closing_date: date) -> tuple[lis
         # The bill totals each column over the period: on the closing date, where its closing is.
         lines=[Line(closing_date, p.name, m.amount, m.kind, m.label) for p in programs for m in p.moves],
         expiries=[expiry for p in programs for expiry in p.expiries],
+        lapse_rules=[p.lapse for p in programs if p.lapse is not None],
     )
     checks = [
         Check(p.name, p.name, p.opening + sum((m.amount for m in p.moves), Decimal(0)), p.closing) for p in programs

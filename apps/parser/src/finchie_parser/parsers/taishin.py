@@ -5,7 +5,7 @@ from finchie_parser.ocr import Ocr
 from finchie_parser.parsers.base import Parsed, StatementParser
 from finchie_parser.parsers.card import card_bill, card_line, check, new_charges
 from finchie_parser.parsers.kinds import card_kind
-from finchie_parser.parsers.points import Program, adjusted, earned, points_program, used
+from finchie_parser.parsers.points import Program, adjusted, earned, lapse_yearly, points_program, used
 from finchie_parser.passwords import Identity
 from finchie_parser.pdf import Document
 from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ROC_DATE, amount, clean, find, roc_date
@@ -42,7 +42,7 @@ _POINTS_EXPIRING = re.compile(rf"到期提醒[：:】]?\s*您有(?P<n>[\d,]+)點
 
 class TaishinParser(StatementParser):
     name = "taishin.credit_card"
-    version = "8"
+    version = "9"
     institution = "taishin"
     # 台新信用卡電子帳單 2026年10月; the combined (deposit) statement, 台新銀行綜合對帳單 2026年9月份,
     # comes from the same address.
@@ -133,8 +133,15 @@ def _points(texts: list[str]) -> list[Program]:
         if any(value == "**" for value in figures.values()):
             continue
         expiries: list[Expiry] = []
+        lapse = None
         if column == 0 and expiring:
-            expiries.append(Expiry(name, amount(expiring["n"]), roc_date(expiring["date"])))
+            by = roc_date(expiring["date"])
+            expiries.append(Expiry(name, amount(expiring["n"]), by))
+            if name == _POINTS_NAME:
+                # 台新Point(信用卡): each lasts two years, and what is past them is purged once a year, at the
+                # end of the month after the owner's birthday month, the month the reminder dates. A year's
+                # points are what the bills closing up to the birthday month add (116/01/31 purges 2024's).
+                lapse = lapse_yearly(name, last_month=(by.month - 2) % 12 + 1, years=2)
         programs.append(
             points_program(
                 name,
@@ -146,6 +153,7 @@ def _points(texts: list[str]) -> list[Program]:
                 ),
                 closing=amount(figures["本期結餘回饋"]),
                 expiries=expiries,
+                lapse=lapse,
             )
         )
     return programs

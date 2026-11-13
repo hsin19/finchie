@@ -23,6 +23,7 @@ import {
     leftOut,
     leftOutAccounts,
     listedBalances,
+    nextLapse,
     readAccountsView,
     shownNumber,
     shownPositions,
@@ -266,5 +267,22 @@ describe("shownPositions", () => {
         const shown = shownPositions([position("A", "0", "120"), position("B", "100"), position("C", "0"), position("D", "0", "0")]);
         expect(shown.map(p => p.unit)).toEqual(["B", "A"]);
         expect(shownPositions(undefined)).toEqual([]);
+    });
+});
+
+describe("nextLapse", () => {
+    const today = "2026-11-13";
+    it("is the soonest of the lots by the rule and what the newest bill says, from today on", () => {
+        const lots = [
+            // The rule says these lapsed already: no lapse ahead.
+            { unit: "小樹點(信用卡)", by: "2026-10-31", amount: "5" },
+            { unit: "小樹點(信用卡)", by: "2027-11-30", amount: "3" },
+            { unit: "小樹點(信用卡)", by: "2028-01-31", amount: "60" },
+        ];
+        expect(nextLapse({ lots, expiries: [] }, today)).toEqual({ unit: "小樹點(信用卡)", amount: "3", by: "2027-11-30", estimated: true });
+        // A bill that knows of a sooner one, points held from before the first bill.
+        const expiries = [{ unit: "小樹點(信用卡)", amount: "88", by: "2026-11-30" }];
+        expect(nextLapse({ lots, expiries }, today)).toEqual({ unit: "小樹點(信用卡)", amount: "88", by: "2026-11-30", estimated: false });
+        expect(nextLapse({ expiries: [] }, today)).toBeUndefined();
     });
 });
