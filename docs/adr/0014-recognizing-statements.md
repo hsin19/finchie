@@ -15,7 +15,7 @@ Before any parser looks, a shared step reduces an e-mail the owner forwarded by 
 | Forwarded as | Where the original is |
 |---|---|
 | An attachment (`message/rfc822`) | The attached message, whole: headers, body, and attachments |
-| Inline, as Gmail forwards | The header block after `---------- Forwarded message ---------`, its labels in Gmail's language (`寄件者：` or `From:`); the attachments are the forward's own |
+| Inline, as Gmail forwards | The header block after `---------- Forwarded message ---------` (or `---------- 轉寄的郵件 ---------`, as the Gmail app writes it in Chinese), its labels in Gmail's language (`寄件者：` or `From:`); the attachments are the forward's own |
 
 Forwarded more than once, the innermost original counts. Previews (ADR 0012) go through the same step and show the bank's headers. An e-mail a Gmail filter forwards needs none of this: it arrives with the bank's headers (ADR 0010).
 

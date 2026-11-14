@@ -79,6 +79,16 @@ Date: 2026年11月6日週五 下午9:30
 Subject: {subject}
 To: <someone@example.com>
 """
+# The Gmail app in Chinese: the marker in Chinese too, every label, and the owner's signature above it.
+_GMAIL_APP_BLOCK_ZH = """Best Regards,
+範例
+
+---------- 轉寄的郵件 ---------
+寄件者： {sender}
+日期：2026年11月6日週五，下午9:30
+主旨：{subject}
+收件者：<someone@example.com>
+"""
 _GMAIL_BLOCK_EN = """---------- Forwarded message ---------
 From: {sender}
 Date: Fri, Nov 6, 2026 at 9:30 PM
@@ -87,11 +97,12 @@ To: <someone@example.com>
 """
 
 
-def gmail_forward(original: bytes, *, english: bool = False, html_only: bool = False) -> bytes:
+def gmail_forward(original: bytes, *, english: bool = False, html_only: bool = False, app: bool = False) -> bytes:
     """As Gmail forwards by hand: the owner's headers, the original's in the body, its attachments copied."""
     inner = email.message_from_bytes(original, policy=email.policy.default)
     assert isinstance(inner, EmailMessage)
-    block = (_GMAIL_BLOCK_EN if english else _GMAIL_BLOCK_ZH).format(sender=inner["From"], subject=inner["Subject"])
+    template = _GMAIL_APP_BLOCK_ZH if app else _GMAIL_BLOCK_EN if english else _GMAIL_BLOCK_ZH
+    block = template.format(sender=inner["From"], subject=inner["Subject"])
     message = EmailMessage()
     message["From"] = OWNER
     message["To"] = "finchie@mailbox.example"

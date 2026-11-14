@@ -44,7 +44,9 @@ def test_anything_but_an_email_is_invalid(content: bytes, message: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "options", [{}, {"english": True}, {"html_only": True}], ids=["zh-labels", "en-labels", "html-only"]
+    "options",
+    [{}, {"english": True}, {"html_only": True}, {"app": True}, {"app": True, "html_only": True}],
+    ids=["zh-labels", "en-labels", "html-only", "zh-app", "zh-app-html-only"],
 )
 def test_a_gmail_forward_reads_as_the_banks_email_with_the_forwards_attachments(options: dict[str, bool]) -> None:
     mail = read_mail(gmail_forward(statement_email(blank_pdf()), **options))

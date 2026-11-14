@@ -116,7 +116,8 @@ def unwrap(message: EmailMessage) -> Mail:
     )
 
 
-_FORWARD_MARKER = "---------- Forwarded message ---------"
+# Gmail on the web writes the marker in English whatever its language; the Gmail app in the forwarder's.
+_FORWARD_MARKER = re.compile(r"-{5,}\s*(?:Forwarded message|轉寄的郵件|转发的邮件)\s*-{5,}")
 # Gmail writes the labels in the forwarder's language, and not all of them in it.
 _LABELS = {
     "from": "from",
@@ -136,12 +137,12 @@ _HEADER_LINE = re.compile(r"^\s*([^:：]{1,10}?)\s*[:：]\s*(.*)$")
 def _inline_forward(message: EmailMessage) -> dict[str, str] | None:
     """The header block of the last forwarded message in the body, the original. None if not a forward."""
     text = _plain_text(message)
-    start = text.rfind(_FORWARD_MARKER)
-    if start < 0:
+    markers = list(_FORWARD_MARKER.finditer(text))
+    if not markers:
         return None
     fields: dict[str, str] = {}
     last = ""
-    for line in text[start + len(_FORWARD_MARKER) :].splitlines()[1:]:
+    for line in text[markers[-1].end() :].splitlines()[1:]:
         if not line.strip():
             if fields:
                 break
