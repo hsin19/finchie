@@ -242,6 +242,59 @@ func TestMoneySentToAnExchangeLinksToTheDepositTheExchangeReports(t *testing.T) 
 	}
 }
 
+// coinLine is a deposit (positive) or withdrawal of coins an exchange reports, with the chain's transaction.
+func coinLine(t *testing.T, id, account int64, institution, amount, unit, txid string) transferLine {
+	t.Helper()
+	return transferLine{
+		ID: id, AccountID: account, AccountKind: domain.Exchange, Institution: institution,
+		TransactionDate: day(t, "2026-01-26"), Kind: "other", Amount: money(t, amount), Unit: unit, Memo: &txid,
+	}
+}
+
+func TestCoinsSentBetweenExchangesLinkByTheChainsTransaction(t *testing.T) {
+	cases := map[string]struct {
+		lines []transferLine
+		want  bool
+	}{
+		"the same transaction, whatever the fee took": {[]transferLine{
+			coinLine(t, 1, 9, "max", "-3177.13", "USDT", "0x35ab45a3"),
+			coinLine(t, 2, 11, "bitget", "3177.00", "USDT", "0x35ab45a3"),
+		}, true},
+		"another transaction": {[]transferLine{
+			coinLine(t, 1, 9, "max", "-3177.13", "USDT", "0x35ab45a3"),
+			coinLine(t, 2, 11, "bitget", "3177.13", "USDT", "0x3f3133c5"),
+		}, false},
+		"another coin": {[]transferLine{
+			coinLine(t, 1, 9, "max", "-10", "USDT", "0x9fb1203a"),
+			coinLine(t, 2, 11, "bitget", "10", "USDC", "0x9fb1203a"),
+		}, false},
+		"one exchange's own": {[]transferLine{
+			coinLine(t, 1, 9, "max", "-10", "USDT", "0x9fb1203a"),
+			coinLine(t, 2, 9, "max", "10", "USDT", "0x9fb1203a"),
+		}, false},
+		"no transaction": {[]transferLine{
+			coinLine(t, 1, 9, "max", "-10", "USDT", ""),
+			coinLine(t, 2, 11, "bitget", "10", "USDT", ""),
+		}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			pairs := matchTransfers(tc.lines)
+			if linked := pairs[1] == 2 && pairs[2] == 1; linked != tc.want {
+				t.Fatalf("linked = %v, want %v (pairs %v)", linked, tc.want, pairs)
+			}
+		})
+	}
+}
+
+func TestAnExchangesFeeLinksToNothing(t *testing.T) {
+	fee := exchangeLine(t, 2, "2026-01-21", "-15", "TWD")
+	fee.Kind = "fee"
+	if pairs := matchTransfers([]transferLine{depositLine(t, 1, esunSavings, "2026-01-21", "15", ""), fee}); len(pairs) != 0 {
+		t.Fatalf("pairs = %v, want none", pairs)
+	}
+}
+
 func TestATransferOrPaymentIsInOneUnit(t *testing.T) {
 	pairs := matchTransfers([]transferLine{
 		inUnit(depositLine(t, 1, esunSavings, "2026-07-21", "-500", "812 0087654321***234"), "USD", ""),

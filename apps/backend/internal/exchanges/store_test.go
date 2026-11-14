@@ -66,7 +66,7 @@ func TestASnapshotReplacesTheDaysAndPutsWhatTheAccountNoLongerHoldsAtZero(t *tes
 	ctx := t.Context()
 	store := func(on string, snapshot Snapshot) {
 		t.Helper()
-		if err := Store(ctx, pool, "test", day(on), snapshot); err != nil {
+		if err := Store(ctx, pool, "test", day(on), snapshot, History{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestAnExchangesPricesAreKeptAsOfTheFetchOnePerCoinAndDay(t *testing.T) {
 		snapshot.price("BTC", "USDT", price(btc))
 		snapshot.price("BGB", "USDT", price("0.85"))
 		snapshot.price("USDT", "USDT", price("1")) // never in itself
-		if err := Store(ctx, pool, "binance", at, snapshot); err != nil {
+		if err := Store(ctx, pool, "binance", at, snapshot, History{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,11 +139,27 @@ func TestAnExchangesPricesAreKeptAsOfTheFetchOnePerCoinAndDay(t *testing.T) {
 type fake struct {
 	snapshot Snapshot
 	err      error
+	moves    []Movement
+	// Each span the job asked for.
+	spans *[]string
 }
 
 func (fake) Institution() string { return "test" }
 
 func (f fake) Fetch(context.Context) (Snapshot, error) { return f.snapshot, f.err }
+
+func (f fake) Movements(_ context.Context, from, to time.Time) ([]Movement, error) {
+	if f.spans != nil {
+		*f.spans = append(*f.spans, from.UTC().Format(time.DateOnly)+".."+to.UTC().Format(time.DateOnly))
+	}
+	var in []Movement
+	for _, m := range f.moves {
+		if !m.At.Before(from) && m.At.Before(to) {
+			in = append(in, m)
+		}
+	}
+	return in, nil
+}
 
 func TestTheJobStoresTheSnapshotOnTheDayInTaipeiAndNothingWhenTheExchangeFails(t *testing.T) {
 	pool := testdb.Pool(t)
@@ -170,5 +186,82 @@ func TestTheJobStoresTheSnapshotOnTheDayInTaipeiAndNothingWhenTheExchangeFails(t
 	// An exchange whose keys were removed after its job was queued: nothing to do.
 	if err := working.Work(t.Context(), &river.Job[FetchArgs]{Args: FetchArgs{Institution: "gone"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTheJobReadsDepositsAndWithdrawalsAMonthAtATimeFromTwoYearsBackAndWaitsOnPendingOnes(t *testing.T) {
+	pool := testdb.Pool(t)
+	now := time.Date(2026, 11, 14, 4, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	pending := Movement{ID: "p", At: now.Add(-48 * time.Hour), Unit: "USD", Amount: big.NewRat(100, 1), Pending: true}
+	var spans []string
+	job := &river.Job[FetchArgs]{Args: FetchArgs{Institution: "test"}}
+	work := func(moves ...Movement) {
+		t.Helper()
+		worker := NewWorker(pool, []Exchange{fake{snapshot: Snapshot{Holdings: held("USDT", "1")}, moves: moves, spans: &spans}}, clock)
+		if err := worker.Work(t.Context(), job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 25 spans of 30 days from two years back; one still pending two days ago is in the last.
+	for range 25 {
+		work(pending)
+	}
+	if want := []string{"2024-11-14..2024-12-14", "2024-12-14..2025-01-13"}; !slices.Equal(spans[:2], want) {
+		t.Fatalf("first spans = %v, want %v", spans[:2], want)
+	}
+	if last := spans[len(spans)-1]; last != "2026-11-04..2026-11-14" {
+		t.Fatalf("last span = %s", last)
+	}
+	// It holds the next read back to it, until it settles; then what came since the last read.
+	work(pending)
+	if got := spans[len(spans)-1]; got != "2026-11-12..2026-11-14" {
+		t.Fatalf("after a pending one: %s, want a read from it", got)
+	}
+	pending.Pending = false
+	work(pending)
+	work(pending)
+	if got := spans[len(spans)-1]; got != "2026-11-14..2026-11-14" {
+		t.Fatalf("after it settled: %s", got)
+	}
+}
+
+func TestSettledMovementsAreLinesAndTheirFeesLinesOfTheirOwn(t *testing.T) {
+	pool := testdb.Pool(t)
+	ctx := t.Context()
+	at := time.Date(2026, 1, 26, 12, 0, 0, 0, time.UTC)
+	history := History{From: at.Add(-time.Hour), To: at, Movements: []Movement{
+		{ID: "withdrawal/w3", At: at.Add(-30 * time.Minute), Unit: "usdt", Amount: big.NewRat(-317713, 100), Fee: big.NewRat(1, 1), FeeUnit: "max", TxID: "0x35ab45a3"},
+		{ID: "deposit/d1", At: at.Add(-20 * time.Minute), Unit: "TWD", Amount: big.NewRat(100000, 1), Memo: "12345678901123"},
+		{ID: "deposit/p", At: at.Add(-10 * time.Minute), Unit: "TWD", Amount: big.NewRat(5, 1), Pending: true},
+	}}
+	for range 2 { // stored twice: the same lines
+		if err := Store(ctx, pool, "test", at, Snapshot{Holdings: held("USDT", "1")}, history); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := pool.Query(ctx, `
+		SELECT t.external_id || ' ' || t.description || ' ' || t.kind || ' ' || t.amount::text || ' ' || u.symbol || ' ' || coalesce(t.memo, '')
+		FROM transactions t JOIN units u ON u.id = t.unit_id
+		WHERE t.external_id IS NOT NULL
+		ORDER BY t.external_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for result.Next() {
+		var row string
+		if err := result.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, row)
+	}
+	want := []string{
+		"deposit/d1 入金 other 100000 TWD 12345678901123",
+		"withdrawal/w3 提幣 other -3177.13 USDT 0x35ab45a3",
+		"withdrawal/w3/fee 提幣手續費 fee -1 MAX 0x35ab45a3",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("lines =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

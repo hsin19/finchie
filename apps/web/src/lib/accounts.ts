@@ -391,10 +391,10 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         holdings: true,
         positions: false,
         expiring: false,
-        lines: { note: "只有與銀行之間的入金、出金：入金是正數", trade: false, empty: "還沒有和銀行之間的入金或出金。" },
+        lines: { note: "入金、出金與充幣、提幣，不含買賣：進來是正數", trade: false, empty: "還沒有入金、出金、充幣或提幣。" },
         history: "days",
         gaps: MISSING_STATEMENT,
-        unchecked: "只讀得到入金與出金，沒有買賣明細，接不起來",
+        unchecked: "只讀得到進出，沒有買賣明細，接不起來",
     },
     // Its bills print its programs' balances, their totals as lines, and what will lapse (ADR 0019).
     points: {

@@ -71,37 +71,50 @@ func (m *MAX) Fetch(ctx context.Context) (Snapshot, error) {
 	if priced {
 		snapshot.Valuation = &Value{Unit: "TWD", Amount: worth}
 	}
-	snapshot.Movements, err = m.movements(ctx)
-	if err != nil {
-		return Snapshot{}, err
-	}
 	return snapshot, nil
 }
 
 type maxDeposit struct {
-	UUID   string  `json:"uuid"`
-	Amount decimal `json:"amount"`
-	// The virtual account the money was sent to.
+	UUID     string  `json:"uuid"`
+	Currency string  `json:"currency"`
+	Amount   decimal `json:"amount"`
+	// NT$'s: the virtual account the money was sent to.
 	ToAddress string `json:"to_address"`
+	TxID      string `json:"txid"`
 	CreatedAt int64  `json:"created_at"`
 	State     string `json:"state"`
 }
 
 type maxWithdrawal struct {
 	UUID        string  `json:"uuid"`
+	Currency    string  `json:"currency"`
 	Amount      decimal `json:"amount"`
 	Fee         decimal `json:"fee"`
 	FeeCurrency string  `json:"fee_currency"`
+	TxID        string  `json:"txid"`
 	CreatedAt   int64   `json:"created_at"`
 	State       string  `json:"state"`
 }
 
-// maxHistory is how many of each MAX lists, the newest first: far more than come in between two fetches.
+// maxHistory is how many of each MAX lists at once: far more than a month of a person's.
 const maxHistory = 1000
 
-// movements are MAX's NT$ deposits and withdrawals that are done.
-func (m *MAX) movements(ctx context.Context) ([]Movement, error) {
-	params := map[string]any{"currency": "twd", "order": "desc", "limit": maxHistory}
+// maxSettled says whether MAX is done with a deposit or withdrawal (done), gave up on it (failed,
+// canceled, rejected), or may still settle it.
+func maxSettled(state string) (done, pending bool) {
+	switch state {
+	case "done":
+		return true, false
+	case "failed", "canceled", "cancelled", "rejected":
+		return false, false
+	default:
+		return false, true
+	}
+}
+
+// Movements are MAX's deposits and withdrawals created in the span, NT$ and coins alike, oldest first.
+func (m *MAX) Movements(ctx context.Context, from, to time.Time) ([]Movement, error) {
+	params := map[string]any{"order": "asc", "timestamp": from.UnixMilli(), "limit": maxHistory}
 	var deposits []maxDeposit
 	if err := m.signed(ctx, "/api/v3/deposits", params, &deposits); err != nil {
 		return nil, err
@@ -110,29 +123,44 @@ func (m *MAX) movements(ctx context.Context) ([]Movement, error) {
 	if err := m.signed(ctx, "/api/v3/withdrawals", params, &withdrawals); err != nil {
 		return nil, err
 	}
+	within := func(ms int64) bool { at := time.UnixMilli(ms); return !at.Before(from) && at.Before(to) }
 	var moves []Movement
 	for _, d := range deposits {
-		if d.State != "done" {
+		done, pending := maxSettled(d.State)
+		if !within(d.CreatedAt) || (!done && !pending) {
 			continue
 		}
 		amount, err := quantity(string(d.Amount))
 		if err != nil {
 			return nil, fmt.Errorf("max deposit %s: %w", d.UUID, err)
 		}
-		moves = append(moves, Movement{ID: "deposit/" + d.UUID, At: time.UnixMilli(d.CreatedAt), Unit: "TWD", Amount: amount, Memo: d.ToAddress})
+		move := Movement{ID: "deposit/" + d.UUID, At: time.UnixMilli(d.CreatedAt), Unit: strings.ToUpper(d.Currency), Amount: amount, TxID: d.TxID, Pending: pending}
+		if strings.EqualFold(d.Currency, "twd") {
+			move.TxID, move.Memo = "", d.ToAddress
+		}
+		moves = append(moves, move)
 	}
 	for _, w := range withdrawals {
-		if w.State != "done" {
+		done, pending := maxSettled(w.State)
+		if !within(w.CreatedAt) || (!done && !pending) {
 			continue
 		}
 		amount, err := quantity(string(w.Amount))
 		if err != nil {
 			return nil, fmt.Errorf("max withdrawal %s: %w", w.UUID, err)
 		}
-		moves = append(moves, Movement{
-			ID: "withdrawal/" + w.UUID, At: time.UnixMilli(w.CreatedAt), Unit: "TWD", Amount: amount.Neg(amount),
-			Memo: feeMemo(string(w.Fee), w.FeeCurrency),
-		})
+		fee, err := quantity(string(w.Fee))
+		if err != nil {
+			return nil, fmt.Errorf("max withdrawal %s fee: %w", w.UUID, err)
+		}
+		move := Movement{
+			ID: "withdrawal/" + w.UUID, At: time.UnixMilli(w.CreatedAt), Unit: strings.ToUpper(w.Currency), Amount: amount.Neg(amount),
+			Fee: fee, FeeUnit: strings.ToUpper(w.FeeCurrency), TxID: w.TxID, Pending: pending,
+		}
+		if strings.EqualFold(w.Currency, "twd") {
+			move.TxID = ""
+		}
+		moves = append(moves, move)
 	}
 	return moves, nil
 }

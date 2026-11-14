@@ -14,7 +14,8 @@ import (
 )
 
 // Binance values every wallet in USDT, and with needBalanceDetail lists each wallet's coins: one call
-// gives both the valuation and the holdings. Money comes and goes as fiat orders (a SWIFT transfer).
+// gives both the valuation and the holdings. Money comes and goes as fiat orders (a SWIFT transfer), coins
+// as deposits and withdrawals.
 type Binance struct {
 	apiKey, apiSecret string
 	baseURL           string
@@ -72,12 +73,7 @@ func (b *Binance) Fetch(ctx context.Context) (Snapshot, error) {
 		}
 		wallets = append(wallets, listed)
 	}
-	snapshot := fold(ctx, b.Institution(), wallets, usdtPrices(markets))
-	snapshot.Movements, err = b.movements(ctx)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	return snapshot, nil
+	return fold(ctx, b.Institution(), wallets, usdtPrices(markets)), nil
 }
 
 type binanceFiatOrder struct {
@@ -92,15 +88,45 @@ type binanceFiatOrder struct {
 	CreateTime      int64   `json:"createTime"`
 }
 
-// binanceOpened is when Binance opened: fiat orders are asked for from then on, every one each time.
-var binanceOpened = time.Date(2017, 7, 1, 0, 0, 0, 0, time.UTC)
+type binanceDeposit struct {
+	ID         string  `json:"id"`
+	Coin       string  `json:"coin"`
+	Amount     decimal `json:"amount"`
+	Status     int     `json:"status"`
+	TxID       string  `json:"txId"`
+	InsertTime int64   `json:"insertTime"`
+}
 
-// binancePage is as many fiat orders as Binance lists at once.
+type binanceWithdrawal struct {
+	ID             string  `json:"id"`
+	Coin           string  `json:"coin"`
+	Amount         decimal `json:"amount"`
+	TransactionFee decimal `json:"transactionFee"`
+	Status         int     `json:"status"`
+	TxID           string  `json:"txId"`
+	// UTC, as "2026-02-16 11:51:00".
+	ApplyTime string `json:"applyTime"`
+}
+
+// binancePage is as many fiat orders as Binance lists at once; of deposits and withdrawals it lists up to
+// 1,000, far more than a month of a person's.
 const binancePage = 500
 
-// movements are Binance's fiat deposits and withdrawals that went through: what the bank sent, the
-// fee Binance then took in the memo; what the bank was sent, after the fee.
-func (b *Binance) movements(ctx context.Context) ([]Movement, error) {
+// Movements are Binance's fiat orders, deposits and withdrawals of coins created in the span. A fiat
+// deposit is what the bank sent, the fee Binance then took apart; a withdrawal what the bank was sent.
+func (b *Binance) Movements(ctx context.Context, from, to time.Time) ([]Movement, error) {
+	fiat, err := b.fiatOrders(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	coins, err := b.coinMovements(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return append(fiat, coins...), nil
+}
+
+func (b *Binance) fiatOrders(ctx context.Context, from, to time.Time) ([]Movement, error) {
 	var moves []Movement
 	for _, deposits := range []bool{true, false} {
 		kind := map[bool]string{true: "0", false: "1"}[deposits]
@@ -111,8 +137,8 @@ func (b *Binance) movements(ctx context.Context) ([]Movement, error) {
 			}
 			query := url.Values{
 				"transactionType": {kind},
-				"beginTime":       {strconv.FormatInt(binanceOpened.UnixMilli(), 10)},
-				"endTime":         {strconv.FormatInt(time.Now().UnixMilli(), 10)},
+				"beginTime":       {strconv.FormatInt(from.UnixMilli(), 10)},
+				"endTime":         {strconv.FormatInt(to.UnixMilli()-1, 10)},
 				"page":            {strconv.Itoa(page)},
 				"rows":            {strconv.Itoa(binancePage)},
 			}
@@ -120,7 +146,8 @@ func (b *Binance) movements(ctx context.Context) ([]Movement, error) {
 				return nil, err
 			}
 			for _, o := range reply.Data {
-				if o.Status != "Successful" && o.Status != "Finished" {
+				pending := o.Status == "Processing"
+				if !pending && o.Status != "Successful" && o.Status != "Finished" {
 					continue
 				}
 				printed := o.Amount
@@ -131,14 +158,17 @@ func (b *Binance) movements(ctx context.Context) ([]Movement, error) {
 				if err != nil {
 					return nil, fmt.Errorf("binance fiat order %s: %w", o.OrderNo, err)
 				}
+				fee, err := quantity(string(o.TotalFee))
+				if err != nil {
+					return nil, fmt.Errorf("binance fiat order %s fee: %w", o.OrderNo, err)
+				}
 				if !deposits {
 					amount.Neg(amount)
 				}
-				memo := o.Method
-				if fee := feeMemo(string(o.TotalFee), o.FiatCurrency); fee != "" {
-					memo += " · " + fee
-				}
-				moves = append(moves, Movement{ID: o.OrderNo, At: time.UnixMilli(o.CreateTime), Unit: o.FiatCurrency, Amount: amount, Memo: memo})
+				moves = append(moves, Movement{
+					ID: o.OrderNo, At: time.UnixMilli(o.CreateTime), Unit: o.FiatCurrency, Amount: amount,
+					Fee: fee, FeeUnit: o.FiatCurrency, Memo: o.Method, Pending: pending,
+				})
 			}
 			if len(reply.Data) < binancePage || page*binancePage >= reply.Total {
 				break
@@ -146,6 +176,68 @@ func (b *Binance) movements(ctx context.Context) ([]Movement, error) {
 		}
 	}
 	return moves, nil
+}
+
+// coinMovements are the deposits and withdrawals of coins, on a chain or between Binance's users. Binance
+// lists up to 90 days at once.
+func (b *Binance) coinMovements(ctx context.Context, from, to time.Time) ([]Movement, error) {
+	span := url.Values{
+		"startTime": {strconv.FormatInt(from.UnixMilli(), 10)},
+		"endTime":   {strconv.FormatInt(to.UnixMilli()-1, 10)},
+		"limit":     {"1000"},
+	}
+	var deposits []binanceDeposit
+	if err := b.signed(ctx, "/sapi/v1/capital/deposit/hisrec", cloneQuery(span), &deposits); err != nil {
+		return nil, err
+	}
+	var withdrawals []binanceWithdrawal
+	if err := b.signed(ctx, "/sapi/v1/capital/withdraw/history", cloneQuery(span), &withdrawals); err != nil {
+		return nil, err
+	}
+	var moves []Movement
+	for _, d := range deposits {
+		// 1 success, 6 credited but not yet withdrawable; 0 pending, 8 waiting for the owner; 2 rejected, 7 wrong.
+		pending := d.Status == 0 || d.Status == 8
+		if !pending && d.Status != 1 && d.Status != 6 {
+			continue
+		}
+		amount, err := quantity(string(d.Amount))
+		if err != nil {
+			return nil, fmt.Errorf("binance deposit %s: %w", d.ID, err)
+		}
+		moves = append(moves, Movement{ID: "deposit/" + d.ID, At: time.UnixMilli(d.InsertTime), Unit: d.Coin, Amount: amount, TxID: d.TxID, Pending: pending})
+	}
+	for _, w := range withdrawals {
+		// 6 completed; 0 e-mail sent, 2 awaiting approval, 4 processing; 1 canceled, 3 rejected, 5 failed.
+		pending := w.Status == 0 || w.Status == 2 || w.Status == 4
+		if !pending && w.Status != 6 {
+			continue
+		}
+		at, err := time.Parse(time.DateTime, w.ApplyTime)
+		if err != nil {
+			return nil, fmt.Errorf("binance withdrawal %s time: %w", w.ID, err)
+		}
+		amount, err := quantity(string(w.Amount))
+		if err != nil {
+			return nil, fmt.Errorf("binance withdrawal %s: %w", w.ID, err)
+		}
+		fee, err := quantity(string(w.TransactionFee))
+		if err != nil {
+			return nil, fmt.Errorf("binance withdrawal %s fee: %w", w.ID, err)
+		}
+		moves = append(moves, Movement{
+			ID: "withdrawal/" + w.ID, At: at, Unit: w.Coin, Amount: amount.Neg(amount), Fee: fee, FeeUnit: w.Coin, TxID: w.TxID, Pending: pending,
+		})
+	}
+	return moves, nil
+}
+
+func cloneQuery(q url.Values) url.Values {
+	c := url.Values{}
+	for k, v := range q {
+		c[k] = append([]string(nil), v...)
+	}
+	return c
 }
 
 // markets are every spot market's last price, from the public ticker.

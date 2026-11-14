@@ -42,7 +42,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 	// Units outlive accounts, so they keep their ids; what the migrations seed (NT$, the owner's prices of
 	// card points) is put back.
 	if _, err := pool.Exec(ctx, `
-		TRUNCATE documents, accounts, prices, river_job RESTART IDENTITY CASCADE;
+		TRUNCATE documents, accounts, prices, exchange_cursors, river_job RESTART IDENTITY CASCADE;
 		DELETE FROM units WHERE id NOT IN (SELECT id FROM test_seed_units);
 		INSERT INTO prices SELECT * FROM test_seed_prices;`); err != nil {
 		t.Fatalf("reset database: %v", err)

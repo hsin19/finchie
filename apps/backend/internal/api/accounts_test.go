@@ -445,7 +445,7 @@ func TestAnExchangeIsWorthItsHoldingsElseItsValuationOfTheSameDay(t *testing.T) 
 			amount, _ := new(big.Rat).SetString(valuation)
 			s.Valuation = &exchanges.Value{Unit: "USDT", Amount: amount}
 		}
-		if err := exchanges.Store(ctx, pool, "binance", day(on), s); err != nil {
+		if err := exchanges.Store(ctx, pool, "binance", day(on), s, exchanges.History{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -632,11 +632,24 @@ func TestMoneySentToAnExchangeIsMovedNotSpentAndEachSideShowsWhereItWent(t *test
 	storeDeposit(t, pool, 1, "0", depositLine{day: 21, amount: "-100000", after: "0", description: "行銀非約跨優", memo: "遠*銀行", opposite: "805 1234567890***123"})
 	// 13:07 in Taipei on the 21st. Fetched twice: one line.
 	deposited := exchanges.Movement{ID: "deposit/abc", At: time.Date(2026, 1, 21, 5, 7, 0, 0, time.UTC), Unit: "TWD", Amount: big.NewRat(100000, 1), Memo: "12345678901123"}
+	// Then 3,177.13 USDT sent on to Bitget, which records the chain's transaction too; MAX took 1 MAX for it.
+	sentOn := exchanges.Movement{
+		ID: "withdrawal/w3", At: time.Date(2026, 1, 26, 12, 6, 0, 0, time.UTC), Unit: "USDT", Amount: big.NewRat(-317713, 100),
+		Fee: big.NewRat(1, 1), FeeUnit: "MAX", TxID: "0x35ab45a3",
+	}
+	arrived := exchanges.Movement{ID: "deposit/d1", At: time.Date(2026, 1, 26, 12, 7, 0, 0, time.UTC), Unit: "USDT", Amount: big.NewRat(317713, 100), TxID: "0x35ab45a3"}
+	at := time.Date(2026, 1, 27, 0, 0, 0, 0, time.UTC)
+	span := func(moves ...exchanges.Movement) exchanges.History {
+		return exchanges.History{From: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), To: at, Movements: moves}
+	}
 	for range 2 {
-		snapshot := exchanges.Snapshot{Holdings: map[string]*big.Rat{"TWD": big.NewRat(100000, 1)}, Movements: []exchanges.Movement{deposited}}
-		if err := exchanges.Store(ctx, pool, "max", time.Date(2026, 1, 22, 0, 0, 0, 0, time.UTC), snapshot); err != nil {
+		snapshot := exchanges.Snapshot{Holdings: map[string]*big.Rat{"TWD": big.NewRat(100000, 1)}}
+		if err := exchanges.Store(ctx, pool, "max", at, snapshot, span(deposited, sentOn)); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := exchanges.Store(ctx, pool, "bitget", at, exchanges.Snapshot{Holdings: map[string]*big.Rat{"USDT": big.NewRat(317713, 100)}}, span(arrived)); err != nil {
+		t.Fatal(err)
 	}
 
 	search := decode[TransactionSearch](t, get(t, e, "/api/transactions?from=2026-01-01&to=2026-01-31&limit=0"))
@@ -646,20 +659,39 @@ func TestMoneySentToAnExchangeIsMovedNotSpentAndEachSideShowsWhereItWent(t *test
 
 	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
 	bank := accountNamed(t, accounts, savings)
-	var exchange Account
+	var exchange, bitget Account
 	for _, a := range accounts {
-		if a.Kind == AccountKindExchange {
+		if a.Kind == AccountKindExchange && a.Institution == "max" {
 			exchange = a
+		}
+		if a.Institution == "bitget" {
+			bitget = a
 		}
 	}
 	sent := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", bank.Id)))[0]
 	if c := sent.Counterpart; c == nil || c.AccountKind != AccountKindExchange || c.Institution != "max" || c.StatementId != nil {
 		t.Fatalf("the bank's line goes to %+v, want the exchange's deposit", sent.Counterpart)
 	}
-	received := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", exchange.Id)))
-	if len(received) != 1 || received[0].Description != "入金" || received[0].Date.String() != "2026-01-21" || received[0].StatementId != nil ||
-		received[0].Counterpart == nil || *received[0].Counterpart.AccountId != bank.Id {
-		t.Fatalf("exchange lines = %+v", received)
+	// Newest first: the fee, the USDT sent on to Bitget, the NT$ from the bank.
+	lines := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", exchange.Id)))
+	var got []string
+	for _, l := range lines {
+		to := ""
+		if l.Counterpart != nil {
+			to = " → " + l.Counterpart.Institution
+		}
+		got = append(got, fmt.Sprintf("%s %s %s %s %s%s", l.Date, l.Description, l.Kind, l.Amount, l.Unit, to))
+	}
+	want := []string{
+		"2026-01-26 提幣手續費 fee -1 MAX",
+		"2026-01-26 提幣 other -3177.13 USDT → bitget",
+		"2026-01-21 入金 other 100000 TWD → esun",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("exchange lines =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if arrivedLine := decode[[]AccountLine](t, get(t, e, fmt.Sprintf("/api/accounts/%d/lines", bitget.Id)))[0]; arrivedLine.Description != "充幣" || arrivedLine.Counterpart == nil || arrivedLine.Counterpart.Institution != "max" {
+		t.Fatalf("bitget's deposit = %+v", arrivedLine)
 	}
 }
 

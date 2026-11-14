@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeMAX serves the spot wallet, the tickers, and the NT$ deposits and withdrawals (none unless given);
@@ -57,8 +58,9 @@ func fakeMAX(t *testing.T, accounts string, movements ...string) *MAX {
 			_, _ = w.Write([]byte(`{"success": false, "error": {"code": 2006, "message": "wrong signature"}}`))
 			return
 		}
-		if r.URL.Path != "/api/v3/wallet/spot/accounts" && r.URL.Query().Get("currency") != "twd" {
-			_, _ = w.Write([]byte(`[]`))
+		// History is read oldest first from a moment on.
+		if r.URL.Path != "/api/v3/wallet/spot/accounts" && (r.URL.Query().Get("order") != "asc" || r.URL.Query().Get("timestamp") == "") {
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		_, _ = w.Write([]byte(reply))
@@ -98,27 +100,44 @@ func TestMAXHoldsItsSpotWalletWorthItsOwnMarketsInNTD(t *testing.T) {
 	assertPrices(t, snapshot, map[string]string{"BTC": "3000000 TWD", "MAX": "16 TWD", "USDT": "32 TWD"})
 }
 
-func TestMAXReadsTheNTDepositsAndWithdrawalsItHasDone(t *testing.T) {
+// movementRows shows movements as "id time unit amount (fee unit) txid memo pending".
+func movementRows(moves []Movement) []string {
+	var rows []string
+	for _, m := range moves {
+		fee := ""
+		if m.Fee != nil && m.Fee.Sign() != 0 {
+			fee = " fee " + m.Fee.RatString() + " " + m.FeeUnit
+		}
+		rows = append(rows, fmt.Sprintf("%s %s %s %s%s tx=%s memo=%s pending=%v", m.ID, m.At.UTC().Format("2006-01-02 15:04"), m.Unit, m.Amount.RatString(), fee, m.TxID, m.Memo, m.Pending))
+	}
+	return rows
+}
+
+func TestMAXReadsItsDepositsAndWithdrawalsOfEveryCurrencyWithinASpan(t *testing.T) {
 	m := fakeMAX(t, `[]`, `[
-		{"uuid": "d1", "currency": "twd", "network_protocol": "fiat", "amount": "100000.0", "to_address": "12345678901123", "created_at": 1768972020000, "state": "done"},
-		{"uuid": "d2", "currency": "twd", "amount": "5000.0", "to_address": "12345678901123", "created_at": 1768972080000, "state": "processing"}
+		{"uuid": "d0", "currency": "twd", "amount": "1.0", "created_at": 1767225599000, "state": "done"},
+		{"uuid": "d1", "currency": "twd", "network_protocol": "fiat", "amount": "100000.0", "to_address": "12345678901123", "txid": "", "created_at": 1768972020000, "state": "done"},
+		{"uuid": "d2", "currency": "twd", "amount": "5000.0", "to_address": "12345678901123", "created_at": 1768972080000, "state": "processing"},
+		{"uuid": "d3", "currency": "usdt", "amount": "10.0", "txid": "0xaaa", "created_at": 1768972080000, "state": "done"}
 	]`, `[
 		{"uuid": "w1", "currency": "twd", "amount": "30000.0", "fee": "15.0", "fee_currency": "twd", "created_at": 1769000000000, "state": "done", "transaction_type": "external"},
-		{"uuid": "w2", "currency": "twd", "amount": "1000.0", "fee": "0", "fee_currency": "twd", "created_at": 1769000000000, "state": "failed"}
+		{"uuid": "w2", "currency": "twd", "amount": "1000.0", "fee": "0", "fee_currency": "twd", "created_at": 1769000000000, "state": "failed"},
+		{"uuid": "w3", "currency": "usdt", "amount": "3177.13", "fee": "0.0", "fee_currency": "max", "txid": "0x35ab45a3", "created_at": 1769429160000, "state": "done"},
+		{"uuid": "w4", "currency": "usdt", "amount": "5.0", "fee": "0", "fee_currency": "usdt", "txid": "0xbbb", "created_at": 1769904000000, "state": "done"}
 	]`)
-	snapshot, err := m.Fetch(t.Context())
+	// January 2026 in UTC: d0 the moment before it, w4 the first of February.
+	moves, err := m.Movements(t.Context(), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, move := range snapshot.Movements {
-		got = append(got, fmt.Sprintf("%s %s %s %s %s", move.ID, move.At.UTC().Format("2006-01-02 15:04"), move.Unit, move.Amount.RatString(), move.Memo))
-	}
 	want := []string{
-		"deposit/d1 2026-01-21 05:07 TWD 100000 12345678901123",
-		"withdrawal/w1 2026-01-21 12:53 TWD -30000 手續費 15.0 TWD",
+		"deposit/d1 2026-01-21 05:07 TWD 100000 tx= memo=12345678901123 pending=false",
+		"deposit/d2 2026-01-21 05:08 TWD 5000 tx= memo=12345678901123 pending=true",
+		"deposit/d3 2026-01-21 05:08 USDT 10 tx=0xaaa memo= pending=false",
+		"withdrawal/w1 2026-01-21 12:53 TWD -30000 fee 15 TWD tx= memo= pending=false",
+		"withdrawal/w3 2026-01-26 12:06 USDT -317713/100 tx=0x35ab45a3 memo= pending=false",
 	}
-	if !slices.Equal(got, want) {
+	if got := movementRows(moves); !slices.Equal(got, want) {
 		t.Fatalf("movements =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

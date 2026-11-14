@@ -18,9 +18,10 @@ import (
 
 // Money that moves between two of the owner's lines is linked (ADR 0016): a deposit account paying a
 // card bill, one account paying into another, one currency exchanged for another, or money sent to an
-// exchange or taken out of it (ADR 0018). Banks print no such link either, so like parents it is worked
-// out from amounts, dates, the counterparties they print, the reference a bank prints on both sides of an
-// exchange of currencies, and an exchange's own records.
+// exchange or taken out of it, coins sent from one exchange to another among them (ADR 0018). Banks print
+// no such link either, so like parents it is worked out from amounts, dates, the counterparties they print,
+// the reference a bank prints on both sides of an exchange of currencies, an exchange's own records, and
+// the chain's transaction two exchanges both record.
 
 const (
 	// A card payment's two lines are at most this many days apart: banks post them on different days.
@@ -104,7 +105,8 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 			ins = append(ins, l)
 		case l.Kind == domain.Payment:
 			payments = append(payments, l)
-		case l.AccountKind == domain.Exchange:
+		case l.AccountKind == domain.Exchange && l.Kind != domain.Fee:
+			// A fee the exchange took moved nowhere.
 			moves = append(moves, l)
 		}
 	}
@@ -152,6 +154,18 @@ func matchTransfers(lines []transferLine) map[int64]int64 {
 				} else {
 					candidates = append(candidates, candidate{m.ID, b.ID, d, false})
 				}
+			}
+		}
+	}
+	// Coins sent from one exchange to another (ADR 0018): both record the chain's transaction, their memo,
+	// which proves it whatever the days or the fee taken.
+	for _, out := range moves {
+		if amount(out.Amount).Sign() >= 0 || out.Memo == nil || *out.Memo == "" {
+			continue
+		}
+		for _, in := range moves {
+			if amount(in.Amount).Sign() > 0 && in.AccountID != out.AccountID && in.Unit == out.Unit && in.Memo != nil && *in.Memo == *out.Memo {
+				candidates = append(candidates, candidate{out.ID, in.ID, 0, false})
 			}
 		}
 	}

@@ -80,6 +80,11 @@ type Document struct {
 	ParserInstance *string
 }
 
+type ExchangeCursor struct {
+	Institution string
+	ReadFrom    pgtype.Timestamptz
+}
+
 type Expiry struct {
 	ID          int64
 	AccountID   int64

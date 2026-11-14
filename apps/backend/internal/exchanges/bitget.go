@@ -103,7 +103,7 @@ func (g *Bitget) markets(ctx context.Context) (map[string]*big.Rat, error) {
 		Symbol string  `json:"symbol"`
 		LastPr decimal `json:"lastPr"`
 	}
-	if err := g.unwrap(request, &tickers); err != nil {
+	if err := g.unwrap(request, &tickers, false); err != nil {
 		return nil, err
 	}
 	markets := make(map[string]*big.Rat, len(tickers))
@@ -115,8 +115,95 @@ func (g *Bitget) markets(ctx context.Context) (map[string]*big.Rat, error) {
 	return markets, nil
 }
 
-// signed sends a GET to a private endpoint. Bitget signs timestamp, method, path, and query, base64.
+type bitgetMovement struct {
+	OrderID string `json:"orderId"`
+	// The chain's transaction, or Bitget's own for a transfer between its users.
+	TradeID string  `json:"tradeId"`
+	Coin    string  `json:"coin"`
+	Size    decimal `json:"size"`
+	// A withdrawal's, printed negative.
+	Fee    decimal `json:"fee"`
+	Status string  `json:"status"`
+	CTime  decimal `json:"cTime"`
+}
+
+// bitgetPage is as many deposits or withdrawals as Bitget lists at once.
+const bitgetPage = 100
+
+// Movements are Bitget's deposits and withdrawals of coins created in the span; Bitget lists up to 90 days
+// at once, a page at a time.
+func (g *Bitget) Movements(ctx context.Context, from, to time.Time) ([]Movement, error) {
+	var moves []Movement
+	for _, deposits := range []bool{true, false} {
+		path := map[bool]string{true: "/api/v2/spot/wallet/deposit-records", false: "/api/v2/spot/wallet/withdrawal-records"}[deposits]
+		var before string
+		for {
+			query := url.Values{
+				"startTime": {strconv.FormatInt(from.UnixMilli(), 10)},
+				"endTime":   {strconv.FormatInt(to.UnixMilli()-1, 10)},
+				"limit":     {strconv.Itoa(bitgetPage)},
+			}
+			if before != "" {
+				query.Set("idLessThan", before)
+			}
+			var page []bitgetMovement
+			if err := g.signedList(ctx, path, query, &page); err != nil {
+				return nil, err
+			}
+			for _, r := range page {
+				pending := r.Status == "pending"
+				if !pending && r.Status != "success" {
+					continue
+				}
+				move, err := r.movement(deposits, pending)
+				if err != nil {
+					return nil, err
+				}
+				moves = append(moves, move)
+			}
+			if len(page) < bitgetPage {
+				break
+			}
+			before = page[len(page)-1].OrderID
+		}
+	}
+	return moves, nil
+}
+
+func (r bitgetMovement) movement(deposit, pending bool) (Movement, error) {
+	created, ok := new(big.Int).SetString(string(r.CTime), 10)
+	if !ok {
+		return Movement{}, fmt.Errorf("bitget %s: time %q", r.OrderID, r.CTime)
+	}
+	amount, err := quantity(string(r.Size))
+	if err != nil {
+		return Movement{}, fmt.Errorf("bitget %s: %w", r.OrderID, err)
+	}
+	move := Movement{At: time.UnixMilli(created.Int64()), Unit: r.Coin, Amount: amount, TxID: r.TradeID, Pending: pending}
+	if deposit {
+		move.ID = "deposit/" + r.OrderID
+		return move, nil
+	}
+	fee, err := quantity(string(r.Fee))
+	if err != nil {
+		return Movement{}, fmt.Errorf("bitget %s fee: %w", r.OrderID, err)
+	}
+	move.ID, move.Amount, move.Fee, move.FeeUnit = "withdrawal/"+r.OrderID, amount.Neg(amount), fee.Abs(fee), r.Coin
+	return move, nil
+}
+
+// signed sends a GET to a private endpoint that answers with what a snapshot needs: no data is an error.
 func (g *Bitget) signed(ctx context.Context, path string, query url.Values, into any) error {
+	return g.send(ctx, path, query, into, false)
+}
+
+// signedList sends a GET to a private endpoint that lists records, of which there may be none.
+func (g *Bitget) signedList(ctx context.Context, path string, query url.Values, into any) error {
+	return g.send(ctx, path, query, into, true)
+}
+
+// send signs a GET: Bitget signs timestamp, method, path, and query, base64.
+func (g *Bitget) send(ctx context.Context, path string, query url.Values, into any, list bool) error {
 	requestPath := path
 	if len(query) > 0 {
 		requestPath += "?" + query.Encode()
@@ -133,10 +220,10 @@ func (g *Bitget) signed(ctx context.Context, path string, query url.Values, into
 	request.Header.Set("ACCESS-TIMESTAMP", timestamp)
 	request.Header.Set("ACCESS-PASSPHRASE", g.passphrase)
 	request.Header.Set("locale", "en-US")
-	return g.unwrap(request, into)
+	return g.unwrap(request, into, list)
 }
 
-func (g *Bitget) unwrap(request *http.Request, into any) error {
+func (g *Bitget) unwrap(request *http.Request, into any, list bool) error {
 	var reply bitgetReply
 	if err := get(g.client, request, &reply); err != nil {
 		return fmt.Errorf("bitget: %w", err)
@@ -145,8 +232,11 @@ func (g *Bitget) unwrap(request *http.Request, into any) error {
 		return fmt.Errorf("bitget: GET %s: %s (code %s)", request.URL.Path, reply.Msg, reply.Code)
 	}
 	// A snapshot is the whole account or nothing (Exchange): a reply that says nothing of a wallet would
-	// read as its coins sold.
+	// read as its coins sold. A list may be empty.
 	if len(reply.Data) == 0 || string(reply.Data) == "null" {
+		if list {
+			return nil
+		}
 		return fmt.Errorf("bitget: GET %s: no data", request.URL.Path)
 	}
 	if err := json.Unmarshal(reply.Data, into); err != nil {

@@ -32,23 +32,28 @@ type Snapshot struct {
 	// What one of each coin held is worth at the exchange's own markets, in NT$ or USDT as it prices
 	// them (ADR 0020).
 	Prices map[string]Value
-	// Every deposit and withdrawal of money a bank holds that the exchange has completed.
-	Movements []Movement
 }
 
-// Movement is money the owner sent to the exchange from a bank or took out of it to one: a fiat deposit
-// or withdrawal, as the exchange records it. These alone meet a bank's lines, which they link to (ADR
-// 0016); coins sent between exchanges, trades, and the like are not read (ADR 0018).
+// Movement is money or coins the owner moved into the exchange or out of it, as the exchange records it
+// (ADR 0018): fiat from or to a bank, which links to the bank's line, or coins on a chain, which links to
+// the other exchange's by the chain's transaction (ADR 0016). Trades, conversions, and earn are not read.
 type Movement struct {
-	// The exchange's own id for it, which every later fetch reports again.
+	// The exchange's own id for it, which every later read reports again.
 	ID string
 	At time.Time
-	// A currency's code, as the exchange prints it.
+	// A currency's or a coin's code, as the exchange prints it.
 	Unit string
-	// What crossed between the bank and the exchange: positive in, negative out.
+	// What crossed between the exchange and the other end, its fee apart: positive in, negative out.
 	Amount *big.Rat
-	// How it came or went, as the exchange tells: a virtual account, a method, a fee.
+	// What the exchange took for it, in FeeUnit; nil when nothing.
+	Fee     *big.Rat
+	FeeUnit string
+	// The chain's transaction, which the other end records too; empty for fiat.
+	TxID string
+	// How fiat came or went, as the exchange tells: a virtual account, a method.
 	Memo string
+	// Not settled yet: it may still complete or fail, and is not kept until it completes.
+	Pending bool
 }
 
 type Value struct {
@@ -81,11 +86,40 @@ func (s *Snapshot) price(unit, quote string, amount *big.Rat) {
 	s.Prices[unit] = Value{Unit: quote, Amount: amount}
 }
 
-// Exchange reads one exchange's snapshot. Every call it makes succeeds, or it returns an error: a snapshot
-// missing a wallet would read as that wallet's coins sold.
+// Exchange reads one exchange: its snapshot, and the deposits and withdrawals created in a span. Every
+// call it makes succeeds, or it returns an error: a snapshot missing a wallet would read as that wallet's
+// coins sold, and a span missing a kind of movement would never be read again.
 type Exchange interface {
 	Institution() string
 	Fetch(ctx context.Context) (Snapshot, error)
+	// Those created from `from` on, before `to`, settled or not; failed and canceled ones left out.
+	Movements(ctx context.Context, from, to time.Time) ([]Movement, error)
+}
+
+// HistorySpan is how much of an exchange's deposits and withdrawals one fetch reads: a month on from where
+// the last left off, so two years are caught up with in a few days of fetches, and then what came since
+// the last one. The exchanges allow up to 90 days.
+const HistorySpan = 30 * 24 * time.Hour
+
+// HistoryStart is how far back an exchange's deposits and withdrawals are read the first time.
+const HistoryStart = 2 // years
+
+// History is what one fetch read of an exchange's deposits and withdrawals: the span, and what was in it.
+type History struct {
+	From, To  time.Time
+	Movements []Movement
+}
+
+// next is where the next read starts: past this span, but not past a movement still pending, which may yet
+// complete; one pending longer than a span is given up on, so the reads move on.
+func (h History) next(at time.Time) time.Time {
+	next := h.To
+	for _, m := range h.Movements {
+		if m.Pending && at.Sub(m.At) < HistorySpan && m.At.Before(next) && !m.At.Before(h.From) {
+			next = m.At
+		}
+	}
+	return next
 }
 
 // FetchArgs is the periodic job that keeps one exchange's snapshot, one job per exchange so that each
@@ -135,7 +169,20 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[FetchArgs]) error {
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", job.Args.Institution, err)
 	}
-	return Store(ctx, w.pool, job.Args.Institution, w.now(), snapshot)
+	at := w.now()
+	from, err := readFrom(ctx, w.pool, job.Args.Institution, at)
+	if err != nil {
+		return err
+	}
+	to := from.Add(HistorySpan)
+	if to.After(at) {
+		to = at
+	}
+	moves, err := exchange.Movements(ctx, from, to)
+	if err != nil {
+		return fmt.Errorf("fetch %s deposits and withdrawals: %w", job.Args.Institution, err)
+	}
+	return Store(ctx, w.pool, job.Args.Institution, at, snapshot, History{From: from, To: to, Movements: moves})
 }
 
 // decimal is an amount as an API prints it, a JSON string or number, kept as text until read exactly;
@@ -169,15 +216,6 @@ func quantity(s string) (*big.Rat, error) {
 		return nil, fmt.Errorf("amount %q is not a number", s)
 	}
 	return r, nil
-}
-
-// feeMemo is a movement's fee as the exchange prints it, "手續費 15 TWD"; empty when there is none.
-func feeMemo(fee, unit string) string {
-	amount, err := quantity(fee)
-	if err != nil || amount.Sign() == 0 {
-		return ""
-	}
-	return "手續費 " + fee + " " + strings.ToUpper(unit)
 }
 
 // sum adds up decimal strings exactly.

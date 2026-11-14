@@ -220,7 +220,7 @@ LEFT JOIN LATERAL (SELECT s.from_date::date AS from_date, s.to_date
                    ORDER BY s.to_date
                    LIMIT 1) step ON true
 WHERE t.account_id = $1
-ORDER BY t.transaction_date DESC, t.statement_id DESC NULLS LAST, t.line_no DESC
+ORDER BY t.transaction_date DESC, t.statement_id DESC NULLS LAST, t.line_no DESC, t.id DESC
 LIMIT $3 OFFSET $2
 `
 
@@ -402,6 +402,18 @@ func (q *Queries) DeleteFillLine(ctx context.Context, arg DeleteFillLineParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const exchangeCursor = `-- name: ExchangeCursor :one
+SELECT read_from FROM exchange_cursors WHERE institution = $1
+`
+
+// Where the next read of an exchange's deposits and withdrawals starts (ADR 0018).
+func (q *Queries) ExchangeCursor(ctx context.Context, institution string) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, exchangeCursor, institution)
+	var read_from pgtype.Timestamptz
+	err := row.Scan(&read_from)
+	return read_from, err
 }
 
 const fillLineIn = `-- name: FillLineIn :one
@@ -718,6 +730,22 @@ func (q *Queries) NewestStatementBalances(ctx context.Context) ([]NewestStatemen
 	return items, nil
 }
 
+const setExchangeCursor = `-- name: SetExchangeCursor :exec
+INSERT INTO exchange_cursors (institution, read_from)
+VALUES ($1, $2)
+ON CONFLICT (institution) DO UPDATE SET read_from = excluded.read_from
+`
+
+type SetExchangeCursorParams struct {
+	Institution string
+	ReadFrom    pgtype.Timestamptz
+}
+
+func (q *Queries) SetExchangeCursor(ctx context.Context, arg SetExchangeCursorParams) error {
+	_, err := q.db.Exec(ctx, setExchangeCursor, arg.Institution, arg.ReadFrom)
+	return err
+}
+
 const setFillMemo = `-- name: SetFillMemo :execrows
 UPDATE transactions
 SET memo = $1
@@ -864,17 +892,18 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (i
 
 const upsertExchangeLine = `-- name: UpsertExchangeLine :execrows
 INSERT INTO transactions (statement_id, line_no, transaction_date, description, kind, amount, account_id, unit_id, memo, external_id)
-VALUES (NULL, 0, $1, $2, 'other', $3, $4, $5, $6, $7::text)
+VALUES (NULL, 0, $1, $2, $3, $4, $5, $6, $7, $8::text)
 ON CONFLICT (account_id, external_id) DO UPDATE
-SET transaction_date = excluded.transaction_date, description = excluded.description, amount = excluded.amount,
-    unit_id = excluded.unit_id, memo = excluded.memo
-WHERE (transactions.transaction_date, transactions.description, transactions.amount, transactions.unit_id, transactions.memo)
-      IS DISTINCT FROM (excluded.transaction_date, excluded.description, excluded.amount, excluded.unit_id, excluded.memo)
+SET transaction_date = excluded.transaction_date, description = excluded.description, kind = excluded.kind,
+    amount = excluded.amount, unit_id = excluded.unit_id, memo = excluded.memo
+WHERE (transactions.transaction_date, transactions.description, transactions.kind, transactions.amount, transactions.unit_id, transactions.memo)
+      IS DISTINCT FROM (excluded.transaction_date, excluded.description, excluded.kind, excluded.amount, excluded.unit_id, excluded.memo)
 `
 
 type UpsertExchangeLineParams struct {
 	OnDate      pgtype.Date
 	Description string
+	Kind        domain.LineKind
 	Amount      pgtype.Numeric
 	AccountID   int64
 	UnitID      int64
@@ -882,12 +911,13 @@ type UpsertExchangeLineParams struct {
 	ExternalID  string
 }
 
-// A deposit or withdrawal an exchange reports (ADR 0018), found again by the exchange's id for it. It
-// affects a row only when it is new or the exchange reports it otherwise now.
+// A deposit or withdrawal an exchange reports, or the fee it took for one (ADR 0018), found again by the
+// exchange's id for it. It affects a row only when it is new or the exchange reports it otherwise now.
 func (q *Queries) UpsertExchangeLine(ctx context.Context, arg UpsertExchangeLineParams) (int64, error) {
 	result, err := q.db.Exec(ctx, upsertExchangeLine,
 		arg.OnDate,
 		arg.Description,
+		arg.Kind,
 		arg.Amount,
 		arg.AccountID,
 		arg.UnitID,

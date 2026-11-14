@@ -147,15 +147,24 @@ VALUES (NULL, 0, @on_date, '', 'fill', @amount, @account_id, @unit_id, sqlc.narg
 RETURNING id, memo;
 
 -- name: UpsertExchangeLine :execrows
--- A deposit or withdrawal an exchange reports (ADR 0018), found again by the exchange's id for it. It
--- affects a row only when it is new or the exchange reports it otherwise now.
+-- A deposit or withdrawal an exchange reports, or the fee it took for one (ADR 0018), found again by the
+-- exchange's id for it. It affects a row only when it is new or the exchange reports it otherwise now.
 INSERT INTO transactions (statement_id, line_no, transaction_date, description, kind, amount, account_id, unit_id, memo, external_id)
-VALUES (NULL, 0, @on_date, @description, 'other', @amount, @account_id, @unit_id, sqlc.narg(memo), @external_id::text)
+VALUES (NULL, 0, @on_date, @description, @kind, @amount, @account_id, @unit_id, sqlc.narg(memo), @external_id::text)
 ON CONFLICT (account_id, external_id) DO UPDATE
-SET transaction_date = excluded.transaction_date, description = excluded.description, amount = excluded.amount,
-    unit_id = excluded.unit_id, memo = excluded.memo
-WHERE (transactions.transaction_date, transactions.description, transactions.amount, transactions.unit_id, transactions.memo)
-      IS DISTINCT FROM (excluded.transaction_date, excluded.description, excluded.amount, excluded.unit_id, excluded.memo);
+SET transaction_date = excluded.transaction_date, description = excluded.description, kind = excluded.kind,
+    amount = excluded.amount, unit_id = excluded.unit_id, memo = excluded.memo
+WHERE (transactions.transaction_date, transactions.description, transactions.kind, transactions.amount, transactions.unit_id, transactions.memo)
+      IS DISTINCT FROM (excluded.transaction_date, excluded.description, excluded.kind, excluded.amount, excluded.unit_id, excluded.memo);
+
+-- name: ExchangeCursor :one
+-- Where the next read of an exchange's deposits and withdrawals starts (ADR 0018).
+SELECT read_from FROM exchange_cursors WHERE institution = @institution;
+
+-- name: SetExchangeCursor :exec
+INSERT INTO exchange_cursors (institution, read_from)
+VALUES (@institution, @read_from)
+ON CONFLICT (institution) DO UPDATE SET read_from = excluded.read_from;
 
 -- name: UpdateFillLine :one
 -- A gap filled again: what it lacks now, and what the owner wrote unless they write something else.
@@ -212,7 +221,7 @@ LEFT JOIN LATERAL (SELECT s.from_date::date AS from_date, s.to_date
                    ORDER BY s.to_date
                    LIMIT 1) step ON true
 WHERE t.account_id = @account_id
-ORDER BY t.transaction_date DESC, t.statement_id DESC NULLS LAST, t.line_no DESC
+ORDER BY t.transaction_date DESC, t.statement_id DESC NULLS LAST, t.line_no DESC, t.id DESC
 LIMIT @row_limit OFFSET @row_offset;
 
 -- name: BalancesOn :many
