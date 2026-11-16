@@ -2,7 +2,9 @@
 import { handleNotifications } from "#lib/api/mutations.js";
 import type { Need } from "#lib/attention.js";
 import ConfirmCurrent from "#lib/components/ConfirmCurrent.svelte";
+import Dot from "#lib/components/Dot.svelte";
 import { resolve } from "$app/paths";
+import Check from "@lucide/svelte/icons/check";
 
 /** What needs the owner (attention.ts): shown first, and only when there is something. */
 let { needs }: { needs: Need[]; } = $props();
@@ -31,7 +33,7 @@ async function handle(ids: number[]) {
         disabled={busy}
         onclick={() => void handle(ids)}
     >
-        ✓
+        <Check class="size-3.5" />
     </button>
 {/snippet}
 
@@ -44,7 +46,7 @@ async function handle(ids: number[]) {
         {#each needs as need (need.kind)}
             <li class="flex flex-col gap-0.5 border-t border-rule py-2 first:border-t-0 md:flex-row md:items-baseline md:gap-3">
                 <span class="shrink-0">
-                    <a href={need.href} class="text-ink hover:text-ink-bright"><span class={tone(need)}>●</span> {need.text}</a>
+                    <a href={need.href} class="text-ink hover:text-ink-bright"><Dot class={tone(need)} /> {need.text}</a>
                     {#if need.names.length === 0}{@render handled(need.ids)}{/if}
                 </span>
                 {#if need.names.length > 0}

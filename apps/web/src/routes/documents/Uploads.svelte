@@ -6,6 +6,7 @@ import {
 } from "#lib/api/client.js";
 import { reparse } from "#lib/api/mutations.js";
 import Bar from "#lib/components/Bar.svelte";
+import Dot from "#lib/components/Dot.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import { formatBytes } from "#lib/dates.js";
 import {
@@ -23,6 +24,8 @@ import {
     Uploads,
 } from "#lib/upload.svelte.js";
 import { resolve } from "$app/paths";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
+import Download from "@lucide/svelte/icons/download";
 
 /**
  * Where statement e-mails are dropped, and how each upload of this visit goes. `documents` and
@@ -87,7 +90,7 @@ onKeys("documents", {
         <td class="py-2.5 pl-2">
             <div class={tone[r.tone]}>{r.detail}</div>
             {#if r.link}
-                <a class="text-[12px]" href={r.link.href}>{r.link.text}</a>
+                <a class="text-[12px]" href={r.link.href}><ArrowRight /> {r.link.text}</a>
             {:else if r.hint}
                 <div class="mt-0.5 text-[12px] text-mute">{r.hint}</div>
             {/if}
@@ -136,7 +139,7 @@ onKeys("documents", {
 <p class="m-0 text-[12px] text-dim">
     要自動收帳單：
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
-    <a href={MAIL_FILTERS_URL} download data-sveltekit-reload>下載 Gmail 篩選器 ↓</a>
+    <a href={MAIL_FILTERS_URL} download data-sveltekit-reload>下載 Gmail 篩選器 <Download /></a>
     ，在 Gmail 設定 → 篩選器和封鎖的地址 → 匯入篩選器。之前自己設的轉寄篩選器要關掉轉寄，不然每封會收到兩次。
 </p>
 
@@ -145,8 +148,8 @@ onKeys("documents", {
         <div class="flex flex-wrap justify-between gap-2 pt-2.5 pb-1">
             <h2 class="label">THIS SESSION · 本次上傳（{uploads.entries.length}）</h2>
             <span class="text-dim">
-                <span class="text-pos">●</span> {summary.done} 完成 · <span class="text-accent">●</span> {summary.running} 進行中 · <span class="text-neg">●</span> {summary.failed} 要處理 ·
-                <span class="text-mute">●</span> {summary.other} 略過
+                <Dot class="text-pos" /> {summary.done} 完成 · <Dot class="text-accent" /> {summary.running} 進行中 · <Dot class="text-neg" /> {summary.failed} 要處理 ·
+                <Dot class="text-mute" /> {summary.other} 略過
             </span>
         </div>
         <div class="overflow-x-auto">

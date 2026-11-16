@@ -93,7 +93,7 @@ describe("the document list", () => {
 
 describe("outcome", () => {
     it("names the document a duplicate repeats and links to it", () => {
-        expect(outcome(doc("duplicate", { duplicateOf: 335 })).link).toEqual({ href: "/documents/335", text: "→ #335" });
+        expect(outcome(doc("duplicate", { duplicateOf: 335 })).link).toEqual({ href: "/documents/335", text: "#335" });
         expect(outcome(doc("duplicate")).link).toBeUndefined();
     });
 

@@ -14,10 +14,13 @@ import {
     notificationKinds,
     pending,
 } from "#lib/attention.js";
+import Dot from "#lib/components/Dot.svelte";
 import {
     shortDateTime,
     today,
 } from "#lib/dates.js";
+import Check from "@lucide/svelte/icons/check";
+import Undo2 from "@lucide/svelte/icons/undo-2";
 import { untrack } from "svelte";
 import type { PageProps } from "./$types";
 
@@ -71,7 +74,7 @@ async function handle(n: Notification) {
                     <li class="flex flex-col gap-0.5 border-t border-rule py-2 first:border-t-0 md:flex-row md:items-baseline md:gap-3">
                         <span class="flex shrink-0 gap-3 text-[12px] md:w-56">
                             <span class="text-mute">{shortDateTime(n.raisedAt)}</span>
-                            <span class={n.resolvedAt ? "text-mute" : n.kind === "overdue" || n.kind === "shortfall" ? "text-accent" : "text-neg"}>● {kinds[n.kind]}</span>
+                            <span class={n.resolvedAt ? "text-mute" : n.kind === "overdue" || n.kind === "shortfall" ? "text-accent" : "text-neg"}><Dot /> {kinds[n.kind]}</span>
                             {#if fresh.has(n.id)}<span class="text-accent">新</span>{/if}
                         </span>
                         <a href={notificationHref(n)} class="min-w-0 grow {n.resolvedAt ? 'text-dim' : 'text-ink'} hover:text-ink-bright">
@@ -88,7 +91,7 @@ async function handle(n: Notification) {
                                 disabled={busy}
                                 onclick={() => void handle(n)}
                             >
-                                {n.handledAt ? "↩" : "✓"}
+                                {#if n.handledAt}<Undo2 class="size-3.5" />{:else}<Check class="size-3.5" />{/if}
                             </button>
                         {/if}
                     </li>

@@ -2,6 +2,7 @@
 import { api } from "#lib/api/client.js";
 import { resolve } from "$app/paths";
 import { page } from "$app/state";
+import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 
 // A page can fail for want of a session before any API request says so: the code of a page not opened
 // yet is behind Cloudflare Access too, and importing it fails like any network error. So ask the API:
@@ -15,7 +16,7 @@ $effect(() => {
     <div><span class="whitespace-pre text-neg">[ERR ]</span> <span class="text-dim">HTTP {page.status}</span></div>
     <p class="m-0 text-ink">{page.error?.message ?? "Something went wrong"}</p>
     {#if page.status === 404}
-        <p class="m-0 text-mute">找不到這個頁面或資料。<a href={resolve("/")}>← 回總覽</a></p>
+        <p class="m-0 text-mute">找不到這個頁面或資料。<a href={resolve("/")}><ArrowLeft /> 回總覽</a></p>
     {:else}
         <!-- An expired Cloudflare Access session signs in again by itself (above); what stays here is a
              backend out of reach, or a sign-in that did not help, which a 401 says itself. -->

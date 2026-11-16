@@ -18,6 +18,7 @@ import {
     kindOrder,
     kinds,
 } from "#lib/kinds.js";
+import X from "@lucide/svelte/icons/x";
 
 /**
  * The transactions page's filters, each a change to the URL (`navigate`). `filters` are as last asked
@@ -51,7 +52,7 @@ const picked = $derived(pickerValue(filters));
         <MonthSelect all {months} value={searchPeriod(filters, latestMonth)} onchange={m => void navigate({ m })} />
         {#if filters.closing}
             <button type="button" class="control pressed" title="移除這個篩選" onclick={() => void navigate({ closing: null })}>
-                {filters.closing} 結帳的帳單 <span class="text-mute">×</span>
+                {filters.closing} 結帳的帳單 <X class="text-mute" />
             </button>
         {/if}
         <!-- As wide as its longest account at most the row: on a phone that would run past the panel. -->

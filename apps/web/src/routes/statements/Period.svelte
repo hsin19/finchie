@@ -41,6 +41,7 @@ import {
 import { tone } from "#lib/tone.js";
 import { statementsHref } from "#lib/urls.js";
 import { goto } from "$app/navigation";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import type { PageData } from "./$types";
 
 let { data }: { data: Extract<PageData, { view: "period"; }>; } = $props();
@@ -106,7 +107,7 @@ function changeTone(change: number | undefined): string {
     />
     <button type="button" class="control" disabled={!newer} onclick={() => openMonth(newer)}><span class="text-accent">[n]</span> next</button>
     <span class="text-[12px] text-mute">這個月結帳的帳單</span>
-    <a href={statementsHref("all")} class="ml-auto text-[12px] text-dim hover:text-ink"><span class="text-accent">[l]</span> 全部帳單 →</a>
+    <a href={statementsHref("all")} class="ml-auto text-[12px] text-dim hover:text-ink"><span class="text-accent">[l]</span> 全部帳單 <ArrowRight /></a>
 </div>
 
 <div class="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">

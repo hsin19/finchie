@@ -1,4 +1,5 @@
 <script lang="ts">
+import Dot from "#lib/components/Dot.svelte";
 import "./layout.css";
 import {
     api,
@@ -179,7 +180,7 @@ function onkeydown(event: KeyboardEvent) {
             class="flex min-h-9 shrink-0 items-center gap-1.5 text-[12px] md:text-[13px] {documents.current ? 'text-ink' : 'text-dim hover:text-ink'}"
         >
             <span class="hidden text-accent md:inline">[{documents.key}]</span>{documents.label}
-            {#if data.pending.length > 0}<span class="text-accent">● {data.pending.length}</span>{/if}
+            {#if data.pending.length > 0}<span class="text-accent"><Dot /> {data.pending.length}</span>{/if}
         </a>
         <a
             href={notifications.href}
@@ -187,7 +188,7 @@ function onkeydown(event: KeyboardEvent) {
             class="flex min-h-9 shrink-0 items-center gap-1.5 text-[12px] md:text-[13px] {notifications.current ? 'text-ink' : 'text-dim hover:text-ink'}"
         >
             <span class="hidden text-accent md:inline">[{notifications.key}]</span>{notifications.label}
-            {#if data.unread > 0}<span class="text-neg" title="還沒看過的通知">● {data.unread}</span>{/if}
+            {#if data.unread > 0}<span class="text-neg" title="還沒看過的通知"><Dot /> {data.unread}</span>{/if}
         </a>
     </header>
 
@@ -199,7 +200,7 @@ function onkeydown(event: KeyboardEvent) {
     </main>
 
     <footer class="hidden flex-wrap gap-x-5 gap-y-1 border-t border-dashed border-line pt-2.5 text-[12px] text-mute md:flex">
-        <span><span class="text-pos">●</span> backend {version === "dev" ? "dev" : `v${version}`} ok</span>
+        <span><Dot class="text-pos" /> backend {version === "dev" ? "dev" : `v${version}`} ok</span>
         {#if parser}<span>parser v{parser}</span>{/if}
         {#if lastUpload}<span>last upload {shortDateTime(lastUpload.receivedAt)}</span>{/if}
         <span>{data.statements.length} statements · {shownCount(data.documentsByState)} documents</span>

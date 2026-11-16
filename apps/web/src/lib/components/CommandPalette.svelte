@@ -1,5 +1,6 @@
 <script lang="ts">
 import { composing } from "#lib/keys.js";
+import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import Dialog from "./Dialog.svelte";
 
 export interface Command {
@@ -71,7 +72,7 @@ function onkeydown(event: KeyboardEvent) {
                 onclick={() => run(command)}
                 onkeydown={() => {}}
             >
-                <span>{i === active ? "▶ " : "  "}{command.label}</span>
+                <span class="flex items-center gap-1"><ChevronRight class={i === active ? "" : "invisible"} />{command.label}</span>
                 {#if command.hint}<span class="text-mute">{command.hint}</span>{/if}
             </li>
         {:else}

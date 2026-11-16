@@ -13,6 +13,7 @@ import {
     negate,
     sign,
 } from "#lib/money.js";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
 /**
  * An account's lines with their running balances; a trade's price and the money paid or received (ADR 0017).
@@ -99,7 +100,7 @@ function amountTone(value: string) {
                             <td class="py-2 pr-2 whitespace-nowrap text-dim">{line.date}</td>
                             <td class="px-2 py-2">
                                 人工補帳
-                                <span class="block text-[12px] text-mute">{fill.from} → {fill.to} 沒有帳單</span>
+                                <span class="block text-[12px] text-mute">{fill.from} <ArrowRight /> {fill.to} 沒有帳單</span>
                             </td>
                             <td class="px-2 py-2 text-dim">
                                 {#if editing?.id === fill.id}

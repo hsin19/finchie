@@ -43,6 +43,9 @@ import {
 } from "#lib/transactions.js";
 import { statementHref } from "#lib/urls.js";
 import { resolve } from "$app/paths";
+import ArrowDown from "@lucide/svelte/icons/arrow-down";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
+import ArrowUp from "@lucide/svelte/icons/arrow-up";
 
 /**
  * One transaction in full: its amounts, where it is, its statement and document, and the lines linked to
@@ -66,10 +69,10 @@ function statementLabel(statementId: number) {
 }
 </script>
 
-{#snippet linked(l: Transaction, arrow: string, from: Transaction)}
+{#snippet linked(l: Transaction, up: boolean, from: Transaction)}
     <a href={statementHref(l.statementId, l.id)} class="flex flex-col gap-0.5 rounded-[4px] px-1.5 py-1 text-ink hover:bg-raised hover:text-ink">
         <span class="flex gap-2">
-            <span class="text-accent">{arrow}</span>
+            <span class="text-accent">{#if up}<ArrowUp />{:else}<ArrowDown />{/if}</span>
             <span class={tone[kinds[l.kind].tone]}>{kinds[l.kind].short}</span>
             <span class="grow truncate">{l.description}</span>
             <span class={l.kind === "purchase" ? "text-ink" : tone[kinds[l.kind].tone]}>{formatAmount(l.amount)}</span>
@@ -157,14 +160,14 @@ function statementLabel(statementId: number) {
         <div class="flex flex-col gap-1 border-t border-dashed border-line pt-2.5">
             <div class="label">LINKED · 關聯</div>
             {#if family.parent}
-                {@render linked(family.parent, "↑", t)}
+                {@render linked(family.parent, true, t)}
             {/if}
             {#each family.children as child (child.id)}
-                {@render linked(child, "↓", t)}
+                {@render linked(child, false, t)}
             {/each}
         </div>
     {/if}
     {#if doc}
-        <FileLink {doc}>原始檔 #{doc.id} {doc.filename} →</FileLink>
+        <FileLink {doc}>原始檔 #{doc.id} {doc.filename} <ArrowRight /></FileLink>
     {/if}
 </div>

@@ -13,6 +13,7 @@ import {
 } from "#lib/statements.js";
 import { statementsHref } from "#lib/urls.js";
 import { resolve } from "$app/paths";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
 // Documents, those that produced no statement among them, are on /documents.
 let { statements, documents }: { statements: Statement[]; documents: ReadonlyMap<number, Document>; } = $props();
@@ -22,7 +23,7 @@ let { statements, documents }: { statements: Statement[]; documents: ReadonlyMap
     <div class="flex flex-wrap items-baseline justify-between gap-2 py-2.5">
         <!-- The layout's statements: the newest ones, a window of the API's largest page. -->
         <h1 class="label">STATEMENTS · 全部帳單（{statements.length}）</h1>
-        <span class="text-[12px] text-mute">依結帳日，新的在上 · <a href={statementsHref()} class="text-dim hover:text-ink"><span class="text-accent">[l]</span> 按月看 →</a></span>
+        <span class="text-[12px] text-mute">依結帳日，新的在上 · <a href={statementsHref()} class="text-dim hover:text-ink"><span class="text-accent">[l]</span> 按月看 <ArrowRight /></a></span>
     </div>
     <div class="overflow-x-auto">
         <table class="w-full min-w-[680px] border-collapse">
@@ -56,7 +57,7 @@ let { statements, documents }: { statements: Statement[]; documents: ReadonlyMap
                     </tr>
                 {:else}
                     <tr class="border-t border-rule">
-                        <td colspan="8" class="py-3 text-mute">還沒有帳單。<a href={resolve("/documents")}>上傳 →</a></td>
+                        <td colspan="8" class="py-3 text-mute">還沒有帳單。<a href={resolve("/documents")}>上傳 <ArrowRight /></a></td>
                     </tr>
                 {/each}
             </tbody>

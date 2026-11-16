@@ -1,6 +1,8 @@
 <script lang="ts">
 import type { LineCounterpart } from "#lib/api/client.js";
 import { counterpartLink } from "#lib/transactions.js";
+import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
 /** `out`: the money left this line for the other one. */
 let { other, out, class: className = "" }: { other: LineCounterpart; out: boolean; class?: string; } = $props();
@@ -8,4 +10,4 @@ let { other, out, class: className = "" }: { other: LineCounterpart; out: boolea
 const link = $derived(counterpartLink(other));
 </script>
 
-<a href={link.href} class={className}>{out ? "→" : "←"} {link.text}</a>
+<a href={link.href} class={className}>{#if out}<ArrowRight />{:else}<ArrowLeft />{/if} {link.text}</a>

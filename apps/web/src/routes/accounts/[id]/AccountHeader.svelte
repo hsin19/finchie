@@ -15,6 +15,7 @@ import {
     sign,
 } from "#lib/money.js";
 import { resolve } from "$app/paths";
+import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 import AccountNames from "./AccountNames.svelte";
 
 /** An account's name, what it is worth or holds, its kind, how current it is, and how its statements get here. */
@@ -37,7 +38,7 @@ let editing = $state(false);
         </h1>
         <span class="flex gap-3 text-[12px]">
             {#if !editing}<button type="button" class="text-dim hover:text-ink" onclick={() => (editing = true)}>編輯名稱與帳號</button>{/if}
-            <a href={resolve("/accounts")} class="text-dim hover:text-ink">← 全部帳戶</a>
+            <a href={resolve("/accounts")} class="text-dim hover:text-ink"><ArrowLeft /> 全部帳戶</a>
         </span>
     </div>
     {#if editing}<AccountNames {account} onclose={() => (editing = false)} />{/if}

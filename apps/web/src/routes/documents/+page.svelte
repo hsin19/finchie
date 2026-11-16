@@ -37,6 +37,7 @@ import {
 } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { page } from "$app/state";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import {
     tick,
     untrack,
@@ -197,7 +198,7 @@ const shown = $derived(items.filter(d => !sessionIds.has(d.id)).map(d => live.ge
                     <!-- What needs doing is read in full; what does not (skipped, duplicate) keeps to a line. -->
                     <span class="text-[12px] {r.tone === 'neg' ? 'break-words text-neg' : r.tone === 'dim' ? 'truncate text-mute' : 'text-dim'}" title={r.tone === "dim" ? r.text : undefined}>
                         {r.text}
-                        {#if r.link}<a href={r.link.href} class="ml-1">{r.link.text}</a>{/if}
+                        {#if r.link}<a href={r.link.href} class="ml-1"><ArrowRight /> {r.link.text}</a>{/if}
                     </span>
                     {#if r.tone === "neg" && r.hint}<span class="text-[12px] text-mute">{r.hint}</span>{/if}
                 </div>

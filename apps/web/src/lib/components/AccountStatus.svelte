@@ -8,6 +8,7 @@ import {
 } from "#lib/accounts.js";
 import type { Account } from "#lib/api/client.js";
 import ConfirmCurrent from "#lib/components/ConfirmCurrent.svelte";
+import Dot from "#lib/components/Dot.svelte";
 
 /**
  * How current an account is and whether it joins up: quiet while all is well, then only what needs a
@@ -23,7 +24,7 @@ const status = $derived(accountStatus(account, today));
     <div class={status.stale ? "text-accent" : full ? "text-ink" : "text-dim"} title="最新的餘額是 {status.asOf} 的">{daysAgo(status.days)}{full ? "更新" : ""}</div>
 {/if}
 {#if status.stale}
-    <div class="text-[12px] text-accent">● 太久沒更新</div>
+    <div class="text-[12px] text-accent"><Dot /> 太久沒更新</div>
     {#if full}<div><ConfirmCurrent id={account.id} suggested={checkAgainDefault(account, today)} /></div>{/if}
 {:else if status.excused}
     <div class="text-[12px] text-mute">{status.note}</div>
@@ -32,9 +33,9 @@ const status = $derived(accountStatus(account, today));
     <div class="text-[12px] text-mute">{status.note}</div>
 {/if}
 {#if status.gaps > 0}
-    <div class="text-[12px] text-neg">● 不連續 · {status.gaps} 段</div>
+    <div class="text-[12px] text-neg"><Dot /> 不連續 · {status.gaps} 段</div>
 {:else if full && status.checked}
-    <div class="text-[12px] text-pos">● 每一期都接得起來</div>
+    <div class="text-[12px] text-pos"><Dot /> 每一期都接得起來</div>
 {:else if full && !isOwned(account)}
     <div class="text-[12px] text-mute">{accountPage(account).unchecked}</div>
 {/if}

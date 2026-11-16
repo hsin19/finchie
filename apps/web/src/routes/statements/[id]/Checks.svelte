@@ -5,6 +5,7 @@ import {
     checkDelta,
     deltaMeaning,
 } from "#lib/statements.js";
+import Check from "@lucide/svelte/icons/check";
 
 /**
  * Every figure the bill prints that its lines are checked against (ADR 0021): those that do not add up
@@ -31,7 +32,7 @@ const unit = (u: string) => (u && u !== statement.currency ? u : "");
 {#if passing.length > 0}
     <div class="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-1">
         {#each passing as check, i (i)}
-            <span class="text-pos">✓</span>
+            <Check class="self-center text-pos" />
             <span>{check.name} <span class="text-mute">{unit(check.unit)}</span></span>
             <span class="text-right text-dim">{formatAmount(check.stated)}</span>
         {/each}

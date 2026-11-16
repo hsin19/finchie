@@ -26,6 +26,8 @@ import {
     goto,
 } from "$app/navigation";
 import { page } from "$app/state";
+import ChevronDown from "@lucide/svelte/icons/chevron-down";
+import ChevronUp from "@lucide/svelte/icons/chevron-up";
 import type { PageProps } from "./$types";
 import TransactionDetail from "./TransactionDetail.svelte";
 import TransactionFilters from "./TransactionFilters.svelte";
@@ -150,7 +152,7 @@ onKeys("transactions", {
             class={byDate ? "text-ink" : "hover:text-ink"}
             onclick={() => setSort(filters.sort === "newest" ? "oldest" : "newest")}
         >
-            date{byDate ? (filters.sort === "oldest" ? " ▲" : " ▼") : ""}
+            date{#if byDate}{#if filters.sort === "oldest"}<ChevronUp class="ml-1" />{:else}<ChevronDown class="ml-1" />{/if}{/if}
         </button>
         <button
             type="button"
@@ -159,7 +161,7 @@ onKeys("transactions", {
             class={byDate ? "hover:text-ink" : "text-ink"}
             onclick={() => setSort(filters.sort === "largest" ? "smallest" : "largest")}
         >
-            amount{byDate ? "" : filters.sort === "smallest" ? " ▲" : " ▼"}
+            amount{#if !byDate}{#if filters.sort === "smallest"}<ChevronUp class="ml-1" />{:else}<ChevronDown class="ml-1" />{/if}{/if}
         </button>
     </span>
 </div>

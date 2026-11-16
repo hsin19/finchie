@@ -27,6 +27,19 @@
 }
 
 @layer base {
+    /*
+     * Lucide's icons sit in a line of text like a character: as large as its text, on its baseline, never
+     * squeezed. A size of its own is a class (size-3.5), which wins over this; the `size` prop is an
+     * attribute, which this would override.
+     */
+    .lucide-icon {
+        display: inline-block;
+        flex-shrink: 0;
+        width: 1em;
+        height: 1em;
+        vertical-align: -0.125em;
+    }
+
     html {
         color-scheme: dark;
         background: var(--color-ground);

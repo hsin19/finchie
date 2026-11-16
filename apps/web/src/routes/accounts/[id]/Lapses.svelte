@@ -2,6 +2,7 @@
 import type { AccountDetail } from "#lib/api/client.js";
 import { yearlyDate } from "#lib/dates.js";
 import { formatAmount } from "#lib/money.js";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
 /**
  * When a points account's points lapse (ADR 0019): worked out by each program's rule from what its bills
@@ -70,7 +71,7 @@ const lapsed = $derived((account.lapsed ?? []).toReversed());
             <tbody>
                 {#each lapsed as l (`${l.unit}:${l.to}`)}
                     <tr class="border-t border-rule">
-                        <td class="py-1.5 pr-4 text-dim">{yearlyDate(l.from, today)} → {yearlyDate(l.to, today)}</td>
+                        <td class="py-1.5 pr-4 text-dim">{yearlyDate(l.from, today)} <ArrowRight /> {yearlyDate(l.to, today)}</td>
                         <td class="py-1.5 pr-2 text-right text-neg">{formatAmount(l.amount)}</td>
                         <td class="py-1.5 text-mute">{l.unit}</td>
                     </tr>

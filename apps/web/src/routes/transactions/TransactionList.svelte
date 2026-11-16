@@ -20,6 +20,9 @@ import {
     original,
     unitSuffix,
 } from "#lib/transactions.js";
+import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
+import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import type { Snippet } from "svelte";
 
 /**
@@ -59,7 +62,7 @@ let { items, selectedId, byDate, onselect, base, children }: {
                         class="cursor-pointer border-t border-rule {t.id === selectedId ? 'bg-raised' : 'hover:bg-raised/60'}"
                         onclick={() => onselect(t)}
                     >
-                        <td class="py-2 pr-1 text-accent">{t.id === selectedId ? "▶" : ""}</td>
+                        <td class="py-2 pr-1 text-accent">{#if t.id === selectedId}<ChevronRight />{/if}</td>
                         <td class="px-2 py-2 whitespace-nowrap">{shortDate(t.transactionDate)}</td>
                         <td class="max-w-[320px] px-2 py-2">
                             <span class="block truncate">{t.description}{#if t.memo}<span class="text-dim"> · {t.memo}</span>{/if}</span>
@@ -92,7 +95,9 @@ let { items, selectedId, byDate, onselect, base, children }: {
             <span class="text-[12px] text-mute">
                 {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{lineAccount(t)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · 帳單上 ${breakdown(t)}` : ""}
                 <!-- The row is a button, so the account the money went to is named, not linked. -->
-                {t.counterpart ? ` · ${sign(flowOf(t)) < 0 ? "→" : "←"} ${counterpartLink(t.counterpart).text}` : ""}
+                {#if t.counterpart}
+                    · {#if sign(flowOf(t)) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {counterpartLink(t.counterpart).text}
+                {/if}
             </span>
         </button>
     {/snippet}

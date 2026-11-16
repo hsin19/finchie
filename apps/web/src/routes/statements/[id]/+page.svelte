@@ -45,6 +45,10 @@ import {
 import { afterNavigate } from "$app/navigation";
 import { resolve } from "$app/paths";
 import { page } from "$app/state";
+import ArrowDown from "@lucide/svelte/icons/arrow-down";
+import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
+import ArrowUp from "@lucide/svelte/icons/arrow-up";
 import type { PageProps } from "./$types";
 import Checks from "./Checks.svelte";
 
@@ -137,11 +141,11 @@ onKeys("statement", {
     <Tag {status} label />
     {#if parsing}<span class="text-accent">re-parsing…</span>{/if}
     <span class="ml-auto flex flex-wrap gap-x-4 text-[12px]">
-        <a href={statementsHref(month)} class="text-dim hover:text-ink">← {month} 的帳單</a>
+        <a href={statementsHref(month)} class="text-dim hover:text-ink"><ArrowLeft /> {month} 的帳單</a>
         <!-- The lines on this statement: one statement per bank closes in a month. -->
-        <a href={transactionsHref({ closing: month, institution: s.institution })} class="text-dim hover:text-ink">這張帳單的交易 →</a>
+        <a href={transactionsHref({ closing: month, institution: s.institution })} class="text-dim hover:text-ink">這張帳單的交易 <ArrowRight /></a>
         {#if doc.contentType === "message/rfc822"}
-            <a href={resolve("/documents/[id]", { id: String(doc.id) })} class="text-dim hover:text-ink">原始信件 →</a>
+            <a href={resolve("/documents/[id]", { id: String(doc.id) })} class="text-dim hover:text-ink">原始信件 <ArrowRight /></a>
         {/if}
     </span>
 </div>
@@ -176,7 +180,7 @@ onKeys("statement", {
             <section class="panel p-3.5">
                 <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                     <h2 class="label">POINTS · {program.unit}</h2>
-                    <a href={resolve("/accounts/[id]", { id: String(program.account.id) })} class="text-[12px]">點數帳戶 →</a>
+                    <a href={resolve("/accounts/[id]", { id: String(program.account.id) })} class="text-[12px]">點數帳戶 <ArrowRight /></a>
                 </div>
                 <dl class="m-0 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5">
                     {#each program.lines as line (line.id)}
@@ -262,12 +266,12 @@ onKeys("statement", {
                                 {line.t.description}
                                 {#if line.t.parent}
                                     <a href={statementHref(line.t.parent.statementId, line.t.parent.id)} class="ml-2 text-[12px] whitespace-nowrap">
-                                        ↑ {kinds[line.t.parent.kind].short} {shortDate(line.t.parent.transactionDate)}{elsewhere(line.t.parent)}
+                                        <ArrowUp /> {kinds[line.t.parent.kind].short} {shortDate(line.t.parent.transactionDate)}{elsewhere(line.t.parent)}
                                     </a>
                                 {/if}
                                 {#each line.t.children ?? [] as child (child.id)}
                                     <a href={statementHref(child.statementId, child.id)} class="ml-2 text-[12px] whitespace-nowrap">
-                                        ↓ {kinds[child.kind].label} {formatAmount(child.amount, { signed: true })}{elsewhere(child)}
+                                        <ArrowDown /> {kinds[child.kind].label} {formatAmount(child.amount, { signed: true })}{elsewhere(child)}
                                     </a>
                                 {/each}
                             </td>

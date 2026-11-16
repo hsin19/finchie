@@ -15,6 +15,9 @@ import { outcome } from "#lib/documents.js";
 import { onKeys } from "#lib/keys.svelte.js";
 import { Reparse } from "#lib/reparse.svelte.js";
 import { resolve } from "$app/paths";
+import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
+import Download from "@lucide/svelte/icons/download";
 import type { PageProps } from "./$types";
 
 let { data }: PageProps = $props();
@@ -79,9 +82,9 @@ onKeys("document", {
     <h1 class="m-0 min-w-0 text-[18px] font-bold break-words">{email?.subject || doc.filename}</h1>
     <Tag status={doc.status} label />
     <span class="ml-auto flex flex-wrap gap-x-4 text-[12px]">
-        <a href={resolve("/documents")} class="text-dim hover:text-ink">← 全部文件</a>
+        <a href={resolve("/documents")} class="text-dim hover:text-ink"><ArrowLeft /> 全部文件</a>
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
-        <a href={documentContentUrl(doc.id)} class="text-dim hover:text-ink" data-sveltekit-reload>下載原始檔 ↓</a>
+        <a href={documentContentUrl(doc.id)} class="text-dim hover:text-ink" data-sveltekit-reload>下載原始檔 <Download /></a>
         {#if doc.deletable}<button type="button" class="text-dim hover:text-neg" onclick={askToDelete}>刪除</button>{/if}
     </span>
 </div>
@@ -98,7 +101,7 @@ onKeys("document", {
         <dt class="text-mute">result</dt>
         <dd class="m-0 min-w-0 break-words {result.tone === 'neg' ? 'text-neg' : result.tone === 'dim' ? 'text-dim' : 'text-ink'}">
             {result.text}
-            {#if result.link}<a href={result.link.href} class="ml-1">{result.link.text}</a>{/if}
+            {#if result.link}<a href={result.link.href} class="ml-1"><ArrowRight /> {result.link.text}</a>{/if}
         </dd>
         {#if result.hint}
             <dt class="text-mute">next</dt>

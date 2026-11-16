@@ -158,9 +158,9 @@ export function outcome(doc: Document, statement?: Statement): Outcome {
     // A card bill has a page of its own; a deposit or securities statement's lines are on its accounts' pages.
     const deposit = doc.statementKind === "deposit" || doc.statementKind === "securities";
     const link = statement
-        ? { href: resolve("/statements/[id]", { id: String(statement.id) }), text: `→ 帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}` }
+        ? { href: resolve("/statements/[id]", { id: String(statement.id) }), text: `帳單 ${institution(statement.institution).name} ${monthOf(statement.closingDate)}` }
         : deposit
-        ? { href: resolve("/accounts"), text: "→ 帳戶" }
+        ? { href: resolve("/accounts"), text: "帳戶" }
         : undefined;
     switch (doc.status) {
         case "pending":
@@ -179,7 +179,7 @@ export function outcome(doc: Document, statement?: Statement): Outcome {
         case "duplicate": {
             const original = doc.duplicateOf;
             return original
-                ? { text: `跟 #${original} 是同一張，這份不再寫入`, tone: "dim", link: { href: resolve("/documents/[id]", { id: String(original) }), text: `→ #${original}` } }
+                ? { text: `跟 #${original} 是同一張，這份不再寫入`, tone: "dim", link: { href: resolve("/documents/[id]", { id: String(original) }), text: `#${original}` } }
                 : { text: "同一張帳單已經入帳，這份不再寫入", tone: "dim" };
         }
         case "failed":
