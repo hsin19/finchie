@@ -25,6 +25,9 @@ const account = (id: number, kind: Account["kind"], asOf: string, institution = 
     gaps: [],
     expiries: [],
     balances: [{ unit: "TWD", asOf, amount: "1" }],
+    overdue: false,
+    excused: false,
+    freshFor: 50,
 });
 const flow = (unit: string, received: string, spent: string): UnitFlow => ({ unit, received, spent, moved: "0", movedCount: 0 });
 
@@ -51,12 +54,12 @@ describe("reportedThrough", () => {
 
     it("waits for no account the owner said not to look at again yet", () => {
         // Excused for years, its old balance would hold every month back.
-        const quiet = { ...account(2, "deposit", "2026-08-04"), checkAgainOn: "2030-01-01" };
+        const quiet = { ...account(2, "deposit", "2026-08-04"), checkAgainOn: "2030-01-01", excused: true };
         expect(reportedThrough([account(1, "deposit", "2026-10-31"), quiet], "2026-11-13")).toBe("2026-10-31");
     });
 
     it("waits for no account that is overdue, nor one the owner keeps", () => {
-        const accounts = [account(1, "deposit", "2026-10-31"), account(2, "deposit", "2026-08-01"), account(3, "deposit", "2026-01-01", "owner")];
+        const accounts = [account(1, "deposit", "2026-10-31"), { ...account(2, "deposit", "2026-08-01"), overdue: true }, account(3, "deposit", "2026-01-01", "owner")];
         expect(reportedThrough(accounts, "2026-11-13")).toBe("2026-10-31");
         expect(reportedThrough([], "2026-11-13")).toBeUndefined();
     });

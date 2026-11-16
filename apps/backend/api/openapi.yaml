@@ -570,6 +570,57 @@ paths:
                 items: { $ref: "#/components/schemas/NetWorthPoint" }
         "400": { $ref: "#/components/responses/Problem" }
 
+  /api/notifications:
+    get:
+      operationId: listNotifications
+      summary: What needs the owner, newest first
+      description: |
+        Each thing that needs the owner, raised once and worked out again from the ledger whenever it may
+        have changed: after a document is stored, after the owner changes something, and every hour, so
+        that a day passing counts. One that is no longer so is resolved by itself. `open` lists only those
+        not resolved, handled by the owner or not.
+      parameters:
+        - name: open
+          in: query
+          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: The notifications
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationList" }
+
+  /api/notifications/read:
+    post:
+      operationId: readNotifications
+      summary: Mark notifications read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationIds" }
+      responses:
+        "204":
+          description: Marked
+
+  /api/notifications/handle:
+    post:
+      operationId: handleNotifications
+      summary: Say notifications are dealt with, or take that back
+      description: |
+        For what Finchie cannot see, such as money moved in after the newest statement. A handled one is
+        not shown among what needs the owner while its situation lasts; a new situation is a new one.
+        Handling one reads it too.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationHandle" }
+      responses:
+        "204":
+          description: Marked
+
   /api/settings:
     get:
       operationId: getSettings
@@ -910,7 +961,7 @@ components:
 
     Account:
       type: object
-      required: [id, institution, kind, side, number, balances, continuity, gaps, expiries]
+      required: [id, institution, kind, side, number, balances, continuity, gaps, expiries, overdue, excused, freshFor]
       properties:
         id: { type: integer, format: int64 }
         institution: { type: string, example: esun }
@@ -964,6 +1015,26 @@ components:
             currency, which that balance therefore does not show gone yet, soonest due first. A bank's bills
             leave the account the newest of them a deposit line showed paid left (ADR 0016)
           items: { $ref: "#/components/schemas/Debit" }
+        overdue:
+          type: boolean
+          description: |
+            Nothing new for longer than its source takes (`freshFor`), and no `checkAgainOn` still ahead.
+            Never for an account the owner keeps
+        excused: { type: boolean, description: "It would be overdue, but `checkAgainOn` is still ahead" }
+        freshFor:
+          type: integer
+          description: |
+            How many days its source may take before its newest balance is overdue: 50 for statements, 1 for an
+            exchange's readings. Confirming it is current puts the next look that far off by default
+        nextLapse: { $ref: "#/components/schemas/NextLapse" }
+        shortfalls:
+          type: array
+          description: |
+            A deposit account's: where its newest balance in a unit does not cover the card bills its autopay
+            takes after it (`debits`), while one of them is still to come out, due today or later. An
+            estimate, since what came in after that balance shows only in the next statement; none while
+            it is overdue
+          items: { $ref: "#/components/schemas/Shortfall" }
 
     Debit:
       type: object
@@ -976,6 +1047,32 @@ components:
         unit: { type: string, example: TWD }
         amount: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: What the bill says is due }
         paidOn: { type: string, format: date, description: "When a later bill showed it paid, after the account's newest balance; absent while that is not known" }
+
+    NextLapse:
+      type: object
+      description: "The soonest of an account's points to lapse from today on: by its program's rule (`estimated`), or as its newest report says (ADR 0019)"
+      required: [unit, amount, by, estimated, soon]
+      properties:
+        unit: { type: string, example: e point }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        by: { type: string, format: date }
+        estimated: { type: boolean }
+        soon: { type: boolean, description: Within 60 days of today }
+
+    Shortfall:
+      type: object
+      description: What a deposit account's newest balance in a unit lacks to cover the card bills its autopay takes after it
+      required: [unit, asOf, balance, debits, owed, lacks]
+      properties:
+        unit: { type: string, example: TWD }
+        asOf: { type: string, format: date }
+        balance: { $ref: "#/components/schemas/Decimal" }
+        debits:
+          type: array
+          description: The bills, soonest due first
+          items: { $ref: "#/components/schemas/Debit" }
+        owed: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: What the bills come to }
+        lacks: { $ref: "#/components/schemas/Decimal" }
 
     AccountDetail:
       allOf:
@@ -1451,10 +1548,83 @@ components:
         worth: { $ref: "#/components/schemas/Decimal" }
         unvalued: { type: integer, description: "Accounts of the kind without a worth, left out of it" }
 
+    NotificationKind:
+      type: string
+      enum: [shortfall, document, gap, overdue, lapsing]
+      description: |
+        In the order to deal with them: an autopay that may not cover the card bills it is to take, a
+        document whose statement does not add up or that failed, an account whose balances do not join
+        up, an account whose source has gone quiet, points about to lapse
+
+    Notification:
+      type: object
+      description: |
+        One thing that needs the owner, with what was so when it was raised; its details are the ones of
+        its kind. A situation that changes, such as a newer balance that still does not cover a bill,
+        is a new one.
+      required: [id, kind, raisedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: "#/components/schemas/NotificationKind" }
+        raisedAt: { type: string, format: date-time }
+        readAt: { type: string, format: date-time }
+        handledAt: { type: string, format: date-time, description: When the owner said it is dealt with }
+        resolvedAt: { type: string, format: date-time, description: When it stopped being so }
+        account: { $ref: "#/components/schemas/NotificationAccount" }
+        document: { $ref: "#/components/schemas/NotificationDocument" }
+        shortfall: { $ref: "#/components/schemas/Shortfall" }
+        gap: { $ref: "#/components/schemas/BalanceGap" }
+        newest: { type: string, format: date, description: "An overdue account's newest balance's day" }
+        lapsing: { $ref: "#/components/schemas/NextLapse" }
+
+    NotificationAccount:
+      type: object
+      description: The account it is about, as it is named now
+      required: [id, institution, kind]
+      properties:
+        id: { type: integer, format: int64 }
+        institution: { type: string }
+        kind: { $ref: "#/components/schemas/AccountKind" }
+        label: { type: string, nullable: true }
+        name: { type: string, nullable: true }
+
+    NotificationDocument:
+      type: object
+      description: The document it is about, as it stood when raised; its id is gone once the document is deleted
+      required: [filename, status]
+      properties:
+        id: { type: integer, format: int64 }
+        filename: { type: string }
+        status: { $ref: "#/components/schemas/DocumentStatus" }
+        failure: { $ref: "#/components/schemas/DocumentFailure" }
+
+    NotificationList:
+      type: object
+      required: [items, unread]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Notification" }
+        unread: { type: integer, description: "Open ones neither read nor handled, whatever `open` and the limit" }
+
+    NotificationIds:
+      type: object
+      required: [ids]
+      properties:
+        ids: { type: array, items: { type: integer, format: int64 } }
+
+    NotificationHandle:
+      type: object
+      required: [ids, handled]
+      properties:
+        ids: { type: array, items: { type: integer, format: int64 } }
+        handled: { type: boolean }
+
     Settings:
       type: object
-      required: [maxUploadBytes, sourceIntervalHours, baseCurrency]
+      required: [maxUploadBytes, sourceIntervalHours, baseCurrency, lapseSoonDays]
       properties:
+        lapseSoonDays: { type: integer, description: How near points to lapse are soon enough to stand out }
         maxUploadBytes: { type: integer, format: int64, description: The largest file an upload may be (BACKEND_MAX_UPLOAD_MB) }
         sourceIntervalHours: { type: integer, description: "How often rates, closes, and exchanges are read" }
         baseCurrency: { type: string, description: "What every worth is in, e.g. TWD" }

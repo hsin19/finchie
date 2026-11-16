@@ -23,16 +23,28 @@ import {
     leftOut,
     leftOutAccounts,
     listedBalances,
-    nextLapse,
     readAccountsView,
-    shortfalls,
     shownNumber,
     shownPositions,
     sortAccounts,
 } from "./accounts.js";
 
 function account(id: number, worth?: string): Account {
-    return { id, institution: "esun", kind: "deposit", side: "asset", number: String(id), balances: [], continuity: "checked", gaps: [], expiries: [], worth };
+    return {
+        id,
+        institution: "esun",
+        kind: "deposit",
+        side: "asset",
+        number: String(id),
+        balances: [],
+        continuity: "checked",
+        gaps: [],
+        expiries: [],
+        worth,
+        overdue: false,
+        excused: false,
+        freshFor: 50,
+    };
 }
 
 describe("accounts", () => {
@@ -85,6 +97,9 @@ describe("small accounts and balances", () => {
         gaps: Array.from({ length: gaps }, () => ({ unit: "TWD", from: "2026-08-31", to: "2026-09-30", unseen: "1" })),
         expiries: [],
         worth,
+        overdue: false,
+        excused: false,
+        freshFor: 50,
     });
 
     it("lists balances by worth, and only those of NT$1,000 or more when small ones are hidden", () => {
@@ -145,8 +160,8 @@ describe("small accounts and balances", () => {
 
 describe("lapsing points", () => {
     it("stands out within sixty days", () => {
-        expect(lapsesSoon("2027-01-08", "2026-11-09")).toBe(true);
-        expect(lapsesSoon("2027-01-09", "2026-11-09")).toBe(false);
+        expect(lapsesSoon("2027-01-08", "2026-11-09", 60)).toBe(true);
+        expect(lapsesSoon("2027-01-09", "2026-11-09", 60)).toBe(false);
         expect(lapsesSoon("2026-11-30", "2026-11-09", 14)).toBe(false);
     });
 });
@@ -177,89 +192,43 @@ describe("shownNumber", () => {
 });
 
 describe("accountStatus", () => {
-    const at = (kind: Account["kind"], asOf: string, rest: Partial<Account> = {}): Account => ({
+    const at = (asOf: string, rest: Partial<Account> = {}): Account => ({
         ...account(1),
-        kind,
         balances: [{ unit: "TWD", asOf: "2026-08-31", amount: "1" }, { unit: "USD", asOf, amount: "1" }],
         ...rest,
     });
 
     it("counts the days since the newest balance", () => {
-        expect(accountStatus(at("deposit", "2026-10-31"), "2026-11-10")).toMatchObject({ asOf: "2026-10-31", days: 10, stale: false });
+        expect(accountStatus(at("2026-10-31"), "2026-11-10")).toMatchObject({ asOf: "2026-10-31", days: 10, stale: false });
         expect(accountStatus({ ...account(1), balances: [] }, "2026-11-10")).toEqual({ stale: false, excused: false, gaps: 0, checked: true });
     });
 
-    it("calls a statement that has not come in 50 days stale, and an exchange not read for a day", () => {
-        expect(accountStatus(at("deposit", "2026-09-30"), "2026-11-19").stale).toBe(false);
-        expect(accountStatus(at("deposit", "2026-09-30"), "2026-11-20").stale).toBe(true);
-        expect(accountStatus(at("points", "2026-09-30"), "2026-11-20").stale).toBe(true);
-        expect(accountStatus(at("securities", "2026-08-04"), "2026-11-10").stale).toBe(true);
-        expect(accountStatus(at("exchange", "2026-11-09"), "2026-11-10").stale).toBe(false);
-        expect(accountStatus(at("exchange", "2026-11-08"), "2026-11-10").stale).toBe(true);
-    });
-
-    it("is not overdue before the day the owner said to look again", () => {
-        // A brokerage sends nothing for a month without a trade: confirmed on 11/13, as its rule would.
-        const quiet = at("securities", "2026-08-04", { checkAgainOn: "2027-01-02" });
-        expect(accountStatus(quiet, "2026-11-13")).toMatchObject({ days: 74, stale: false, excused: true, note: "確認過沒變 · 2027/01/02 再提醒" });
-        expect(accountStatus(quiet, "2027-01-01").stale).toBe(false);
-        expect(accountStatus(quiet, "2027-01-02")).toMatchObject({ stale: true, excused: false });
-        // Far off, for one that never moves.
-        expect(accountStatus(at("deposit", "2026-08-04", { checkAgainOn: "2030-01-01" }), "2029-06-01").stale).toBe(false);
-        // Nothing to excuse while it is current.
-        expect(accountStatus(at("deposit", "2026-11-01", { checkAgainOn: "2027-01-02" }), "2026-11-13")).toEqual(expect.objectContaining({ stale: false, excused: false }));
+    it("is stale or excused as the backend works it out, and says until when it is excused", () => {
+        expect(accountStatus(at("2026-08-04", { overdue: true }), "2026-11-13")).toMatchObject({ days: 74, stale: true, excused: false });
+        expect(accountStatus(at("2026-08-04", { excused: true, checkAgainOn: "2027-01-02" }), "2026-11-13")).toMatchObject({
+            stale: false,
+            excused: true,
+            note: "確認過沒變 · 2027/01/02 再提醒",
+        });
     });
 
     it("gives as long from today as the account's source may take, by default", () => {
-        expect(checkAgainDefault({ kind: "securities" }, "2026-11-13")).toBe("2027-01-02");
-        expect(checkAgainDefault({ kind: "exchange" }, "2026-11-13")).toBe("2026-11-14");
+        expect(checkAgainDefault({ freshFor: 50 }, "2026-11-13")).toBe("2027-01-02");
+        expect(checkAgainDefault({ freshFor: 1 }, "2026-11-13")).toBe("2026-11-14");
     });
 
-    it("never calls an account the owner keeps stale", () => {
-        expect(accountStatus(at("deposit", "2026-01-01", { institution: "owner" }), "2026-11-10")).toMatchObject({ stale: false, note: "手動" });
+    it("notes an account the owner keeps", () => {
+        expect(accountStatus(at("2026-01-01", { institution: "owner" }), "2026-11-10")).toMatchObject({ stale: false, note: "手動" });
     });
 
     it("counts the gaps, and knows when there is nothing to check", () => {
         const gaps = [{ from: "2026-01-31", to: "2026-03-31", unit: "TWD", unseen: "5" }];
-        expect(accountStatus(at("deposit", "2026-11-01", { gaps }), "2026-11-10")).toMatchObject({ gaps: 1, checked: true });
-        expect(accountStatus(at("exchange", "2026-11-10", { continuity: "unknown" }), "2026-11-10").checked).toBe(false);
+        expect(accountStatus(at("2026-11-01", { gaps }), "2026-11-10")).toMatchObject({ gaps: 1, checked: true });
+        expect(accountStatus(at("2026-11-10", { continuity: "unknown" }), "2026-11-10").checked).toBe(false);
     });
 
     it("says how long ago in words", () => {
         expect([daysAgo(0), daysAgo(1), daysAgo(41)]).toEqual(["今天", "昨天", "41 天前"]);
-    });
-});
-
-describe("shortfalls", () => {
-    // E.SUN's savings pays HSBC's bill on 11/09 and E.SUN's on 11/23; its newest balance is October's end.
-    const payer = (amount: string, rest: Partial<Account> = {}): Account => ({
-        ...account(1),
-        balances: [{ unit: "TWD", asOf: "2026-10-31", amount }],
-        debits: [
-            { statementId: 10, institution: "hsbc", dueDate: "2026-11-09", unit: "TWD", amount: "3000" },
-            { statementId: 11, institution: "esun", dueDate: "2026-11-23", unit: "TWD", amount: "4000.50" },
-        ],
-        ...rest,
-    });
-
-    it("is what the newest balance lacks to cover every bill taken after it, those already due included", () => {
-        expect(shortfalls(payer("5000"), "2026-11-13")).toEqual([
-            { unit: "TWD", asOf: "2026-10-31", balance: "5000", debits: payer("0").debits, owed: "7000.50", lacks: "2000.50" },
-        ]);
-    });
-
-    it("is nothing when the balance covers them, or once every bill is due", () => {
-        expect(shortfalls(payer("7000.50"), "2026-11-13")).toEqual([]);
-        expect(shortfalls(payer("5000"), "2026-11-24")).toEqual([]);
-    });
-
-    it("counts a bill a later bill showed paid, but not as still to come out", () => {
-        const paid = payer("5000", { debits: [{ statementId: 11, institution: "esun", dueDate: "2026-11-23", unit: "TWD", amount: "6000", paidOn: "2026-11-23" }] });
-        expect(shortfalls(paid, "2026-11-13")).toEqual([]);
-    });
-
-    it("tells nothing by a balance too old to go by", () => {
-        expect(shortfalls(payer("5000", { balances: [{ unit: "TWD", asOf: "2026-09-20", amount: "5000" }] }), "2026-11-13")).toEqual([]);
     });
 });
 
@@ -301,22 +270,5 @@ describe("shownPositions", () => {
         const shown = shownPositions([position("A", "0", "120"), position("B", "100"), position("C", "0"), position("D", "0", "0")]);
         expect(shown.map(p => p.unit)).toEqual(["B", "A"]);
         expect(shownPositions(undefined)).toEqual([]);
-    });
-});
-
-describe("nextLapse", () => {
-    const today = "2026-11-13";
-    it("is the soonest of the lots by the rule and what the newest bill says, from today on", () => {
-        const lots = [
-            // The rule says these lapsed already: no lapse ahead.
-            { unit: "小樹點(信用卡)", by: "2026-10-31", amount: "5" },
-            { unit: "小樹點(信用卡)", by: "2027-11-30", amount: "3" },
-            { unit: "小樹點(信用卡)", by: "2028-01-31", amount: "60" },
-        ];
-        expect(nextLapse({ lots, expiries: [] }, today)).toEqual({ unit: "小樹點(信用卡)", amount: "3", by: "2027-11-30", estimated: true });
-        // A bill that knows of a sooner one, points held from before the first bill.
-        const expiries = [{ unit: "小樹點(信用卡)", amount: "88", by: "2026-11-30" }];
-        expect(nextLapse({ lots, expiries }, today)).toEqual({ unit: "小樹點(信用卡)", amount: "88", by: "2026-11-30", estimated: false });
-        expect(nextLapse({ expiries: [] }, today)).toBeUndefined();
     });
 });

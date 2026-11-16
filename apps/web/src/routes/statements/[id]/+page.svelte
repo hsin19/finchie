@@ -191,8 +191,8 @@ onKeys("statement", {
                         <dd class="m-0 text-right font-bold text-ink-bright">{formatAmount(program.balance.amount)}</dd>
                     {/if}
                     {#each program.expiries as expiry (expiry.by)}
-                        <dt class={lapsesSoon(expiry.by, today()) ? "text-neg" : "text-mute"}>{expiry.by} 前到期</dt>
-                        <dd class="m-0 text-right {lapsesSoon(expiry.by, today()) ? 'text-neg' : ''}">{formatAmount(expiry.amount)}</dd>
+                        <dt class={lapsesSoon(expiry.by, today(), data.settings.lapseSoonDays) ? "text-neg" : "text-mute"}>{expiry.by} 前到期</dt>
+                        <dd class="m-0 text-right {lapsesSoon(expiry.by, today(), data.settings.lapseSoonDays) ? 'text-neg' : ''}">{formatAmount(expiry.amount)}</dd>
                     {/each}
                 </dl>
             </section>

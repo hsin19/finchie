@@ -14,8 +14,8 @@ import {
     trendQuery,
 } from "./networth";
 
-/** A deposit account whose newest balance is of `asOf`. */
-const reported = (id: number, asOf: string): Account => ({
+/** A deposit account whose newest balance is of `asOf`, overdue or not by the backend's rule. */
+const reported = (id: number, asOf: string, overdue = false): Account => ({
     id,
     institution: "esun",
     kind: "deposit",
@@ -25,19 +25,22 @@ const reported = (id: number, asOf: string): Account => ({
     gaps: [],
     expiries: [],
     balances: [{ unit: "TWD", asOf, amount: "1" }],
+    overdue,
+    excused: false,
+    freshFor: 50,
 });
 const point = (on: string, net: string, complete = true): NetWorthPoint => ({ on, assets: "0", liabilities: "0", net, unvalued: 0, complete });
 
 describe("overdueBehind", () => {
     it("names only the accounts behind the figure that are overdue", () => {
         // A statement that closed last month is behind today as a matter of course; one 60 days old is overdue.
-        const accounts = [reported(1, "2026-09-12"), reported(2, "2026-10-31"), reported(3, "2026-10-31")];
+        const accounts = [reported(1, "2026-09-12", true), reported(2, "2026-10-31"), reported(3, "2026-10-31")];
         expect(overdueBehind({ behind: [3, 1] }, accounts, "2026-11-11")).toEqual([accounts[0]]);
         expect(overdueBehind({ behind: [2, 3] }, accounts, "2026-11-11")).toEqual([]);
     });
 
     it("names none that is not behind, however old", () => {
-        expect(overdueBehind({ behind: [] }, [reported(1, "2026-09-12")], "2026-11-11")).toEqual([]);
+        expect(overdueBehind({ behind: [] }, [reported(1, "2026-09-12", true)], "2026-11-11")).toEqual([]);
     });
 });
 

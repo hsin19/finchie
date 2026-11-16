@@ -27,6 +27,7 @@ export const keymap = {
             { keys: ["t"], label: "交易" },
             { keys: ["a"], label: "帳戶" },
             { keys: ["d"], label: "文件與上傳" },
+            { keys: ["i"], label: "通知" },
             { keys: ["/"], label: "搜尋：這頁有搜尋框就用它，沒有就搜尋交易" },
             { keys: ["?"], label: "這個說明" },
         ],

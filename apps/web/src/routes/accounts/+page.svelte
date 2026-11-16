@@ -4,11 +4,9 @@ import {
     accountsHref,
     describePrice,
     isSmallAccount,
-    lapsesSoon,
     leftOut,
     leftOutAccounts,
     listedBalances,
-    nextLapse,
     shownNumber,
     sortAccounts,
 } from "#lib/accounts.js";
@@ -94,7 +92,7 @@ function href(account: Account) {
     {@const ntdOnly = account.balances.length === 1 && account.balances[0].unit === base}
     <!-- A worth line only where something has a worth: not for points no one has valued. -->
     {@const worthLine = !ntdOnly && (account.worth !== undefined || account.balances.some(b => b.worth !== undefined))}
-    {@const lapsing = nextLapse(account, now)}
+    {@const lapsing = account.nextLapse}
     {#if worthLine}
         <div
             class={account.worth !== undefined && sign(account.worth) < 0 ? "text-neg" : "text-accent-soft"}
@@ -120,7 +118,7 @@ function href(account: Account) {
     {/each}
     {#if note}<div class="text-[12px] text-mute">{note}</div>{/if}
     {#if lapsing}
-        <div class="text-[12px] {lapsesSoon(lapsing.by, now) ? 'text-neg' : 'text-mute'}">
+        <div class="text-[12px] {lapsing.soon ? 'text-neg' : 'text-mute'}">
             {formatAmount(lapsing.amount)} {lapsing.unit} {lapsing.by} 前到期{lapsing.estimated ? "（推算）" : ""}
         </div>
     {/if}

@@ -24,5 +24,7 @@ sql:
           - column: documents.failure
             go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: Failure, pointer: true}
             nullable: true
+          - column: notifications.kind
+            go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: NoticeKind}
           - column: prices.source
             go_type: {import: github.com/hsin19/finchie/apps/backend/internal/domain, type: PriceSource}

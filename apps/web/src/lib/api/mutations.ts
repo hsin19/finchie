@@ -83,3 +83,13 @@ export function setCheckAgain(id: number, checkAgainOn: string) {
 export function deleteDocument(id: number, then: ResolvedPathname) {
     return change(api().DELETE("/api/documents/{id}", { params: { path: { id } } }), then);
 }
+
+/** Says notifications are dealt with, or takes that back: for what Finchie cannot see. */
+export function handleNotifications(ids: number[], handled = true) {
+    return change(api().POST("/api/notifications/handle", { body: { ids, handled } }));
+}
+
+/** Marks notifications read: the owner has seen them. */
+export function readNotifications(ids: number[]) {
+    return change(api().POST("/api/notifications/read", { body: { ids } }));
+}

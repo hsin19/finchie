@@ -20,6 +20,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	"github.com/hsin19/finchie/apps/backend/internal/notify"
 )
 
 // ParseDocumentArgs is the job enqueued on upload, on re-parse, and by Retry.
@@ -60,6 +61,13 @@ func (w *Worker) Timeout(*river.Job[ParseDocumentArgs]) time.Duration {
 }
 
 func (w *Worker) Work(ctx context.Context, job *river.Job[ParseDocumentArgs]) error {
+	err := w.parse(ctx, job)
+	// Whatever became of the document, what needs the owner may have changed with it.
+	notify.After(ctx, w.pool)
+	return err
+}
+
+func (w *Worker) parse(ctx context.Context, job *river.Job[ParseDocumentArgs]) error {
 	id := job.Args.DocumentID
 	queries := dbq.New(w.pool)
 	doc, err := queries.GetDocumentContent(ctx, id)

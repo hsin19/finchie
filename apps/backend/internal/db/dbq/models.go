@@ -105,6 +105,19 @@ type NewestPrice struct {
 	TwdAmount   pgtype.Numeric
 }
 
+type Notification struct {
+	ID         int64
+	Kind       domain.NoticeKind
+	Key        string
+	AccountID  *int64
+	DocumentID *int64
+	Facts      []byte
+	RaisedAt   pgtype.Timestamptz
+	ReadAt     pgtype.Timestamptz
+	HandledAt  pgtype.Timestamptz
+	ResolvedAt pgtype.Timestamptz
+}
+
 type Price struct {
 	UnitID      int64
 	AsOf        pgtype.Timestamptz

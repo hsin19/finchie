@@ -17,14 +17,16 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	"github.com/hsin19/finchie/apps/backend/internal/domain"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	"github.com/hsin19/finchie/apps/backend/internal/notify"
 	"github.com/hsin19/finchie/apps/backend/internal/numeric"
+	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
 // The accounts' standing is the domain's (domain.Assess); these handlers read what it needs and show
 // what it says.
 
 func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) (ListAccountsResponseObject, error) {
-	accounts, _, err := readAccounts(ctx, dbq.New(s.pool), nil)
+	accounts, err := readAccounts(ctx, dbq.New(s.pool), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +35,7 @@ func (s *Server) ListAccounts(ctx context.Context, _ ListAccountsRequestObject) 
 
 func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject) (GetAccountResponseObject, error) {
 	queries := dbq.New(s.pool)
-	found, _, err := readAccounts(ctx, queries, &request.Id)
+	found, err := readAccounts(ctx, queries, &request.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -70,126 +72,94 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 	return GetAccount200JSONResponse(detail), nil
 }
 
-// readAccounts reads the owner's accounts, or the one with id, and how each stands: as shown, and what
-// each is worth to the domain.
-func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Account, []domain.Worth, error) {
-	rows, err := queries.ListAccounts(ctx, id)
+// readAccounts reads the owner's accounts, or the one with id, as they stand today (ledger.ReadAccounts).
+func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Account, error) {
+	now, err := ledger.ReadAccounts(ctx, queries, id)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list accounts: %w", err)
+		return nil, err
 	}
-	latest, err := queries.LatestBalances(ctx, id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("latest balances: %w", err)
+	today := taipei.Today(time.Now())
+	accounts := make([]Account, 0, len(now))
+	for _, a := range now {
+		accounts = append(accounts, toAccount(a, today))
 	}
-	gaps, err := ledger.Gaps(ctx, queries, id)
-	if err != nil {
-		return nil, nil, err
-	}
-	valuations, err := queries.LatestValuations(ctx, id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("latest valuations: %w", err)
-	}
-	expiries, err := queries.LatestExpiries(ctx, id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("latest expiries: %w", err)
-	}
-	programs, err := ledger.PointsLots(ctx, queries, id)
-	if err != nil {
-		return nil, nil, err
-	}
-	lotsOf, lapsedOf := pointsLots(programs)
-	debitsOf, err := readDebits(ctx, queries, latest)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	balancesOf := map[int64][]dbq.LatestBalancesRow{}
-	for _, b := range latest {
-		balancesOf[b.AccountID] = append(balancesOf[b.AccountID], b)
-	}
-	valuationOf := map[int64]dbq.LatestValuationsRow{}
-	for _, v := range valuations {
-		valuationOf[v.AccountID] = v
-	}
-	expiriesOf := map[int64][]Expiry{}
-	for _, e := range expiries {
-		expiriesOf[e.AccountID] = append(expiriesOf[e.AccountID], toExpiry(e))
-	}
-	gapsOf := domain.ReadGaps(gaps)
-
-	accounts := make([]Account, 0, len(rows))
-	worths := make([]domain.Worth, 0, len(rows))
-	for _, row := range rows {
-		var valuation *dbq.LatestValuationsRow
-		if v, ok := valuationOf[row.ID]; ok {
-			valuation = &v
-		}
-		account, standing := toAccount(row, balancesOf[row.ID], gapsOf[row.ID], valuation)
-		account.Expiries = append(account.Expiries, expiriesOf[row.ID]...)
-		if lots := lotsOf[row.ID]; len(lots) > 0 {
-			account.Lots = &lots
-		}
-		if lapsed := lapsedOf[row.ID]; len(lapsed) > 0 {
-			account.Lapsed = &lapsed
-		}
-		if debits := debitsOf[row.ID]; len(debits) > 0 {
-			account.Debits = &debits
-		}
-		accounts = append(accounts, account)
-		worths = append(worths, domain.Worth{Kind: row.Kind, Worth: standing.Worth})
-	}
-	return accounts, worths, nil
+	return accounts, nil
 }
 
-// readDebits works out the card bills that leave each deposit account after its newest balance, `latest`
-// (domain.Debits).
-func readDebits(ctx context.Context, queries *dbq.Queries, latest []dbq.LatestBalancesRow) (map[int64][]Debit, error) {
-	rows, err := queries.CardBillPayments(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("card bill payments: %w", err)
+// toAccount shows an account as the domain assesses it (domain.Assess) on today.
+func toAccount(a ledger.AccountNow, today time.Time) Account {
+	standing := a.Standing
+	shown := make(map[string]Balance, len(a.Latest))
+	for _, b := range a.Latest {
+		shown[b.Unit] = toLatestBalance(b)
 	}
-	bills := make([]domain.CardBill, 0, len(rows))
-	for _, b := range rows {
-		if !b.ClosingDate.Valid || !b.DueDate.Valid || b.Currency == nil {
-			continue
-		}
-		bill := domain.CardBill{
-			ID: b.ID, Institution: b.Institution, ClosingDate: b.ClosingDate.Time, DueDate: b.DueDate.Time,
-			Unit: *b.Currency, TotalDue: numeric.ToRat(b.TotalDue),
-		}
-		if b.PaidFrom != nil {
-			bill.PaidFrom = *b.PaidFrom
-		}
-		if b.PaidOn.Valid {
-			bill.PaidOn = b.PaidOn.Time
-		}
-		bills = append(bills, bill)
+	side := Asset
+	if a.Kind.Liability() {
+		side = Liability
 	}
-	newest := make(map[domain.AccountUnit]time.Time, len(latest))
-	for _, b := range latest {
-		newest[domain.AccountUnit{AccountID: b.AccountID, Unit: b.Unit}] = b.AsOf.Time
+	fresh := a.Fresh(today)
+	account := Account{
+		Id: a.ID, Institution: a.Institution, Kind: AccountKind(a.Kind), Side: side, Number: a.Number,
+		Label: a.Label, Name: a.Name, FullNumber: a.FullNumber, CheckAgainOn: optionalDate(a.CheckAgainOn),
+		Continuity: AccountContinuity(standing.Continuity), Balances: make([]Balance, 0, len(standing.Held)),
+		Gaps: make([]BalanceGap, 0, len(a.Gaps.Unseen)), Expiries: make([]Expiry, 0, len(a.Expiries)),
+		Overdue: fresh.Overdue, Excused: fresh.Excused, FreshFor: a.Kind.FreshFor(),
 	}
-
-	shown := map[int64][]Debit{}
-	for account, bills := range domain.Debits(bills, newest) {
-		for _, b := range bills {
-			debit := Debit{
-				StatementId: b.ID, Institution: b.Institution, DueDate: openapi_types.Date{Time: b.DueDate}, Unit: b.Unit,
-				Amount: numeric.Exact(b.TotalDue),
-			}
-			if !b.PaidOn.IsZero() {
-				debit.PaidOn = &openapi_types.Date{Time: b.PaidOn}
-			}
-			shown[account] = append(shown[account], debit)
+	for _, b := range standing.Held {
+		account.Balances = append(account.Balances, shown[b.Unit])
+	}
+	for _, g := range a.Gaps.Unseen {
+		account.Gaps = append(account.Gaps, BalanceGap{
+			Unit: g.Unit, From: openapi_types.Date{Time: g.From}, To: openapi_types.Date{Time: g.To},
+			Unseen: numeric.Exact(g.Unseen),
+		})
+	}
+	if v := a.Valuation; v != nil {
+		valuation := Valuation{Unit: v.Unit, AsOf: openapi_types.Date{Time: v.AsOf.Time}, Amount: numeric.String(v.Amount)}
+		if v.Worth.Valid {
+			worth := numeric.String(v.Worth)
+			valuation.Worth = &worth
 		}
+		account.Valuation = &valuation
 	}
-	return shown, nil
+	if standing.Worth != nil {
+		account.Worth, account.WorthFrom = ptr(numeric.Cents(standing.Worth)), ptr(WorthFrom(standing.WorthFrom))
+	}
+	for _, e := range a.Expiries {
+		account.Expiries = append(account.Expiries, toExpiry(e))
+	}
+	lots, lapsed := pointsLots(a.Programs)
+	if len(lots) > 0 {
+		account.Lots = &lots
+	}
+	if len(lapsed) > 0 {
+		account.Lapsed = &lapsed
+	}
+	if next := a.NextLapse(today); next != nil {
+		account.NextLapse = ptr(toNextLapse(notify.LapsingOf(*next, today)))
+	}
+	if len(a.Debits) > 0 {
+		debits := make([]Debit, 0, len(a.Debits))
+		for _, b := range a.Debits {
+			debits = append(debits, toDebit(notify.DebitOf(b)))
+		}
+		account.Debits = &debits
+	}
+	if shortfalls := domain.Shortfalls(standing.Held, a.Debits, fresh, today); len(shortfalls) > 0 {
+		shown := make([]Shortfall, 0, len(shortfalls))
+		for _, s := range shortfalls {
+			shown = append(shown, toShortfall(s))
+		}
+		account.Shortfalls = &shown
+	}
+	return account
 }
 
-// pointsLots shows each account's points programs' lots, a day's together, soonest first, and what
-// lapsed, oldest first.
-func pointsLots(programs []ledger.ProgramLots) (map[int64][]PointsLot, map[int64][]LapsedPoints) {
-	lotsOf, lapsedOf := map[int64][]PointsLot{}, map[int64][]LapsedPoints{}
+// pointsLots shows an account's points programs' lots, a day's together, soonest first, and what lapsed,
+// oldest first.
+func pointsLots(programs []ledger.ProgramLots) ([]PointsLot, []LapsedPoints) {
+	var lots []PointsLot
+	var lapsed []LapsedPoints
 	for _, p := range programs {
 		var days []domain.Lot
 		for _, l := range p.Held {
@@ -204,70 +174,50 @@ func pointsLots(programs []ledger.ProgramLots) (map[int64][]PointsLot, map[int64
 			if l.Unaged {
 				lot.Unaged = &l.Unaged
 			}
-			lotsOf[p.AccountID] = append(lotsOf[p.AccountID], lot)
+			lots = append(lots, lot)
 		}
 		for _, l := range p.Lapsed {
-			lapsedOf[p.AccountID] = append(lapsedOf[p.AccountID], LapsedPoints{
+			lapsed = append(lapsed, LapsedPoints{
 				Unit: p.Unit, From: openapi_types.Date{Time: l.From}, To: openapi_types.Date{Time: l.To}, Amount: numeric.Exact(l.Amount),
 			})
 		}
 	}
-	for _, lots := range lotsOf {
-		slices.SortStableFunc(lots, func(a, b PointsLot) int { return a.By.Compare(b.By.Time) })
-	}
-	for _, lapsed := range lapsedOf {
-		slices.SortStableFunc(lapsed, func(a, b LapsedPoints) int { return a.To.Compare(b.To.Time) })
-	}
-	return lotsOf, lapsedOf
+	slices.SortStableFunc(lots, func(a, b PointsLot) int { return a.By.Compare(b.By.Time) })
+	slices.SortStableFunc(lapsed, func(a, b LapsedPoints) int { return a.To.Compare(b.To.Time) })
+	return lots, lapsed
 }
 
-// toAccount shows an account as the domain assesses it (domain.Assess).
-func toAccount(row dbq.ListAccountsRow, latest []dbq.LatestBalancesRow, gaps domain.Gaps, valuation *dbq.LatestValuationsRow) (Account, domain.Standing) {
-	balances := make([]domain.Balance, 0, len(latest))
-	shown := make(map[string]Balance, len(latest))
-	for _, b := range latest {
-		balances = append(balances, domain.Balance{
-			Unit: b.Unit, AsOf: b.AsOf.Time, Amount: numeric.ToRat(b.Amount), Worth: numeric.ToRat(b.Worth),
-			FromStatement: b.StatementID != nil,
-		})
-		shown[b.Unit] = toLatestBalance(b)
+// toShortfall shows a shortfall as notifications store it (notify.Facts), so the two read alike.
+func toShortfall(s domain.Shortfall) Shortfall {
+	shown := Shortfall{
+		Unit: s.Unit, AsOf: openapi_types.Date{Time: s.AsOf}, Balance: numeric.Exact(s.Balance),
+		Owed: numeric.Exact(s.Owed), Lacks: numeric.Exact(s.Lacks), Debits: make([]Debit, 0, len(s.Debits)),
 	}
-	var valued *domain.Valuation
-	if valuation != nil {
-		valued = &domain.Valuation{AsOf: valuation.AsOf.Time, Worth: numeric.ToRat(valuation.Worth)}
+	for _, b := range s.Debits {
+		shown.Debits = append(shown.Debits, toDebit(notify.DebitOf(b)))
 	}
-	standing := domain.Assess(row.Kind, balances, gaps, valued)
+	return shown
+}
 
-	side := Asset
-	if row.Kind.Liability() {
-		side = Liability
+func toDebit(d notify.Debit) Debit {
+	debit := Debit{StatementId: d.StatementID, Institution: d.Institution, DueDate: dateOf(d.DueDate), Unit: d.Unit, Amount: d.Amount}
+	if d.PaidOn != "" {
+		debit.PaidOn = ptr(dateOf(d.PaidOn))
 	}
-	account := Account{
-		Id: row.ID, Institution: row.Institution, Kind: AccountKind(row.Kind), Side: side, Number: row.Number,
-		Label: row.Label, Name: row.Name, FullNumber: row.FullNumber, CheckAgainOn: optionalDate(row.CheckAgainOn), Continuity: AccountContinuity(standing.Continuity),
-		Balances: make([]Balance, 0, len(standing.Held)), Gaps: make([]BalanceGap, 0, len(gaps.Unseen)), Expiries: []Expiry{},
+	return debit
+}
+
+func toNextLapse(l notify.Lapsing) NextLapse {
+	return NextLapse{Unit: l.Unit, Amount: l.Amount, By: dateOf(l.By), Estimated: l.Estimated, Soon: l.Soon}
+}
+
+// dateOf reads a date notify wrote.
+func dateOf(day string) openapi_types.Date {
+	t, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		panic(fmt.Sprintf("notify wrote a date as %q", day))
 	}
-	for _, b := range standing.Held {
-		account.Balances = append(account.Balances, shown[b.Unit])
-	}
-	for _, g := range gaps.Unseen {
-		account.Gaps = append(account.Gaps, BalanceGap{
-			Unit: g.Unit, From: openapi_types.Date{Time: g.From}, To: openapi_types.Date{Time: g.To},
-			Unseen: numeric.Exact(g.Unseen),
-		})
-	}
-	if valuation != nil {
-		v := Valuation{Unit: valuation.Unit, AsOf: openapi_types.Date{Time: valuation.AsOf.Time}, Amount: numeric.String(valuation.Amount)}
-		if valuation.Worth.Valid {
-			worth := numeric.String(valuation.Worth)
-			v.Worth = &worth
-		}
-		account.Valuation = &v
-	}
-	if standing.Worth != nil {
-		account.Worth, account.WorthFrom = ptr(numeric.Cents(standing.Worth)), ptr(WorthFrom(standing.WorthFrom))
-	}
-	return account, standing
+	return openapi_types.Date{Time: t}
 }
 
 // readPositions works out a securities account's positions (domain.Positions) from its balances' history,

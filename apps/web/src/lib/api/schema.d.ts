@@ -407,6 +407,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What needs the owner, newest first
+         * @description Each thing that needs the owner, raised once and worked out again from the ledger whenever it may
+         *     have changed: after a document is stored, after the owner changes something, and every hour, so
+         *     that a day passing counts. One that is no longer so is resolved by itself. `open` lists only those
+         *     not resolved, handled by the owner or not.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark notifications read */
+        post: operations["readNotifications"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/handle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Say notifications are dealt with, or take that back
+         * @description For what Finchie cannot see, such as money moved in after the newest statement. A handled one is
+         *     not shown among what needs the owner while its situation lasts; a new situation is a new one.
+         *     Handling one reads it too.
+         */
+        post: operations["handleNotifications"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -724,6 +786,26 @@ export interface components {
              *     leave the account the newest of them a deposit line showed paid left (ADR 0016)
              */
             debits?: components["schemas"]["Debit"][];
+            /**
+             * @description Nothing new for longer than its source takes (`freshFor`), and no `checkAgainOn` still ahead.
+             *     Never for an account the owner keeps
+             */
+            overdue: boolean;
+            /** @description It would be overdue, but `checkAgainOn` is still ahead */
+            excused: boolean;
+            /**
+             * @description How many days its source may take before its newest balance is overdue: 50 for statements, 1 for an
+             *     exchange's readings. Confirming it is current puts the next look that far off by default
+             */
+            freshFor: number;
+            nextLapse?: components["schemas"]["NextLapse"];
+            /**
+             * @description A deposit account's: where its newest balance in a unit does not cover the card bills its autopay
+             *     takes after it (`debits`), while one of them is still to come out, due today or later. An
+             *     estimate, since what came in after that balance shows only in the next statement; none while
+             *     it is overdue
+             */
+            shortfalls?: components["schemas"]["Shortfall"][];
         };
         /** @description A card bill whose money leaves a deposit account */
         Debit: {
@@ -742,6 +824,30 @@ export interface components {
              * @description When a later bill showed it paid, after the account's newest balance; absent while that is not known
              */
             paidOn?: string;
+        };
+        /** @description The soonest of an account's points to lapse from today on: by its program's rule (`estimated`), or as its newest report says (ADR 0019) */
+        NextLapse: {
+            /** @example e point */
+            unit: string;
+            amount: components["schemas"]["Decimal"];
+            /** Format: date */
+            by: string;
+            estimated: boolean;
+            /** @description Within 60 days of today */
+            soon: boolean;
+        };
+        /** @description What a deposit account's newest balance in a unit lacks to cover the card bills its autopay takes after it */
+        Shortfall: {
+            /** @example TWD */
+            unit: string;
+            /** Format: date */
+            asOf: string;
+            balance: components["schemas"]["Decimal"];
+            /** @description The bills, soonest due first */
+            debits: components["schemas"]["Debit"][];
+            /** @description What the bills come to */
+            owed: components["schemas"]["Decimal"];
+            lacks: components["schemas"]["Decimal"];
         };
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Every balance its sources reported, statements and snapshots, newest first */
@@ -1223,7 +1329,79 @@ export interface components {
             /** @description Accounts of the kind without a worth, left out of it */
             unvalued: number;
         };
+        /**
+         * @description In the order to deal with them: an autopay that may not cover the card bills it is to take, a
+         *     document whose statement does not add up or that failed, an account whose balances do not join
+         *     up, an account whose source has gone quiet, points about to lapse
+         * @enum {string}
+         */
+        NotificationKind: "shortfall" | "document" | "gap" | "overdue" | "lapsing";
+        /**
+         * @description One thing that needs the owner, with what was so when it was raised; its details are the ones of
+         *     its kind. A situation that changes, such as a newer balance that still does not cover a bill,
+         *     is a new one.
+         */
+        Notification: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["NotificationKind"];
+            /** Format: date-time */
+            raisedAt: string;
+            /** Format: date-time */
+            readAt?: string;
+            /**
+             * Format: date-time
+             * @description When the owner said it is dealt with
+             */
+            handledAt?: string;
+            /**
+             * Format: date-time
+             * @description When it stopped being so
+             */
+            resolvedAt?: string;
+            account?: components["schemas"]["NotificationAccount"];
+            document?: components["schemas"]["NotificationDocument"];
+            shortfall?: components["schemas"]["Shortfall"];
+            gap?: components["schemas"]["BalanceGap"];
+            /**
+             * Format: date
+             * @description An overdue account's newest balance's day
+             */
+            newest?: string;
+            lapsing?: components["schemas"]["NextLapse"];
+        };
+        /** @description The account it is about, as it is named now */
+        NotificationAccount: {
+            /** Format: int64 */
+            id: number;
+            institution: string;
+            kind: components["schemas"]["AccountKind"];
+            label?: string | null;
+            name?: string | null;
+        };
+        /** @description The document it is about, as it stood when raised; its id is gone once the document is deleted */
+        NotificationDocument: {
+            /** Format: int64 */
+            id?: number;
+            filename: string;
+            status: components["schemas"]["DocumentStatus"];
+            failure?: components["schemas"]["DocumentFailure"];
+        };
+        NotificationList: {
+            items: components["schemas"]["Notification"][];
+            /** @description Open ones neither read nor handled, whatever `open` and the limit */
+            unread: number;
+        };
+        NotificationIds: {
+            ids: number[];
+        };
+        NotificationHandle: {
+            ids: number[];
+            handled: boolean;
+        };
         Settings: {
+            /** @description How near points to lapse are soon enough to stand out */
+            lapseSoonDays: number;
             /**
              * Format: int64
              * @description The largest file an upload may be (BACKEND_MAX_UPLOAD_MB)
@@ -1870,6 +2048,73 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                open?: boolean;
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notifications */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationList"];
+                };
+            };
+        };
+    };
+    readNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationIds"];
+            };
+        };
+        responses: {
+            /** @description Marked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    handleNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationHandle"];
+            };
+        };
+        responses: {
+            /** @description Marked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getSettings: {

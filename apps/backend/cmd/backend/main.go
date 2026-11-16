@@ -32,6 +32,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 	"github.com/hsin19/finchie/apps/backend/internal/jobs"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
+	"github.com/hsin19/finchie/apps/backend/internal/notify"
 	"github.com/hsin19/finchie/apps/backend/internal/quotes"
 	"github.com/hsin19/finchie/apps/backend/internal/rates"
 	"github.com/hsin19/finchie/apps/backend/internal/telemetry"
@@ -138,13 +139,14 @@ func run() error {
 	exchangeAPIs := configuredExchanges(cfg, &http.Client{Timeout: 30 * time.Second})
 	// Registered without any exchange too: a job queued before its keys were removed finds a worker.
 	river.AddWorker(workers, exchanges.NewWorker(pool, exchangeAPIs, time.Now))
+	river.AddWorker(workers, notify.NewWorker(pool))
 	queue, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			jobs.Parse:   {MaxWorkers: cfg.ParseConcurrency},
 			jobs.Sources: {MaxWorkers: jobs.SourcesWorkers},
 		},
 		Workers:      workers,
-		PeriodicJobs: append([]*river.PeriodicJob{rates.Periodic(), quotes.Periodic(), ingest.RetryPeriodic()}, exchanges.Periodic(exchangeAPIs)...),
+		PeriodicJobs: append([]*river.PeriodicJob{rates.Periodic(), quotes.Periodic(), ingest.RetryPeriodic(), notify.Periodic()}, exchanges.Periodic(exchangeAPIs)...),
 		Logger:       logger,
 		// Without it, the signal that cancels the context passed to Start cancels running jobs too.
 		SoftStopTimeout: jobStopTimeout,

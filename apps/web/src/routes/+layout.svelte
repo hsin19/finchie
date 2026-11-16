@@ -91,7 +91,9 @@ const pages: NavItem[] = $derived([
 // Documents arrive by mail by themselves: their page is for an upload by hand or a look at what parsing
 // gave, so it is a link of its own, not a tab. What needs a look there the overview says.
 const documents: NavItem = $derived({ key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? "") });
-const nav = $derived([...pages, documents]);
+// What needs the owner the overview puts first; the link counts what they have not seen yet.
+const notifications: NavItem = $derived({ key: "i", label: "通知", href: resolve("/notifications"), current: page.route.id === "/notifications" });
+const nav = $derived([...pages, documents, notifications]);
 
 const prompt = $derived(commandLine(page.url.pathname, page.url.searchParams, (page.data as { command?: string; }).command));
 
@@ -129,6 +131,7 @@ onKeys("global", {
     "t": () => go("t"),
     "a": () => go("a"),
     "d": () => go("d"),
+    "i": () => go("i"),
     "/": () => void search(),
     "?": () => (help = !help),
 });
@@ -176,6 +179,14 @@ function onkeydown(event: KeyboardEvent) {
         >
             <span class="hidden text-accent md:inline">[{documents.key}]</span>{documents.label}
             {#if data.pending.length > 0}<span class="text-accent">● {data.pending.length}</span>{/if}
+        </a>
+        <a
+            href={notifications.href}
+            aria-current={notifications.current ? "page" : undefined}
+            class="flex min-h-9 items-center gap-1.5 text-[12px] md:text-[13px] {notifications.current ? 'text-ink' : 'text-dim hover:text-ink'}"
+        >
+            <span class="hidden text-accent md:inline">[{notifications.key}]</span>{notifications.label}
+            {#if data.unread > 0}<span class="text-neg" title="還沒看過的通知">● {data.unread}</span>{/if}
         </a>
     </header>
 

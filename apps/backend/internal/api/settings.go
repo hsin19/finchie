@@ -14,5 +14,6 @@ func (s *Server) GetSettings(context.Context, GetSettingsRequestObject) (GetSett
 		MaxUploadBytes:      s.maxUploadBytes,
 		SourceIntervalHours: int(jobs.SourceInterval / time.Hour),
 		BaseCurrency:        domain.BaseCurrency,
+		LapseSoonDays:       domain.LapseSoonDays,
 	}, nil
 }

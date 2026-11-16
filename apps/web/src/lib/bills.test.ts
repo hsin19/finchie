@@ -125,6 +125,9 @@ describe("reward", () => {
         gaps: [],
         expiries: [],
         balances: [{ unit, asOf: "2026-10-07", amount: "5000", ...(twd ? { price: { asOf: "2026-10-01T00:00:00Z", source: "owner", quote: "TWD", quoted: twd, twd } } : {}) }],
+        overdue: false,
+        excused: false,
+        freshFor: 50,
     });
 
     it("is the bills' cash rebates when they report no points", () => {

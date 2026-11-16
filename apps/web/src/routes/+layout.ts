@@ -27,11 +27,12 @@ export const load = (async ({ fetch, depends }) => {
     depends(LEDGER);
     const client = api(fetch);
     settings ??= client.GET("/api/settings").then(need);
-    const [statements, documents, pending, newest, deployment] = await Promise.all([
+    const [statements, documents, pending, newest, notifications, deployment] = await Promise.all([
         client.GET("/api/statements", { params: { query: { limit: WINDOW } } }),
         client.GET("/api/documents", { params: { query: { limit: WINDOW } } }),
         client.GET("/api/documents", { params: { query: { state: ["pending"], limit: WINDOW } } }),
         client.GET("/api/transactions", { params: { query: { limit: 1 } } }),
+        client.GET("/api/notifications", { params: { query: { open: true, limit: WINDOW } } }),
         settings.catch(error => {
             settings = undefined;
             throw error;
@@ -48,6 +49,7 @@ export const load = (async ({ fetch, depends }) => {
     const newestMonth = latestMonth > thisMonth() ? latestMonth : thisMonth();
 
     const docPage = need(documents);
+    const notified = need(notifications);
     return {
         settings: deployment,
         // The newest card statements, newest first: a window, not all of them, though years of them
@@ -61,6 +63,10 @@ export const load = (async ({ fetch, depends }) => {
         pending: need(pending).items,
         // Counts over every document, not the window.
         documentsByState: docPage.byState,
+        // What needs the owner and is not resolved (internal/notify): the overview's attention list, and
+        // how many the owner has not seen, beside the link to /notifications.
+        notifications: notified.items,
+        unread: notified.unread,
         latestMonth,
         months: monthsBetween(oldest, newestMonth),
     };

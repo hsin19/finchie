@@ -48,9 +48,9 @@ func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv2.P
 var _ StrictServerInterface = (*Server)(nil)
 
 // Register mounts the API. Use it instead of the generated RegisterHandlers, which would leave out
-// notMultipartIsBadRequest.
+// notMultipartIsBadRequest and notifyAfterChanges.
 func Register(router EchoRouter, server *Server) {
-	RegisterHandlersWithOptions(router, NewStrictHandler(server, nil), RegisterHandlersOptions{
+	RegisterHandlersWithOptions(router, NewStrictHandler(server, []StrictMiddlewareFunc{notifyAfterChanges(server.pool)}), RegisterHandlersOptions{
 		OperationMiddlewares: map[string][]echo.MiddlewareFunc{"uploadDocument": {notMultipartIsBadRequest}},
 	})
 }

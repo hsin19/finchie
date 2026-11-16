@@ -165,6 +165,33 @@ func (e HistoryStep) Valid() bool {
 	}
 }
 
+// Defines values for NotificationKind.
+const (
+	NotificationKindDocument  NotificationKind = "document"
+	NotificationKindGap       NotificationKind = "gap"
+	NotificationKindLapsing   NotificationKind = "lapsing"
+	NotificationKindOverdue   NotificationKind = "overdue"
+	NotificationKindShortfall NotificationKind = "shortfall"
+)
+
+// Valid indicates whether the value is a known member of the NotificationKind enum.
+func (e NotificationKind) Valid() bool {
+	switch e {
+	case NotificationKindDocument:
+		return true
+	case NotificationKindGap:
+		return true
+	case NotificationKindLapsing:
+		return true
+	case NotificationKindOverdue:
+		return true
+	case NotificationKindShortfall:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PriceSource.
 const (
 	Binance PriceSource = "binance"
@@ -333,8 +360,15 @@ type Account struct {
 	// leave the account the newest of them a deposit line showed paid left (ADR 0016)
 	Debits *[]Debit `json:"debits,omitempty"`
 
+	// Excused It would be overdue, but `checkAgainOn` is still ahead
+	Excused bool `json:"excused"`
+
 	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
 	Expiries []Expiry `json:"expiries"`
+
+	// FreshFor How many days its source may take before its newest balance is overdue: 50 for statements, 1 for an
+	// exchange's readings. Confirming it is current puts the next look that far off by default
+	FreshFor int `json:"freshFor"`
 
 	// FullNumber Its full number, where the owner gave one (ADR 0016)
 	FullNumber *string      `json:"fullNumber,omitempty"`
@@ -361,10 +395,23 @@ type Account struct {
 	// Name The owner's name for it
 	Name *string `json:"name,omitempty"`
 
+	// NextLapse The soonest of an account's points to lapse from today on: by its program's rule (`estimated`), or as its newest report says (ADR 0019)
+	NextLapse *NextLapse `json:"nextLapse,omitempty"`
+
 	// Number As printed, usually masked; empty for a bank's card or points account
 	//
 	// Example: 1234567***890
 	Number string `json:"number"`
+
+	// Overdue Nothing new for longer than its source takes (`freshFor`), and no `checkAgainOn` still ahead.
+	// Never for an account the owner keeps
+	Overdue bool `json:"overdue"`
+
+	// Shortfalls A deposit account's: where its newest balance in a unit does not cover the card bills its autopay
+	// takes after it (`debits`), while one of them is still to come out, due today or later. An
+	// estimate, since what came in after that balance shows only in the next statement; none while
+	// it is overdue
+	Shortfalls *[]Shortfall `json:"shortfalls,omitempty"`
 
 	// Side A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)
 	Side AccountSide `json:"side"`
@@ -416,11 +463,18 @@ type AccountDetail struct {
 	// leave the account the newest of them a deposit line showed paid left (ADR 0016)
 	Debits *[]Debit `json:"debits,omitempty"`
 
+	// Excused It would be overdue, but `checkAgainOn` is still ahead
+	Excused bool `json:"excused"`
+
 	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
 	Expiries []Expiry `json:"expiries"`
 
 	// Fills The owner's fills of its gaps that count, newest first: the gaps they fill are not in `gaps`
 	Fills []GapFill `json:"fills"`
+
+	// FreshFor How many days its source may take before its newest balance is overdue: 50 for statements, 1 for an
+	// exchange's readings. Confirming it is current puts the next look that far off by default
+	FreshFor int `json:"freshFor"`
 
 	// FullNumber Its full number, where the owner gave one (ADR 0016)
 	FullNumber *string      `json:"fullNumber,omitempty"`
@@ -450,13 +504,26 @@ type AccountDetail struct {
 	// Name The owner's name for it
 	Name *string `json:"name,omitempty"`
 
+	// NextLapse The soonest of an account's points to lapse from today on: by its program's rule (`estimated`), or as its newest report says (ADR 0019)
+	NextLapse *NextLapse `json:"nextLapse,omitempty"`
+
 	// Number As printed, usually masked; empty for a bank's card or points account
 	//
 	// Example: 1234567***890
 	Number string `json:"number"`
 
+	// Overdue Nothing new for longer than its source takes (`freshFor`), and no `checkAgainOn` still ahead.
+	// Never for an account the owner keeps
+	Overdue bool `json:"overdue"`
+
 	// Positions A securities account's: every security it holds or has traded, by name (ADR 0017)
 	Positions *[]Position `json:"positions,omitempty"`
+
+	// Shortfalls A deposit account's: where its newest balance in a unit does not cover the card bills its autopay
+	// takes after it (`debits`), while one of them is still to come out, due today or later. An
+	// estimate, since what came in after that balance shows only in the next statement; none while
+	// it is overdue
+	Shortfalls *[]Shortfall `json:"shortfalls,omitempty"`
 
 	// Side A liability's balances are what is owed, as printed; its worth is negative (ADR 0022)
 	Side AccountSide `json:"side"`
@@ -909,6 +976,110 @@ type NetWorthPoint struct {
 	Unvalued int                `json:"unvalued"`
 }
 
+// NextLapse The soonest of an account's points to lapse from today on: by its program's rule (`estimated`), or as its newest report says (ADR 0019)
+type NextLapse struct {
+	// Amount Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Amount    Decimal            `json:"amount"`
+	By        openapi_types.Date `json:"by"`
+	Estimated bool               `json:"estimated"`
+
+	// Soon Within 60 days of today
+	Soon bool `json:"soon"`
+
+	// Unit Example: e point
+	Unit string `json:"unit"`
+}
+
+// Notification One thing that needs the owner, with what was so when it was raised; its details are the ones of
+// its kind. A situation that changes, such as a newer balance that still does not cover a bill,
+// is a new one.
+type Notification struct {
+	// Account The account it is about, as it is named now
+	Account *NotificationAccount `json:"account,omitempty"`
+
+	// Document The document it is about, as it stood when raised; its id is gone once the document is deleted
+	Document *NotificationDocument `json:"document,omitempty"`
+
+	// Gap Two consecutive balances in one unit that the lines between them do not join
+	Gap *BalanceGap `json:"gap,omitempty"`
+
+	// HandledAt When the owner said it is dealt with
+	HandledAt *time.Time `json:"handledAt,omitempty"`
+	Id        int64      `json:"id"`
+
+	// Kind In the order to deal with them: an autopay that may not cover the card bills it is to take, a
+	// document whose statement does not add up or that failed, an account whose balances do not join
+	// up, an account whose source has gone quiet, points about to lapse
+	Kind NotificationKind `json:"kind"`
+
+	// Lapsing The soonest of an account's points to lapse from today on: by its program's rule (`estimated`), or as its newest report says (ADR 0019)
+	Lapsing *NextLapse `json:"lapsing,omitempty"`
+
+	// Newest An overdue account's newest balance's day
+	Newest   *openapi_types.Date `json:"newest,omitempty"`
+	RaisedAt time.Time           `json:"raisedAt"`
+	ReadAt   *time.Time          `json:"readAt,omitempty"`
+
+	// ResolvedAt When it stopped being so
+	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+
+	// Shortfall What a deposit account's newest balance in a unit lacks to cover the card bills its autopay takes after it
+	Shortfall *Shortfall `json:"shortfall,omitempty"`
+}
+
+// NotificationAccount The account it is about, as it is named now
+type NotificationAccount struct {
+	Id          int64       `json:"id"`
+	Institution string      `json:"institution"`
+	Kind        AccountKind `json:"kind"`
+	Label       *string     `json:"label,omitempty"`
+	Name        *string     `json:"name,omitempty"`
+}
+
+// NotificationDocument The document it is about, as it stood when raised; its id is gone once the document is deleted
+type NotificationDocument struct {
+	// Failure Why a document could not be parsed: what has to change first. unsupported: no parser
+	// handles it (the document is skipped). locked: its PDF needs a password the parser lacks.
+	// unreadable: it is no e-mail, or cannot be read as one. layout: its layout is not the one
+	// the parser knows. unavailable: the parser could not be reached in time; the backend tries
+	// again by itself. invalid_response: the parser broke its contract. other: anything else.
+	Failure  *DocumentFailure `json:"failure,omitempty"`
+	Filename string           `json:"filename"`
+	Id       *int64           `json:"id,omitempty"`
+
+	// Status pending: queued or being parsed. parsed: reconciled. needs_review: parsed but the
+	// transactions don't add up to the statement. duplicate: the same statement came from
+	// another document (`duplicateOf`). failed: it could not be parsed (`failure`, `error`).
+	// skipped: no parser handles it, so there is nothing to fix or retry.
+	Status DocumentStatus `json:"status"`
+}
+
+// NotificationHandle defines model for NotificationHandle.
+type NotificationHandle struct {
+	Handled bool    `json:"handled"`
+	Ids     []int64 `json:"ids"`
+}
+
+// NotificationIds defines model for NotificationIds.
+type NotificationIds struct {
+	Ids []int64 `json:"ids"`
+}
+
+// NotificationKind In the order to deal with them: an autopay that may not cover the card bills it is to take, a
+// document whose statement does not add up or that failed, an account whose balances do not join
+// up, an account whose source has gone quiet, points about to lapse
+type NotificationKind string
+
+// NotificationList defines model for NotificationList.
+type NotificationList struct {
+	Items []Notification `json:"items"`
+
+	// Unread Open ones neither read nor handled, whatever `open` and the limit
+	Unread int `json:"unread"`
+}
+
 // PointsLot Points that lapse together (ADR 0019)
 type PointsLot struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
@@ -998,11 +1169,38 @@ type Settings struct {
 	// BaseCurrency What every worth is in, e.g. TWD
 	BaseCurrency string `json:"baseCurrency"`
 
+	// LapseSoonDays How near points to lapse are soon enough to stand out
+	LapseSoonDays int `json:"lapseSoonDays"`
+
 	// MaxUploadBytes The largest file an upload may be (BACKEND_MAX_UPLOAD_MB)
 	MaxUploadBytes int64 `json:"maxUploadBytes"`
 
 	// SourceIntervalHours How often rates, closes, and exchanges are read
 	SourceIntervalHours int `json:"sourceIntervalHours"`
+}
+
+// Shortfall What a deposit account's newest balance in a unit lacks to cover the card bills its autopay takes after it
+type Shortfall struct {
+	AsOf openapi_types.Date `json:"asOf"`
+
+	// Balance Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Balance Decimal `json:"balance"`
+
+	// Debits The bills, soonest due first
+	Debits []Debit `json:"debits"`
+
+	// Lacks Decimal number as a string, e.g. "-6552.97"
+	//
+	// Example: 1234.50
+	Lacks Decimal `json:"lacks"`
+
+	// Owed What the bills come to
+	Owed Decimal `json:"owed"`
+
+	// Unit Example: TWD
+	Unit string `json:"unit"`
 }
 
 // StateCount defines model for StateCount.
@@ -1293,6 +1491,12 @@ type GetNetWorthHistoryParams struct {
 	Step *HistoryStep        `form:"step,omitempty" json:"step,omitempty"`
 }
 
+// ListNotificationsParams defines parameters for ListNotifications.
+type ListNotificationsParams struct {
+	Open  *bool  `form:"open,omitempty" json:"open,omitempty"`
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListStatementsParams defines parameters for ListStatements.
 type ListStatementsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1362,6 +1566,12 @@ type UpdateHoldingsJSONRequestBody = HoldingsUpdate
 
 // UploadDocumentMultipartRequestBody defines body for UploadDocument for multipart/form-data ContentType.
 type UploadDocumentMultipartRequestBody UploadDocumentMultipartBody
+
+// HandleNotificationsJSONRequestBody defines body for HandleNotifications for application/json ContentType.
+type HandleNotificationsJSONRequestBody = NotificationHandle
+
+// ReadNotificationsJSONRequestBody defines body for ReadNotifications for application/json ContentType.
+type ReadNotificationsJSONRequestBody = NotificationIds
 
 // SetUnitPriceJSONRequestBody defines body for SetUnitPrice for application/json ContentType.
 type SetUnitPriceJSONRequestBody = UnitPriceUpdate
@@ -1434,6 +1644,15 @@ type ServerInterface interface {
 	// GetNetWorthHistory Net worth over time, by day or by month end
 	// (GET /api/net-worth/history)
 	GetNetWorthHistory(ctx *echo.Context, params GetNetWorthHistoryParams) error
+	// ListNotifications What needs the owner, newest first
+	// (GET /api/notifications)
+	ListNotifications(ctx *echo.Context, params ListNotificationsParams) error
+	// HandleNotifications Say notifications are dealt with, or take that back
+	// (POST /api/notifications/handle)
+	HandleNotifications(ctx *echo.Context) error
+	// ReadNotifications Mark notifications read
+	// (POST /api/notifications/read)
+	ReadNotifications(ctx *echo.Context) error
 	// GetSettings The deployment's settings the web app shows or obeys
 	// (GET /api/settings)
 	GetSettings(ctx *echo.Context) error
@@ -1880,6 +2099,49 @@ func (w *ServerInterfaceWrapper) GetNetWorthHistory(ctx *echo.Context) error {
 	return err
 }
 
+// ListNotifications converts echo context to params.
+func (w *ServerInterfaceWrapper) ListNotifications(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNotificationsParams
+	// ------------- Optional query parameter "open" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "open", ctx.QueryParams(), &params.Open, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter open: %s", err))
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", ctx.QueryParams(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter limit: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ListNotifications(ctx, params)
+	return err
+}
+
+// HandleNotifications converts echo context to params.
+func (w *ServerInterfaceWrapper) HandleNotifications(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.HandleNotifications(ctx)
+	return err
+}
+
+// ReadNotifications converts echo context to params.
+func (w *ServerInterfaceWrapper) ReadNotifications(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.ReadNotifications(ctx)
+	return err
+}
+
 // GetSettings converts echo context to params.
 func (w *ServerInterfaceWrapper) GetSettings(ctx *echo.Context) error {
 	var err error
@@ -2192,6 +2454,9 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
 	router.GET(options.BaseURL+"/api/net-worth", wrapper.GetNetWorth, options.OperationMiddlewares["getNetWorth"]...)
 	router.GET(options.BaseURL+"/api/net-worth/history", wrapper.GetNetWorthHistory, options.OperationMiddlewares["getNetWorthHistory"]...)
+	router.GET(options.BaseURL+"/api/notifications", wrapper.ListNotifications, options.OperationMiddlewares["listNotifications"]...)
+	router.POST(options.BaseURL+"/api/notifications/read", wrapper.ReadNotifications, options.OperationMiddlewares["readNotifications"]...)
+	router.POST(options.BaseURL+"/api/notifications/handle", wrapper.HandleNotifications, options.OperationMiddlewares["handleNotifications"]...)
 	router.GET(options.BaseURL+"/api/settings", wrapper.GetSettings, options.OperationMiddlewares["getSettings"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
@@ -3272,6 +3537,60 @@ func (response GetNetWorthHistory400JSONResponse) VisitGetNetWorthHistoryRespons
 	return err
 }
 
+type ListNotificationsRequestObject struct {
+	Params ListNotificationsParams
+}
+
+type ListNotificationsResponseObject interface {
+	VisitListNotificationsResponse(w http.ResponseWriter) error
+}
+
+type ListNotifications200JSONResponse NotificationList
+
+func (response ListNotifications200JSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HandleNotificationsRequestObject struct {
+	Body *HandleNotificationsJSONRequestBody
+}
+
+type HandleNotificationsResponseObject interface {
+	VisitHandleNotificationsResponse(w http.ResponseWriter) error
+}
+
+type HandleNotifications204Response struct {
+}
+
+func (response HandleNotifications204Response) VisitHandleNotificationsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReadNotificationsRequestObject struct {
+	Body *ReadNotificationsJSONRequestBody
+}
+
+type ReadNotificationsResponseObject interface {
+	VisitReadNotificationsResponse(w http.ResponseWriter) error
+}
+
+type ReadNotifications204Response struct {
+}
+
+func (response ReadNotifications204Response) VisitReadNotificationsResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
 type GetSettingsRequestObject struct {
 }
 
@@ -3610,6 +3929,15 @@ type StrictServerInterface interface {
 	// GetNetWorthHistory Net worth over time, by day or by month end
 	// (GET /api/net-worth/history)
 	GetNetWorthHistory(ctx context.Context, request GetNetWorthHistoryRequestObject) (GetNetWorthHistoryResponseObject, error)
+	// ListNotifications What needs the owner, newest first
+	// (GET /api/notifications)
+	ListNotifications(ctx context.Context, request ListNotificationsRequestObject) (ListNotificationsResponseObject, error)
+	// HandleNotifications Say notifications are dealt with, or take that back
+	// (POST /api/notifications/handle)
+	HandleNotifications(ctx context.Context, request HandleNotificationsRequestObject) (HandleNotificationsResponseObject, error)
+	// ReadNotifications Mark notifications read
+	// (POST /api/notifications/read)
+	ReadNotifications(ctx context.Context, request ReadNotificationsRequestObject) (ReadNotificationsResponseObject, error)
 	// GetSettings The deployment's settings the web app shows or obeys
 	// (GET /api/settings)
 	GetSettings(ctx context.Context, request GetSettingsRequestObject) (GetSettingsResponseObject, error)
@@ -4312,6 +4640,123 @@ func (sh *strictHandler) GetNetWorthHistory(ctx *echo.Context, params GetNetWort
 		return err
 	} else if validResponse, ok := response.(GetNetWorthHistoryResponseObject); ok {
 		return validResponse.VisitGetNetWorthHistoryResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ListNotifications operation middleware
+func (sh *strictHandler) ListNotifications(ctx *echo.Context, params ListNotificationsParams) error {
+	var request ListNotificationsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNotifications(ctx.Request().Context(), request.(ListNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNotifications")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ListNotificationsResponseObject); ok {
+		return validResponse.VisitListNotificationsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// HandleNotifications operation middleware
+func (sh *strictHandler) HandleNotifications(ctx *echo.Context) error {
+	var request HandleNotificationsRequestObject
+
+	var body HandleNotificationsJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.HandleNotifications(ctx.Request().Context(), request.(HandleNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "HandleNotifications")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(HandleNotificationsResponseObject); ok {
+		return validResponse.VisitHandleNotificationsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// ReadNotifications operation middleware
+func (sh *strictHandler) ReadNotifications(ctx *echo.Context) error {
+	var request ReadNotificationsRequestObject
+
+	var body ReadNotificationsJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ReadNotifications(ctx.Request().Context(), request.(ReadNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReadNotifications")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(ReadNotificationsResponseObject); ok {
+		return validResponse.VisitReadNotificationsResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

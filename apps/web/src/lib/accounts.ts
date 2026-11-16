@@ -2,7 +2,6 @@ import type {
     Account,
     AccountKind,
     Balance,
-    Debit,
     Position,
     Price,
     PriceSource,
@@ -25,7 +24,6 @@ import {
     roundWhole,
     sign,
     subtract,
-    sum,
 } from "#lib/money.js";
 import { resolve } from "$app/paths";
 import type { ResolvedPathname } from "$app/types";
@@ -211,41 +209,13 @@ export function shownNumber(account: Pick<Account, "number" | "fullNumber">): st
     return account.fullNumber ?? account.number;
 }
 
-/** Points to lapse by a day: worked out by the program's rule (`estimated`), or as the newest bill says. */
-export interface NextLapse {
-    unit: string;
-    amount: string;
-    by: string;
-    estimated: boolean;
-}
-
 /**
- * The soonest points to lapse from `today` on, of the account's lots by their program's rule (ADR 0019)
- * and what its newest bills say will lapse; none when neither has any. The soonest wins: a bill may know
- * of lapses the rule cannot place, points held from before the first bill.
+ * Whether points lapse within `days` (the deployment's `lapseSoonDays`) of `today`, YYYY-MM-DD: soon
+ * enough to stand out.
  */
-export function nextLapse(account: Pick<Account, "lots" | "expiries">, today: string): NextLapse | undefined {
-    const ahead: NextLapse[] = [
-        ...(account.lots ?? []).filter(l => l.by >= today).map(l => ({ unit: l.unit, amount: l.amount, by: l.by, estimated: true })),
-        ...account.expiries.map(e => ({ unit: e.unit, amount: e.amount, by: e.by, estimated: false })),
-    ];
-    return ahead.sort((a, b) => a.by.localeCompare(b.by) || Number(a.estimated) - Number(b.estimated))[0];
+export function lapsesSoon(by: string, today: string, days: number): boolean {
+    return by <= addDays(today, days);
 }
-
-/** Whether points lapse within this many days of `today` (YYYY-MM-DD): soon enough to stand out. */
-export function lapsesSoon(by: string, today: string, days = 60): boolean {
-    const limit = new Date(`${today}T00:00:00Z`);
-    limit.setUTCDate(limit.getUTCDate() + days);
-    return by <= limit.toISOString().slice(0, 10);
-}
-
-/**
- * A statement comes monthly, and up to about three weeks after it closes (台新's took 16 days in 2026,
- * 中信's 20 after month end): past this, one that should have come has not.
- */
-const STATEMENT_DAYS = 50;
-/** An exchange is read every few hours (ADR 0018). */
-const SNAPSHOT_DAYS = 1;
 
 export interface AccountStatus {
     /** The day of its newest balance, and how many days before `today` that was. */
@@ -253,7 +223,8 @@ export interface AccountStatus {
     days?: number;
     /**
      * Nothing new for longer than its source takes, and no day still ahead that the owner said to look again
-     * on. Why is not said: a bank sends nothing for a month without a line, which is what that day is for.
+     * on (the backend's `overdue`). Why is not said: a bank sends nothing for a month without a line, which
+     * is what that day is for.
      */
     stale: boolean;
     /** It would be overdue, but the owner said to look again on a day still ahead (`checkAgainOn`). */
@@ -266,67 +237,27 @@ export interface AccountStatus {
     checked: boolean;
 }
 
-/** How many days its source takes at most before an account of the kind is overdue. */
-const overdueAfter = (kind: AccountKind) => (kind === "exchange" ? SNAPSHOT_DAYS : STATEMENT_DAYS);
-
 /**
  * The day to look again that confirming an account is current gives: as long from today as its source
- * may take. The owner can give a later one, far off for an account that never moves.
+ * may take (`freshFor`). The owner can give a later one, far off for an account that never moves.
  */
-export function checkAgainDefault(account: Pick<Account, "kind">, today: string): string {
-    return addDays(today, overdueAfter(account.kind));
+export function checkAgainDefault(account: Pick<Account, "freshFor">, today: string): string {
+    return addDays(today, account.freshFor);
 }
 
 /**
- * How current an account is and whether it joins up. One the owner keeps is as old as they leave it; one
- * they said to look at again on a day still ahead is not overdue until then.
+ * How current an account is and whether it joins up, as the backend works it out. One the owner keeps is
+ * as old as they leave it.
  */
 export function accountStatus(account: Account, today: string): AccountStatus {
-    const status: AccountStatus = { stale: false, excused: false, gaps: account.gaps.length, checked: account.continuity === "checked" };
+    const status: AccountStatus = { stale: account.overdue, excused: account.excused, gaps: account.gaps.length, checked: account.continuity === "checked" };
     const asOf = account.balances.map(b => b.asOf).sort().at(-1);
     if (!asOf) return status;
-    const days = Math.round((Date.parse(today) - Date.parse(asOf)) / 86_400_000);
     status.asOf = asOf;
-    status.days = days;
-    if (isOwned(account)) {
-        status.note = "手動";
-        return status;
-    }
-    const overdue = days > overdueAfter(account.kind);
-    status.excused = overdue && account.checkAgainOn !== undefined && today < account.checkAgainOn;
-    status.stale = overdue && !status.excused;
-    if (status.excused) status.note = `確認過沒變 · ${yearlyDate(account.checkAgainOn!, today)} 再提醒`;
+    status.days = Math.round((Date.parse(today) - Date.parse(asOf)) / 86_400_000);
+    if (isOwned(account)) status.note = "手動";
+    else if (status.excused) status.note = `確認過沒變 · ${yearlyDate(account.checkAgainOn!, today)} 再提醒`;
     return status;
-}
-
-/** What a deposit account's newest balance in a unit lacks to cover the card bills its autopay takes after it. */
-export interface Shortfall {
-    unit: string;
-    asOf: string;
-    balance: string;
-    /** The bills, soonest due first, and what they come to. */
-    debits: Debit[];
-    owed: string;
-    lacks: string;
-}
-
-/**
- * Where an account's newest balance does not cover the card bills its autopay takes after it (`debits`),
- * while one of them is still to come out, today or later. An estimate: what came in since that balance
- * shows only in the next statement. None for an overdue account, whose balance is too old to tell by; it
- * is flagged as overdue instead.
- */
-export function shortfalls(account: Account, today: string): Shortfall[] {
-    const all = account.debits ?? [];
-    if (all.length === 0 || accountStatus(account, today).stale) return [];
-    return [...new Set(all.map(d => d.unit))].flatMap(unit => {
-        const debits = all.filter(d => d.unit === unit);
-        const held = account.balances.find(b => b.unit === unit);
-        if (!held || !debits.some(d => !d.paidOn && d.dueDate >= today)) return [];
-        const owed = sum(debits.map(d => d.amount));
-        const lacks = subtract(owed, held.amount);
-        return sign(lacks) > 0 ? [{ unit, asOf: held.asOf, balance: held.amount, debits, owed, lacks }] : [];
-    });
 }
 
 /** "今天", "昨天", "41 天前". */
