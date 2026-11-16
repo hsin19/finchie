@@ -1,5 +1,13 @@
 <script lang="ts">
 import Dot from "#lib/components/Dot.svelte";
+import Key from "#lib/components/Key.svelte";
+import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
+import Bell from "@lucide/svelte/icons/bell";
+import FileText from "@lucide/svelte/icons/file-text";
+import House from "@lucide/svelte/icons/house";
+import ReceiptText from "@lucide/svelte/icons/receipt-text";
+import Wallet from "@lucide/svelte/icons/wallet";
+import type { Component } from "svelte";
 import "./layout.css";
 import {
     api,
@@ -82,18 +90,18 @@ let palette = $state(false);
 
 // Switching between statements and transactions keeps the selected month; the overview has none.
 const carried = $derived(carriedLinks(page.route.id, page.url.searchParams));
-type NavItem = { key: KeyOf<"global">; label: string; href: ResolvedPathname; current: boolean; };
+type NavItem = { key: KeyOf<"global">; label: string; href: ResolvedPathname; current: boolean; icon: Component<{ class?: string; }>; };
 const pages: NavItem[] = $derived([
-    { key: "o", label: "總覽", href: resolve("/"), current: page.route.id === "/" },
-    { key: "s", label: "帳單", href: carried.statements, current: /^\/statements/.test(page.route.id ?? "") },
-    { key: "t", label: "交易", href: carried.transactions, current: page.route.id === "/transactions" },
-    { key: "a", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? "") },
+    { key: "o", label: "總覽", href: resolve("/"), current: page.route.id === "/", icon: House },
+    { key: "s", label: "帳單", href: carried.statements, current: /^\/statements/.test(page.route.id ?? ""), icon: ReceiptText },
+    { key: "t", label: "交易", href: carried.transactions, current: page.route.id === "/transactions", icon: ArrowLeftRight },
+    { key: "a", label: "帳戶", href: resolve("/accounts"), current: /^\/accounts/.test(page.route.id ?? ""), icon: Wallet },
 ]);
 // Documents arrive by mail by themselves: their page is for an upload by hand or a look at what parsing
 // gave, so it is a link of its own, not a tab. What needs a look there the overview says.
-const documents: NavItem = $derived({ key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? "") });
+const documents: NavItem = $derived({ key: "d", label: "文件", href: resolve("/documents"), current: /^\/documents/.test(page.route.id ?? ""), icon: FileText });
 // What needs the owner the overview puts first; the link counts what they have not seen yet.
-const notifications: NavItem = $derived({ key: "i", label: "通知", href: resolve("/notifications"), current: page.route.id === "/notifications" });
+const notifications: NavItem = $derived({ key: "i", label: "通知", href: resolve("/notifications"), current: page.route.id === "/notifications", icon: Bell });
 const nav = $derived([...pages, documents, notifications]);
 
 const prompt = $derived(commandLine(page.url.pathname, page.url.searchParams, (page.data as { command?: string; }).command));
@@ -156,7 +164,7 @@ function onkeydown(event: KeyboardEvent) {
      keeps what scrolls past from showing through the clock. In a browser tab the inset is 0. -->
 <div class="fixed inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] bg-ground"></div>
 
-<div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-[calc(env(safe-area-inset-top)+0.875rem)] pb-28 md:px-5 md:pt-[calc(env(safe-area-inset-top)+1.25rem)] md:pb-6">
+<div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-[calc(env(safe-area-inset-top)+0.875rem)] pb-[calc(env(safe-area-inset-bottom)+4.5rem)] md:px-5 md:pt-[calc(env(safe-area-inset-top)+1.25rem)] md:pb-6">
     <!-- One line at any width: the command gives way, cut short, and the links stay at the top right. -->
     <header class="flex items-center gap-x-3 border-b border-line pb-2.5 md:panel md:gap-x-4 md:px-3.5 md:py-2.5">
         <div class="min-w-0 flex-1 truncate text-[14px]">
@@ -179,7 +187,7 @@ function onkeydown(event: KeyboardEvent) {
             aria-current={documents.current ? "page" : undefined}
             class="flex min-h-9 shrink-0 items-center gap-1.5 text-[12px] md:text-[13px] {documents.current ? 'text-ink' : 'text-dim hover:text-ink'}"
         >
-            <span class="hidden text-accent md:inline">[{documents.key}]</span>{documents.label}
+            <Key hint={documents.key} icon={documents.icon} />{documents.label}
             {#if data.pending.length > 0}<span class="text-accent"><Dot /> {data.pending.length}</span>{/if}
         </a>
         <a
@@ -187,7 +195,7 @@ function onkeydown(event: KeyboardEvent) {
             aria-current={notifications.current ? "page" : undefined}
             class="flex min-h-9 shrink-0 items-center gap-1.5 text-[12px] md:text-[13px] {notifications.current ? 'text-ink' : 'text-dim hover:text-ink'}"
         >
-            <span class="hidden text-accent md:inline">[{notifications.key}]</span>{notifications.label}
+            <Key hint={notifications.key} icon={notifications.icon} />{notifications.label}
             {#if data.unread > 0}<span class="text-neg" title="還沒看過的通知"><Dot /> {data.unread}</span>{/if}
         </a>
     </header>
@@ -214,14 +222,15 @@ function onkeydown(event: KeyboardEvent) {
     </footer>
 </div>
 
-<nav aria-label="主要" class="fixed inset-x-0 bottom-0 z-10 grid grid-cols-4 border-t border-line bg-panel pb-[max(env(safe-area-inset-bottom),12px)] md:hidden">
+<!-- About as much room below the labels as above them: a touch more, or what the phone keeps for its home indicator. -->
+<nav aria-label="主要" class="fixed inset-x-0 bottom-0 z-10 grid grid-cols-4 border-t border-line bg-panel pb-[max(env(safe-area-inset-bottom),4px)] md:hidden">
     {#each pages as item (item.key)}
         <a
             href={item.href}
             aria-current={item.current ? "page" : undefined}
             class="flex min-h-14 flex-col items-center justify-center gap-0.5 border-t-2 {item.current ? 'border-accent text-accent' : 'border-transparent text-dim'}"
         >
-            <span class="text-[12px] font-bold">[{item.key}]</span>
+            <item.icon class="size-5" />
             <span class="text-[11px]">{item.label}</span>
         </a>
     {/each}

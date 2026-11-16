@@ -7,6 +7,7 @@ import {
 import { reparse } from "#lib/api/mutations.js";
 import Bar from "#lib/components/Bar.svelte";
 import Dot from "#lib/components/Dot.svelte";
+import Key from "#lib/components/Key.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import { formatBytes } from "#lib/dates.js";
 import {
@@ -26,6 +27,7 @@ import {
 import { resolve } from "$app/paths";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import Download from "@lucide/svelte/icons/download";
+import UploadIcon from "@lucide/svelte/icons/upload";
 
 /**
  * Where statement e-mails are dropped, and how each upload of this visit goes. `documents` and
@@ -121,7 +123,7 @@ onKeys("documents", {
         <div class="font-bold">把帳單 e-mail（.eml）拖到這裡</div>
         <div class="text-[12px] text-dim">只收 e-mail，手動轉寄的也行 · 一次可以多個檔案 · 單檔上限 {formatBytes(maxBytes)} · 同一個檔案重複上傳不會重複入帳</div>
     </div>
-    <button type="button" class="control min-h-10 border-accent" onclick={() => input?.click()}><span class="text-accent">[enter]</span> 選擇檔案</button>
+    <button type="button" class="control min-h-10 border-accent" onclick={() => input?.click()}><Key hint="enter" icon={UploadIcon} /> 選擇檔案</button>
     <input
         bind:this={input}
         type="file"

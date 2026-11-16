@@ -7,6 +7,7 @@ import {
     type TransactionSort,
 } from "#lib/api/client.js";
 import Dialog from "#lib/components/Dialog.svelte";
+import Key from "#lib/components/Key.svelte";
 import { documentsById } from "#lib/documents.js";
 import {
     type FilterChanges,
@@ -27,7 +28,10 @@ import {
 } from "$app/navigation";
 import { page } from "$app/state";
 import ChevronDown from "@lucide/svelte/icons/chevron-down";
+import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import ChevronUp from "@lucide/svelte/icons/chevron-up";
+import X from "@lucide/svelte/icons/x";
 import type { PageProps } from "./$types";
 import TransactionDetail from "./TransactionDetail.svelte";
 import TransactionFilters from "./TransactionFilters.svelte";
@@ -172,8 +176,8 @@ onKeys("transactions", {
             <span>{first}–{last} / {data.result.total}</span>
             <span class="flex items-center gap-2">
                 <span class="hidden lg:inline"><span class="text-accent">[j/k]</span> 上下移動 · <span class="text-accent">[enter]</span> 詳細 ·</span>
-                <button type="button" class="control min-h-8" disabled={filters.page <= 1} onclick={() => goPage(filters.page - 1)}><span class="text-accent">[p]</span> prev</button>
-                <button type="button" class="control min-h-8" disabled={filters.page >= pages} onclick={() => goPage(filters.page + 1)}><span class="text-accent">[n]</span> next</button>
+                <button type="button" class="control min-h-8" disabled={filters.page <= 1} onclick={() => goPage(filters.page - 1)}><Key hint="p" icon={ChevronLeft} /> prev</button>
+                <button type="button" class="control min-h-8" disabled={filters.page >= pages} onclick={() => goPage(filters.page + 1)}><Key hint="n" /> next <ChevronRight class="md:hidden" /></button>
             </span>
         </div>
     </TransactionList>
@@ -182,7 +186,7 @@ onKeys("transactions", {
         <aside aria-label="交易詳細" class="panel hidden self-start p-3.5 lg:sticky lg:top-3 lg:block">
             <div class="mb-3 flex items-center justify-between">
                 <h2 class="label">TXN #{selected.id}</h2>
-                <button type="button" class="text-mute hover:text-ink" aria-label="關閉詳細" onclick={() => (selectedId = undefined)}><span class="text-accent">[x]</span></button>
+                <button type="button" class="text-mute hover:text-ink" aria-label="關閉詳細" onclick={() => (selectedId = undefined)}><Key hint="x" icon={X} /></button>
             </div>
             <TransactionDetail t={selected} {family} {statements} {documents} {base} />
         </aside>
@@ -193,7 +197,7 @@ onKeys("transactions", {
     {#if selected}
         <div class="flex items-center justify-between border-b border-line px-4 py-3">
             <h2 class="label">TXN #{selected.id}</h2>
-            <button type="button" class="text-mute" aria-label="關閉" onclick={() => (sheet = false)}><span class="text-accent">[esc]</span></button>
+            <button type="button" class="text-mute" aria-label="關閉" onclick={() => (sheet = false)}><Key hint="esc" icon={X} /></button>
         </div>
         <div class="p-4"><TransactionDetail t={selected} {family} {statements} {documents} {base} /></div>
     {/if}

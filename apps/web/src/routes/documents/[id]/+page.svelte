@@ -6,6 +6,7 @@ import {
 } from "#lib/api/client.js";
 import { deleteDocument } from "#lib/api/mutations.js";
 import Dialog from "#lib/components/Dialog.svelte";
+import Key from "#lib/components/Key.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import {
     formatBytes,
@@ -18,6 +19,9 @@ import { resolve } from "$app/paths";
 import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import Download from "@lucide/svelte/icons/download";
+import FileText from "@lucide/svelte/icons/file-text";
+import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+import X from "@lucide/svelte/icons/x";
 import type { PageProps } from "./$types";
 
 let { data }: PageProps = $props();
@@ -94,7 +98,7 @@ onKeys("document", {
         <h2 class="label">PARSE · 解析結果</h2>
         {#if reparse.askedAt && !parsing}<span class="ml-auto text-[12px] text-mute">{reparse.askedAt} 重新解析完成</span>{/if}
         <button type="button" class="control min-h-9" disabled={parsing} onclick={() => void reparse.run()}>
-            <span class="text-accent">[r]</span> {parsing ? "解析中…" : "重新解析"}
+            <Key hint="r" icon={RefreshCw} /> {parsing ? "解析中…" : "重新解析"}
         </button>
     </div>
     <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
@@ -150,11 +154,12 @@ onKeys("document", {
         {/if}
         {#each files as file (file.index)}
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t border-rule py-2 first-of-type:border-t-0">
-                <span class="w-[3ch] text-accent">{file.index < 9 ? `[${file.index + 1}]` : ""}</span>
+                <!-- A file's key where there is a keyboard; on a phone, nothing to press, so no column for it. -->
+                <span class="hidden w-[3ch] text-accent md:inline">{file.index < 9 ? `[${file.index + 1}]` : ""}</span>
                 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an API URL, not a route -->
                 <a href={previewFileUrl(doc.id, file.index)} target="_blank" rel="noreferrer" data-sveltekit-reload class="min-w-0 grow break-all text-ink hover:text-accent">{file.filename}</a>
                 <span class="text-[12px] {file.locked ? 'text-neg' : 'text-mute'}">
-                    {#if file.primary}<span class="text-accent">[f]</span> 帳單 ·{/if}
+                    {#if file.primary}<Key hint="f" icon={FileText} /> 帳單 ·{/if}
                     {formatBytes(file.sizeBytes)} · {file.contentType !== "application/pdf" ? "下載" : file.locked ? "需要密碼" : "免密碼"}
                 </span>
             </div>
@@ -181,7 +186,7 @@ onKeys("document", {
 <Dialog bind:open={confirming} title="刪除文件">
     <div class="flex items-center justify-between border-b border-line px-4 py-3">
         <h2 class="label">DELETE · 刪除文件</h2>
-        <button type="button" class="text-mute" aria-label="關閉" onclick={() => (confirming = false)}><span class="text-accent">[esc]</span></button>
+        <button type="button" class="text-mute" aria-label="關閉" onclick={() => (confirming = false)}><Key hint="esc" icon={X} /></button>
     </div>
     <div class="flex flex-col gap-2 p-4">
         <p class="m-0 break-words">刪除 #{doc.id} {doc.filename}？原始檔一起刪掉，不能復原。</p>

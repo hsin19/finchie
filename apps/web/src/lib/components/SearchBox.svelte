@@ -1,4 +1,5 @@
 <script lang="ts">
+import Key from "#lib/components/Key.svelte";
 import { composing } from "#lib/keys.js";
 import {
     Search,
@@ -6,6 +7,7 @@ import {
 } from "#lib/search.svelte.js";
 import { afterNavigate } from "$app/navigation";
 import { page } from "$app/state";
+import SearchIcon from "@lucide/svelte/icons/search";
 
 /**
  * The page's search: the text in `?{param}`, applied while typing (Search). "/" focuses it (the
@@ -42,7 +44,7 @@ function onkeydown(event: KeyboardEvent) {
 </script>
 
 <div class="flex items-center gap-2 rounded-[4px] border border-line-strong bg-ground px-2.5">
-    <label for={id} class="whitespace-nowrap"><span class="text-accent">[/]</span> 搜尋</label>
+    <label for={id} class="whitespace-nowrap"><Key hint="/" icon={SearchIcon} /> 搜尋</label>
     <input
         {id}
         type="search"

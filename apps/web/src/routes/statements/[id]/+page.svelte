@@ -2,6 +2,7 @@
 import { lapsesSoon } from "#lib/accounts.js";
 import type { Transaction } from "#lib/api/client.js";
 import FileLink from "#lib/components/FileLink.svelte";
+import Key from "#lib/components/Key.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import {
     formatBytes,
@@ -49,6 +50,8 @@ import ArrowDown from "@lucide/svelte/icons/arrow-down";
 import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import ArrowUp from "@lucide/svelte/icons/arrow-up";
+import FileText from "@lucide/svelte/icons/file-text";
+import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 import type { PageProps } from "./$types";
 import Checks from "./Checks.svelte";
 
@@ -225,8 +228,8 @@ onKeys("statement", {
             </tbody>
         </table>
         <div class="flex flex-wrap gap-2">
-            <FileLink {doc} class="control inline-flex items-center text-ink hover:text-ink"><span class="text-accent">[f]</span>&nbsp;開啟帳單 PDF</FileLink>
-            <button type="button" class="control" disabled={parsing} onclick={() => void reparse.run()}><span class="text-accent">[r]</span> 修正 parser 後重新解析</button>
+            <FileLink {doc} class="control inline-flex items-center text-ink hover:text-ink"><Key hint="f" icon={FileText} />&nbsp;開啟帳單 PDF</FileLink>
+            <button type="button" class="control" disabled={parsing} onclick={() => void reparse.run()}><Key hint="r" icon={RefreshCw} /> 修正 parser 後重新解析</button>
         </div>
         {#if reparse.error}<p class="m-0 text-neg">{reparse.error}</p>{/if}
         {#if reparsed}

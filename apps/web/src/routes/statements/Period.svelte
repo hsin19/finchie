@@ -10,6 +10,7 @@ import {
     totalDue,
 } from "#lib/bills.js";
 import Bar from "#lib/components/Bar.svelte";
+import Key from "#lib/components/Key.svelte";
 import MonthSelect from "#lib/components/MonthSelect.svelte";
 import StatementRow from "#lib/components/StatementRow.svelte";
 import TrendChart from "#lib/components/TrendChart.svelte";
@@ -42,6 +43,9 @@ import { tone } from "#lib/tone.js";
 import { statementsHref } from "#lib/urls.js";
 import { goto } from "$app/navigation";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
+import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+import ChevronRight from "@lucide/svelte/icons/chevron-right";
+import List from "@lucide/svelte/icons/list";
 import type { PageData } from "./$types";
 
 let { data }: { data: Extract<PageData, { view: "period"; }>; } = $props();
@@ -99,15 +103,15 @@ function changeTone(change: number | undefined): string {
 </script>
 
 <div class="flex flex-wrap items-center gap-2">
-    <button type="button" class="control" disabled={!older} onclick={() => openMonth(older)}><span class="text-accent">[p]</span> prev</button>
+    <button type="button" class="control" disabled={!older} onclick={() => openMonth(older)}><Key hint="p" icon={ChevronLeft} /> prev</button>
     <MonthSelect
         months={data.closingMonths}
         value={data.month}
         onchange={openMonth}
     />
-    <button type="button" class="control" disabled={!newer} onclick={() => openMonth(newer)}><span class="text-accent">[n]</span> next</button>
+    <button type="button" class="control" disabled={!newer} onclick={() => openMonth(newer)}><Key hint="n" /> next <ChevronRight class="md:hidden" /></button>
     <span class="text-[12px] text-mute">這個月結帳的帳單</span>
-    <a href={statementsHref("all")} class="ml-auto text-[12px] text-dim hover:text-ink"><span class="text-accent">[l]</span> 全部帳單 <ArrowRight /></a>
+    <a href={statementsHref("all")} class="ml-auto text-[12px] text-dim hover:text-ink"><Key hint="l" icon={List} /> 全部帳單 <ArrowRight /></a>
 </div>
 
 <div class="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
