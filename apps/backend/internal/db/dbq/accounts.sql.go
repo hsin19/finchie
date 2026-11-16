@@ -334,7 +334,7 @@ SELECT m.day::date AS day, m.account_id, u.symbol AS unit, m.as_of, m.amount, m.
        round(m.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
 FROM moved m
 JOIN units u ON u.id = m.unit_id
-LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + '1 day'::interval) AT TIME ZONE 'Asia/Taipei'))
     AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
 ORDER BY m.day, m.account_id, u.symbol
 `
@@ -358,6 +358,9 @@ type BalancesOnRow struct {
 // the day, and for the itemized kinds the lines that count (counted_lines, a fill of a gap among them) dated
 // after that balance up to the day; with its worth in
 // NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
+// The day after is an interval, not `+ 1`: Database Observability (Grafana Alloy) prepares this query with
+// its constants as parameters, and a date plus an untyped parameter matches several operators, leaving it
+// unplannable.
 func (q *Queries) BalancesOn(ctx context.Context, arg BalancesOnParams) ([]BalancesOnRow, error) {
 	rows, err := q.db.Query(ctx, balancesOn, arg.Days, arg.Itemized)
 	if err != nil {
@@ -942,7 +945,7 @@ WITH days AS (
 SELECT v.day::date AS day, v.account_id, v.as_of,
        round(v.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
 FROM valued v
-LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + '1 day'::interval) AT TIME ZONE 'Asia/Taipei'))
     AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
 ORDER BY v.day, v.account_id
 `
@@ -955,6 +958,7 @@ type ValuationsOnRow struct {
 }
 
 // Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then.
+// An interval, not `+ 1`: see BalancesOn.
 func (q *Queries) ValuationsOn(ctx context.Context, days []pgtype.Date) ([]ValuationsOnRow, error) {
 	rows, err := q.db.Query(ctx, valuationsOn, days)
 	if err != nil {

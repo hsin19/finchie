@@ -249,7 +249,10 @@ SELECT m.day::date AS day, m.account_id, u.symbol AS unit, m.as_of, m.amount, m.
        round(m.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
 FROM moved m
 JOIN units u ON u.id = m.unit_id
-LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+-- The day after is an interval, not `+ 1`: Database Observability (Grafana Alloy) prepares this query with
+-- its constants as parameters, and a date plus an untyped parameter matches several operators, leaving it
+-- unplannable.
+LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + '1 day'::interval) AT TIME ZONE 'Asia/Taipei'))
     AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
 ORDER BY m.day, m.account_id, u.symbol;
 
@@ -266,6 +269,7 @@ WITH days AS (
 SELECT v.day::date AS day, v.account_id, v.as_of,
        round(v.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
 FROM valued v
-LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + 1)::timestamp AT TIME ZONE 'Asia/Taipei'))
+-- An interval, not `+ 1`: see BalancesOn.
+LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + '1 day'::interval) AT TIME ZONE 'Asia/Taipei'))
     AS p(as_of, source, quote, amount, quote_amount, unit_amount, twd_amount) ON true
 ORDER BY v.day, v.account_id;
