@@ -28,10 +28,7 @@ import {
 import { resolve } from "$app/paths";
 import type { ResolvedPathname } from "$app/types";
 
-/** The owner's name for an account, else the bank's ("臺幣活存"), else its kind's. */
-export function accountName(account: Pick<Account, "kind" | "label" | "name">): string {
-    return account.name ?? account.label ?? accountKinds[account.kind].label;
-}
+export { accountName, daysAgo } from "#lib/names.js";
 
 /** Where a line is: "ESUN··3381" for a card, "ESUN 臺幣活存" for a deposit account, "SKIS 證券" for a brokerage. */
 export function lineAccount(t: Pick<Transaction, "institution" | "cardLast4" | "accountKind" | "accountName">): string {
@@ -258,11 +255,6 @@ export function accountStatus(account: Account, today: string): AccountStatus {
     if (isOwned(account)) status.note = "手動";
     else if (status.excused) status.note = `確認過沒變 · ${yearlyDate(account.checkAgainOn!, today)} 再提醒`;
     return status;
-}
-
-/** "今天", "昨天", "41 天前". */
-export function daysAgo(days: number): string {
-    return days <= 0 ? "今天" : days === 1 ? "昨天" : `${days} 天前`;
 }
 
 // ---- What an account's page shows, by kind

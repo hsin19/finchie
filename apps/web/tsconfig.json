@@ -12,5 +12,7 @@
     "vite.config.ts",
     "icons.ts",
     "eslint.config.js"
-  ]
+  ],
+  // The service worker has its own (src/service-worker/tsconfig.json): a worker's globals, not a page's.
+  "exclude": ["src/service-worker"]
 }

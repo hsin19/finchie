@@ -3,7 +3,7 @@
 import type {
     AccountKind,
     TransactionKind,
-} from "#lib/api/client.js";
+} from "#lib/api/types.js";
 import type { Tone } from "#lib/tone.js";
 
 /**

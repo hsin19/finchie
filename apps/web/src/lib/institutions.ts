@@ -1,7 +1,7 @@
 // The banks, brokers, and exchanges Finchie reads from, as the UI names them. Any other institution
 // still shows, by its id.
 
-import type { AccountKind } from "#lib/api/client.js";
+import type { AccountKind } from "#lib/api/types.js";
 
 /** The institution of an account the owner keeps by hand (ADR 0019). */
 export const OWNER = "owner";

@@ -18,7 +18,7 @@
     "format:check": "dprint check",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc --noEmit -p src/service-worker",
     "test": "vitest run",
     "test:watch": "vitest"
   },

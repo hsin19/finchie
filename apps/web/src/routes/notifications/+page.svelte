@@ -1,8 +1,5 @@
 <script lang="ts">
-import type {
-    Notification,
-    NotificationKind,
-} from "#lib/api/client.js";
+import type { Notification } from "#lib/api/client.js";
 import {
     handleNotifications,
     readNotifications,
@@ -15,10 +12,12 @@ import {
     pending,
 } from "#lib/attention.js";
 import Dot from "#lib/components/Dot.svelte";
+import PushSwitch from "#lib/components/PushSwitch.svelte";
 import {
     shortDateTime,
     today,
 } from "#lib/dates.js";
+import { noticeLabels } from "#lib/notices.js";
 import Check from "@lucide/svelte/icons/check";
 import Undo2 from "@lucide/svelte/icons/undo-2";
 import { untrack } from "svelte";
@@ -29,14 +28,6 @@ let { data }: PageProps = $props();
 // The page is not open across days.
 const day = today();
 const base = $derived(data.settings.baseCurrency);
-
-const kinds: Record<NotificationKind, string> = {
-    shortfall: "扣款可能不夠",
-    document: "文件",
-    gap: "餘額接不起來",
-    overdue: "太久沒更新",
-    lapsing: "點數快到期",
-};
 
 // Opening the page reads what it lists; what was new when it opened stays marked as such.
 const fresh = untrack(() => new Set(data.all.filter(n => !n.readAt).map(n => n.id)));
@@ -62,6 +53,8 @@ async function handle(n: Notification) {
 }
 </script>
 
+<PushSwitch publicKey={data.settings.pushPublicKey} />
+
 {#each sections as section (section.title)}
     {#if section.items.length > 0 || section.empty}
         <section class="panel flex flex-col gap-1 p-3 md:p-3.5">
@@ -74,7 +67,7 @@ async function handle(n: Notification) {
                     <li class="flex flex-col gap-0.5 border-t border-rule py-2 first:border-t-0 md:flex-row md:items-baseline md:gap-3">
                         <span class="flex shrink-0 gap-3 text-[12px] md:w-56">
                             <span class="text-mute">{shortDateTime(n.raisedAt)}</span>
-                            <span class={n.resolvedAt ? "text-mute" : n.kind === "overdue" || n.kind === "shortfall" ? "text-accent" : "text-neg"}><Dot /> {kinds[n.kind]}</span>
+                            <span class={n.resolvedAt ? "text-mute" : n.kind === "overdue" || n.kind === "shortfall" ? "text-accent" : "text-neg"}><Dot /> {noticeLabels[n.kind]}</span>
                             {#if fresh.has(n.id)}<span class="text-accent">新</span>{/if}
                         </span>
                         <a href={notificationHref(n)} class="min-w-0 grow {n.resolvedAt ? 'text-dim' : 'text-ink'} hover:text-ink-bright">

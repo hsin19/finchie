@@ -1,13 +1,17 @@
 <script lang="ts">
 import Dot from "#lib/components/Dot.svelte";
 import Key from "#lib/components/Key.svelte";
+import { renewPush } from "#lib/push.js";
 import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
 import Bell from "@lucide/svelte/icons/bell";
 import FileText from "@lucide/svelte/icons/file-text";
 import House from "@lucide/svelte/icons/house";
 import ReceiptText from "@lucide/svelte/icons/receipt-text";
 import Wallet from "@lucide/svelte/icons/wallet";
-import type { Component } from "svelte";
+import {
+    type Component,
+    onMount,
+} from "svelte";
 import "./layout.css";
 import {
     api,
@@ -57,6 +61,10 @@ import type { ResolvedPathname } from "$app/types";
 import type { LayoutProps } from "./$types";
 
 let { data, children }: LayoutProps = $props();
+
+// The backend drops a subscription its push service says is gone, and a browser may renew one: telling it
+// again whenever the app opens keeps this device's pushes coming. A failure waits for the next opening.
+onMount(() => void renewPush().catch(() => undefined));
 let help = $state(false);
 
 // While the parser works, look at what is still pending, and reload the ledger once that changes: a

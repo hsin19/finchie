@@ -4,7 +4,6 @@
 // handled, a row per kind, each naming what it is about, and /notifications lists them all.
 
 import {
-    accountName,
     checkAgainDefault,
     daysAgo,
 } from "#lib/accounts.js";
@@ -12,17 +11,18 @@ import type {
     Account,
     Notification,
     NotificationKind,
-    Shortfall,
 } from "#lib/api/client.js";
-import { yearlyDate } from "#lib/dates.js";
 import { documentsQueryHref } from "#lib/documents.js";
-import { institution } from "#lib/institutions.js";
-import { formatAmount } from "#lib/money.js";
+import {
+    daysSince,
+    describe,
+    named,
+    type NotifiedAccount,
+} from "#lib/notices.js";
 import { resolve } from "$app/paths";
 import type { ResolvedPathname } from "$app/types";
 
-/** The account a notification is about, as it is named now. */
-export type NotifiedAccount = NonNullable<Notification["account"]>;
+export { describe, describeShortfall, named, type NotifiedAccount } from "#lib/notices.js";
 
 export interface NeedName {
     text: string;
@@ -47,37 +47,9 @@ export interface Need {
 export const notificationKinds: readonly NotificationKind[] = ["shortfall", "document", "gap", "overdue", "lapsing"];
 
 export const accountHref = (a: Pick<NotifiedAccount, "id">) => resolve("/accounts/[id]", { id: String(a.id) });
-export const named = (a: Pick<NotifiedAccount, "institution" | "kind" | "label" | "name">) => `${institution(a.institution).name} ${accountName(a)}`.trim();
 
 /** Whether a notification still needs the owner: open, and not handled. */
 export const pending = (n: Notification) => !n.resolvedAt && !n.handledAt;
-
-const daysSince = (day: string, today: string) => Math.round((Date.parse(today) - Date.parse(day)) / 86_400_000);
-
-/** "差 2,000（10/31 餘額 5,000，要扣 滙豐 11/09 3,000 + 玉山 11/23 4,000）": what one balance is to cover, and lacks. */
-export function describeShortfall(s: Shortfall, base: string, today: string): string {
-    const slashDate = (day: string) => yearlyDate(day, today);
-    const amount = (value: string) => `${formatAmount(value)}${s.unit === base ? "" : ` ${s.unit}`}`;
-    const bills = s.debits.map(d => `${institution(d.institution).name} ${slashDate(d.dueDate)} ${amount(d.amount)}`).join(" + ");
-    return `差 ${amount(s.lacks)}（${slashDate(s.asOf)} 餘額 ${amount(s.balance)}，要扣 ${bills}）`;
-}
-
-/** What a notification says, without the account it is about; a day of another year than today's says its year. */
-export function describe(n: Notification, today: string, base: string): string {
-    const slashDate = (day: string) => yearlyDate(day, today);
-    switch (n.kind) {
-        case "shortfall":
-            return n.shortfall ? describeShortfall(n.shortfall, base, today) : "";
-        case "document":
-            return n.document ? `${n.document.filename}：${n.document.status === "needs_review" ? "對不起來" : "解析失敗"}` : "";
-        case "gap":
-            return n.gap ? `${n.gap.unit} ${slashDate(n.gap.from)} 到 ${slashDate(n.gap.to)} 之間有 ${formatAmount(n.gap.unseen, { signed: true })} 沒有交易說明` : "";
-        case "overdue":
-            return n.newest ? `${daysAgo(daysSince(n.newest, today))}的餘額` : "";
-        case "lapsing":
-            return n.lapsing ? `${formatAmount(n.lapsing.amount)} ${n.lapsing.unit} ${slashDate(n.lapsing.by)} 前${n.lapsing.estimated ? "（推算）" : ""}` : "";
-    }
-}
 
 /** Where a notification is looked into. */
 export function notificationHref(n: Notification): ResolvedPathname {
