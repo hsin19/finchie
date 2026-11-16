@@ -359,7 +359,7 @@ type SearchTransactionsRow struct {
 // A link (ADR 0016) is one row too: the line its money went to (another account's inflow, a card bill's
 // payment line) is listed under the outflow it came from whenever that outflow matches as well. A view
 // without the outflow, such as another account or the month before, lists the line itself.
-// Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+// Keys are typed: Database Observability (Grafana Alloy) prepares this query with its constants as
 // parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
 // Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
 // big payment counts as large. Ties go newest first, then in statement line order.
@@ -578,7 +578,7 @@ type TransactionFamilyRow struct {
 
 // A line with its parent and its children, whichever statements they are on; the same columns as
 // ListTransactions.
-// Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+// Keys are typed: Database Observability (Grafana Alloy) prepares this query with its constants as
 // parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
 func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]TransactionFamilyRow, error) {
 	rows, err := q.db.Query(ctx, transactionFamily, id)

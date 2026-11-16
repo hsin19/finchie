@@ -75,6 +75,7 @@ docker compose up -d    # local Postgres for `task backend:run`
 - Python: type hints everywhere, checked by mypy (strict); ruff for lint and format, pytest. Test names describe behavior (`test_taishin_splits_wrapped_merchant_lines`).
 - Go: `gofmt`, golangci-lint, errors wrapped with `%w`, `context.Context` first. SQL lives in `.sql` files for sqlc, not in Go strings.
 - Schema changes are new goose migrations; never edit an applied one.
+- A SQL literal whose type its context leaves open gets a `::` cast: a key of `jsonb_build_object` is `'id'::text`, a day after a date is `+ '1 day'::interval`, not `+ 1`. The deployment's Database Observability (Grafana Alloy) prepares every query with its constants turned into untyped parameters, and one Postgres cannot type leaves the query unplannable, with an error in its log each time the query runs. Use the `::` form: `interval '1 day'` becomes `interval $1`, which does not parse. A literal its context fixes (`= 1`, `ON true`, `round(x, 2)`) needs no cast.
 - Web (SvelteKit 3, Svelte 5 runes): see [`apps/web/README.md`](apps/web/README.md) for its pitfalls. Format with dprint (`task web:fmt`), not Prettier. Amounts go through `#lib/money.js`, never `Number` arithmetic. Every filter belongs in the URL.
 
 ## Documentation rules

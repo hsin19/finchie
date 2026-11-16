@@ -345,7 +345,7 @@ type ListTransactionsRow struct {
 
 // The lines as printed, each with its parent (parent_id) and its children, which may be on other
 // statements.
-// Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+// Keys are typed: Database Observability (Grafana Alloy) prepares this query with its constants as
 // parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
 func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]ListTransactionsRow, error) {
 	rows, err := q.db.Query(ctx, listTransactions, statementID)

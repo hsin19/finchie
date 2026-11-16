@@ -110,7 +110,7 @@ JOIN units u ON u.id = t.unit_id
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
--- Keys are typed: Database Observability (ADR 0011) prepares this query with its constants as
+-- Keys are typed: Database Observability (Grafana Alloy) prepares this query with its constants as
 -- parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
 LEFT JOIN LATERAL (SELECT jsonb_build_object('id'::text, p.id, 'statementId'::text, p.statement_id, 'kind'::text, p.kind,
                                              'transactionDate'::text, p.transaction_date, 'amount'::text, p.amount::text,
