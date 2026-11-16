@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const anyDocumentPending = `-- name: AnyDocumentPending :one
+SELECT EXISTS (SELECT 1 FROM documents WHERE status = 'pending')
+`
+
+// Whether a document is being parsed: its ledger, and so what needs the owner, is still changing.
+func (q *Queries) AnyDocumentPending(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, anyDocumentPending)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const countUnreadNotifications = `-- name: CountUnreadNotifications :one
 SELECT count(*)::integer
 FROM notifications
@@ -121,7 +133,7 @@ func (q *Queries) LockNotifications(ctx context.Context) error {
 	return err
 }
 
-const raiseNotification = `-- name: RaiseNotification :exec
+const raiseNotification = `-- name: RaiseNotification :many
 INSERT INTO notifications (kind, key, account_id, document_id, facts)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (key) DO UPDATE SET
@@ -131,6 +143,7 @@ ON CONFLICT (key) DO UPDATE SET
     handled_at  = CASE WHEN notifications.resolved_at IS NULL THEN notifications.handled_at END,
     resolved_at = NULL
 WHERE notifications.resolved_at IS NOT NULL OR notifications.facts IS DISTINCT FROM EXCLUDED.facts
+RETURNING id, raised_at, (raised_at = now())::boolean AS raised
 `
 
 type RaiseNotificationParams struct {
@@ -141,17 +154,39 @@ type RaiseNotificationParams struct {
 	Facts      []byte
 }
 
+type RaiseNotificationRow struct {
+	ID       int64
+	RaisedAt pgtype.Timestamptz
+	Raised   bool
+}
+
 // Raises a situation once. One still open keeps what the owner did with it and takes the newest facts;
-// one that was resolved and is so again is raised again, as news.
-func (q *Queries) RaiseNotification(ctx context.Context, arg RaiseNotificationParams) error {
-	_, err := q.db.Exec(ctx, raiseNotification,
+// one that was resolved and is so again is raised again, as news. A row comes back when anything changed,
+// `raised` when it is news: new, or so again.
+func (q *Queries) RaiseNotification(ctx context.Context, arg RaiseNotificationParams) ([]RaiseNotificationRow, error) {
+	rows, err := q.db.Query(ctx, raiseNotification,
 		arg.Kind,
 		arg.Key,
 		arg.AccountID,
 		arg.DocumentID,
 		arg.Facts,
 	)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RaiseNotificationRow
+	for rows.Next() {
+		var i RaiseNotificationRow
+		if err := rows.Scan(&i.ID, &i.RaisedAt, &i.Raised); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const readNotifications = `-- name: ReadNotifications :exec

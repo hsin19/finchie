@@ -21,13 +21,19 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/jobs"
 	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 	"github.com/hsin19/finchie/apps/backend/internal/numeric"
+	"github.com/hsin19/finchie/apps/backend/internal/push"
 	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 )
 
 // Evaluate works out what needs the owner at now, raises what is new, and resolves what is no longer so.
+// What it raised is pushed to the owner's devices, as it happens: what was raised before is never pushed.
+// Not while a document is being parsed, though: its ledger is still changing, and a release that parses
+// every document again would push gaps that close a minute later. What it raised then is in the app.
 func Evaluate(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
 	today := taipei.Today(now)
+	var raised []Message
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		raised = nil
 		queries := dbq.New(tx)
 		if err := queries.LockNotifications(ctx); err != nil {
 			return fmt.Errorf("lock notifications: %w", err)
@@ -37,8 +43,10 @@ func Evaluate(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
 			return err
 		}
 		watched := make([]domain.Watched, 0, len(accounts))
+		named := make(map[int64]*Account, len(accounts))
 		for _, a := range accounts {
 			watched = append(watched, a.Watched(today))
+			named[a.ID] = &Account{ID: a.ID, Institution: a.Institution, Kind: a.Kind, Label: a.Label, Name: a.Name}
 		}
 		rows, err := queries.TroubledDocuments(ctx)
 		if err != nil {
@@ -53,19 +61,26 @@ func Evaluate(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
 		// Never nil: an empty list resolves everything open, where NULL would resolve nothing.
 		keys := make([]string, 0, len(notices))
 		for _, n := range notices {
-			facts, err := json.Marshal(factsOf(n, today))
+			facts := factsOf(n, today)
+			stored, err := json.Marshal(facts)
 			if err != nil {
 				return fmt.Errorf("notice facts: %w", err)
 			}
-			params := dbq.RaiseNotificationParams{Kind: n.Kind, Key: n.Key, Facts: facts}
+			params := dbq.RaiseNotificationParams{Kind: n.Kind, Key: n.Key, Facts: stored}
 			if n.AccountID != 0 {
 				params.AccountID = &n.AccountID
 			}
 			if n.Document != nil {
 				params.DocumentID = &n.Document.ID
 			}
-			if err := queries.RaiseNotification(ctx, params); err != nil {
+			rows, err := queries.RaiseNotification(ctx, params)
+			if err != nil {
 				return fmt.Errorf("raise %s: %w", n.Key, err)
+			}
+			if len(rows) == 1 && rows[0].Raised {
+				raised = append(raised, Message{Base: domain.BaseCurrency, Notification: &Pushed{
+					ID: rows[0].ID, Kind: n.Kind, RaisedAt: rows[0].RaisedAt.Time, Account: named[n.AccountID], Facts: facts,
+				}})
 			}
 			keys = append(keys, n.Key)
 		}
@@ -77,7 +92,61 @@ func Evaluate(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("notify: %w", err)
 	}
+	if len(raised) > 0 {
+		pushRaised(ctx, pool, raised)
+	}
 	return nil
+}
+
+// pushRaised pushes what was just raised, unless a document is being parsed. A push that fails is only
+// logged: the notification is in the app either way.
+func pushRaised(ctx context.Context, pool *pgxpool.Pool, raised []Message) {
+	pending, err := dbq.New(pool).AnyDocumentPending(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "notifications not pushed", "error", err)
+		return
+	}
+	if pending {
+		return
+	}
+	messages := make([][]byte, 0, len(raised))
+	for _, m := range raised {
+		encoded, err := json.Marshal(m)
+		if err != nil {
+			slog.WarnContext(ctx, "notifications not pushed", "error", err)
+			return
+		}
+		messages = append(messages, encoded)
+	}
+	if _, err := push.Send(ctx, pool, messages...); err != nil {
+		slog.WarnContext(ctx, "notifications not all pushed", "error", err)
+	}
+}
+
+// Message is what a push carries: a notification just raised, as the API shows it, and the base currency
+// its amounts are in, for the app's service worker to word it as the app does. Without a notification it
+// is a test.
+type Message struct {
+	Base         string  `json:"base"`
+	Notification *Pushed `json:"notification,omitempty"`
+}
+
+// Pushed is a notification as the API shows it (api.Notification).
+type Pushed struct {
+	ID       int64             `json:"id"`
+	Kind     domain.NoticeKind `json:"kind"`
+	RaisedAt time.Time         `json:"raisedAt"`
+	Account  *Account          `json:"account,omitempty"`
+	Facts
+}
+
+// Account is the account a notification is about, as it is named.
+type Account struct {
+	ID          int64              `json:"id"`
+	Institution string             `json:"institution"`
+	Kind        domain.AccountKind `json:"kind"`
+	Label       *string            `json:"label,omitempty"`
+	Name        *string            `json:"name,omitempty"`
 }
 
 // After evaluates once the work that may have changed the ledger is done. A failure is only logged: what

@@ -1164,6 +1164,26 @@ type Problem struct {
 	Message string `json:"message"`
 }
 
+// PushEndpoint defines model for PushEndpoint.
+type PushEndpoint struct {
+	Endpoint string `json:"endpoint"`
+}
+
+// PushSent defines model for PushSent.
+type PushSent struct {
+	// Sent How many devices' push services took the message
+	Sent int `json:"sent"`
+}
+
+// PushSubscription A device's push subscription, as PushSubscription.toJSON() gives it
+type PushSubscription struct {
+	Endpoint string `json:"endpoint"`
+	Keys     struct {
+		Auth   string `json:"auth"`
+		P256dh string `json:"p256dh"`
+	} `json:"keys"`
+}
+
 // Settings defines model for Settings.
 type Settings struct {
 	// BaseCurrency What every worth is in, e.g. TWD
@@ -1174,6 +1194,9 @@ type Settings struct {
 
 	// MaxUploadBytes The largest file an upload may be (BACKEND_MAX_UPLOAD_MB)
 	MaxUploadBytes int64 `json:"maxUploadBytes"`
+
+	// PushPublicKey The VAPID public key a device subscribes to pushes with (applicationServerKey), base64url
+	PushPublicKey string `json:"pushPublicKey"`
 
 	// SourceIntervalHours How often rates, closes, and exchanges are read
 	SourceIntervalHours int `json:"sourceIntervalHours"`
@@ -1573,6 +1596,12 @@ type HandleNotificationsJSONRequestBody = NotificationHandle
 // ReadNotificationsJSONRequestBody defines body for ReadNotifications for application/json ContentType.
 type ReadNotificationsJSONRequestBody = NotificationIds
 
+// SubscribePushJSONRequestBody defines body for SubscribePush for application/json ContentType.
+type SubscribePushJSONRequestBody = PushSubscription
+
+// UnsubscribePushJSONRequestBody defines body for UnsubscribePush for application/json ContentType.
+type UnsubscribePushJSONRequestBody = PushEndpoint
+
 // SetUnitPriceJSONRequestBody defines body for SetUnitPrice for application/json ContentType.
 type SetUnitPriceJSONRequestBody = UnitPriceUpdate
 
@@ -1653,6 +1682,15 @@ type ServerInterface interface {
 	// ReadNotifications Mark notifications read
 	// (POST /api/notifications/read)
 	ReadNotifications(ctx *echo.Context) error
+	// SubscribePush Take pushes on this device
+	// (POST /api/push/subscribe)
+	SubscribePush(ctx *echo.Context) error
+	// TestPush Push a message to every device subscribed, to see that pushes arrive
+	// (POST /api/push/test)
+	TestPush(ctx *echo.Context) error
+	// UnsubscribePush Stop pushes to a device
+	// (POST /api/push/unsubscribe)
+	UnsubscribePush(ctx *echo.Context) error
 	// GetSettings The deployment's settings the web app shows or obeys
 	// (GET /api/settings)
 	GetSettings(ctx *echo.Context) error
@@ -2142,6 +2180,33 @@ func (w *ServerInterfaceWrapper) ReadNotifications(ctx *echo.Context) error {
 	return err
 }
 
+// SubscribePush converts echo context to params.
+func (w *ServerInterfaceWrapper) SubscribePush(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.SubscribePush(ctx)
+	return err
+}
+
+// TestPush converts echo context to params.
+func (w *ServerInterfaceWrapper) TestPush(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.TestPush(ctx)
+	return err
+}
+
+// UnsubscribePush converts echo context to params.
+func (w *ServerInterfaceWrapper) UnsubscribePush(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.UnsubscribePush(ctx)
+	return err
+}
+
 // GetSettings converts echo context to params.
 func (w *ServerInterfaceWrapper) GetSettings(ctx *echo.Context) error {
 	var err error
@@ -2457,6 +2522,9 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/notifications", wrapper.ListNotifications, options.OperationMiddlewares["listNotifications"]...)
 	router.POST(options.BaseURL+"/api/notifications/read", wrapper.ReadNotifications, options.OperationMiddlewares["readNotifications"]...)
 	router.POST(options.BaseURL+"/api/notifications/handle", wrapper.HandleNotifications, options.OperationMiddlewares["handleNotifications"]...)
+	router.POST(options.BaseURL+"/api/push/subscribe", wrapper.SubscribePush, options.OperationMiddlewares["subscribePush"]...)
+	router.POST(options.BaseURL+"/api/push/unsubscribe", wrapper.UnsubscribePush, options.OperationMiddlewares["unsubscribePush"]...)
+	router.POST(options.BaseURL+"/api/push/test", wrapper.TestPush, options.OperationMiddlewares["testPush"]...)
 	router.GET(options.BaseURL+"/api/settings", wrapper.GetSettings, options.OperationMiddlewares["getSettings"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
@@ -3591,6 +3659,73 @@ func (response ReadNotifications204Response) VisitReadNotificationsResponse(w ht
 	return nil
 }
 
+type SubscribePushRequestObject struct {
+	Body *SubscribePushJSONRequestBody
+}
+
+type SubscribePushResponseObject interface {
+	VisitSubscribePushResponse(w http.ResponseWriter) error
+}
+
+type SubscribePush204Response struct {
+}
+
+func (response SubscribePush204Response) VisitSubscribePushResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SubscribePush400JSONResponse struct{ ProblemJSONResponse }
+
+func (response SubscribePush400JSONResponse) VisitSubscribePushResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestPushRequestObject struct {
+}
+
+type TestPushResponseObject interface {
+	VisitTestPushResponse(w http.ResponseWriter) error
+}
+
+type TestPush200JSONResponse PushSent
+
+func (response TestPush200JSONResponse) VisitTestPushResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnsubscribePushRequestObject struct {
+	Body *UnsubscribePushJSONRequestBody
+}
+
+type UnsubscribePushResponseObject interface {
+	VisitUnsubscribePushResponse(w http.ResponseWriter) error
+}
+
+type UnsubscribePush204Response struct {
+}
+
+func (response UnsubscribePush204Response) VisitUnsubscribePushResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
 type GetSettingsRequestObject struct {
 }
 
@@ -3938,6 +4073,15 @@ type StrictServerInterface interface {
 	// ReadNotifications Mark notifications read
 	// (POST /api/notifications/read)
 	ReadNotifications(ctx context.Context, request ReadNotificationsRequestObject) (ReadNotificationsResponseObject, error)
+	// SubscribePush Take pushes on this device
+	// (POST /api/push/subscribe)
+	SubscribePush(ctx context.Context, request SubscribePushRequestObject) (SubscribePushResponseObject, error)
+	// TestPush Push a message to every device subscribed, to see that pushes arrive
+	// (POST /api/push/test)
+	TestPush(ctx context.Context, request TestPushRequestObject) (TestPushResponseObject, error)
+	// UnsubscribePush Stop pushes to a device
+	// (POST /api/push/unsubscribe)
+	UnsubscribePush(ctx context.Context, request UnsubscribePushRequestObject) (UnsubscribePushResponseObject, error)
 	// GetSettings The deployment's settings the web app shows or obeys
 	// (GET /api/settings)
 	GetSettings(ctx context.Context, request GetSettingsRequestObject) (GetSettingsResponseObject, error)
@@ -4757,6 +4901,121 @@ func (sh *strictHandler) ReadNotifications(ctx *echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(ReadNotificationsResponseObject); ok {
 		return validResponse.VisitReadNotificationsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// SubscribePush operation middleware
+func (sh *strictHandler) SubscribePush(ctx *echo.Context) error {
+	var request SubscribePushRequestObject
+
+	var body SubscribePushJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SubscribePush(ctx.Request().Context(), request.(SubscribePushRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SubscribePush")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(SubscribePushResponseObject); ok {
+		return validResponse.VisitSubscribePushResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// TestPush operation middleware
+func (sh *strictHandler) TestPush(ctx *echo.Context) error {
+	var request TestPushRequestObject
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.TestPush(ctx.Request().Context(), request.(TestPushRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestPush")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(TestPushResponseObject); ok {
+		return validResponse.VisitTestPushResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// UnsubscribePush operation middleware
+func (sh *strictHandler) UnsubscribePush(ctx *echo.Context) error {
+	var request UnsubscribePushRequestObject
+
+	var body UnsubscribePushJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UnsubscribePush(ctx.Request().Context(), request.(UnsubscribePushRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UnsubscribePush")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(UnsubscribePushResponseObject); ok {
+		return validResponse.VisitUnsubscribePushResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

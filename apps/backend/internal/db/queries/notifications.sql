@@ -10,9 +10,10 @@ FROM documents
 WHERE status IN ('needs_review', 'failed')
 ORDER BY id;
 
--- name: RaiseNotification :exec
+-- name: RaiseNotification :many
 -- Raises a situation once. One still open keeps what the owner did with it and takes the newest facts;
--- one that was resolved and is so again is raised again, as news.
+-- one that was resolved and is so again is raised again, as news. A row comes back when anything changed,
+-- `raised` when it is news: new, or so again.
 INSERT INTO notifications (kind, key, account_id, document_id, facts)
 VALUES (@kind, @key, @account_id, @document_id, @facts)
 ON CONFLICT (key) DO UPDATE SET
@@ -21,7 +22,8 @@ ON CONFLICT (key) DO UPDATE SET
     read_at     = CASE WHEN notifications.resolved_at IS NULL THEN notifications.read_at END,
     handled_at  = CASE WHEN notifications.resolved_at IS NULL THEN notifications.handled_at END,
     resolved_at = NULL
-WHERE notifications.resolved_at IS NOT NULL OR notifications.facts IS DISTINCT FROM EXCLUDED.facts;
+WHERE notifications.resolved_at IS NOT NULL OR notifications.facts IS DISTINCT FROM EXCLUDED.facts
+RETURNING id, raised_at, (raised_at = now())::boolean AS raised;
 
 -- name: ResolveNotifications :exec
 -- Resolves the open situations that are no longer so: every one not among `keys`, except a document's
@@ -57,3 +59,7 @@ UPDATE notifications
 SET handled_at = CASE WHEN @handled::boolean THEN coalesce(handled_at, now()) END,
     read_at    = coalesce(read_at, now())
 WHERE id = ANY (@ids::bigint[]);
+
+-- name: AnyDocumentPending :one
+-- Whether a document is being parsed: its ledger, and so what needs the owner, is still changing.
+SELECT EXISTS (SELECT 1 FROM documents WHERE status = 'pending');

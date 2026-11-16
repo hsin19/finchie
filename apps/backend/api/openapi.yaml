@@ -621,6 +621,49 @@ paths:
         "204":
           description: Marked
 
+  /api/push/subscribe:
+    post:
+      operationId: subscribePush
+      summary: Take pushes on this device
+      description: |
+        The subscription the browser's PushManager gave for `pushPublicKey` (Settings): where its push
+        service takes messages, and the keys they are encrypted to. The same device subscribing again
+        replaces its keys. 400 for an endpoint that is not an https URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushSubscription" }
+      responses:
+        "204":
+          description: Kept
+        "400":
+          $ref: "#/components/responses/Problem"
+
+  /api/push/unsubscribe:
+    post:
+      operationId: unsubscribePush
+      summary: Stop pushes to a device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushEndpoint" }
+      responses:
+        "204":
+          description: Dropped, or never kept
+
+  /api/push/test:
+    post:
+      operationId: testPush
+      summary: Push a message to every device subscribed, to see that pushes arrive
+      responses:
+        "200":
+          description: How many devices' push services took it
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushSent" }
+
   /api/settings:
     get:
       operationId: getSettings
@@ -1620,10 +1663,36 @@ components:
         ids: { type: array, items: { type: integer, format: int64 } }
         handled: { type: boolean }
 
+    PushSubscription:
+      type: object
+      description: A device's push subscription, as PushSubscription.toJSON() gives it
+      required: [endpoint, keys]
+      properties:
+        endpoint: { type: string }
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh: { type: string }
+            auth: { type: string }
+
+    PushEndpoint:
+      type: object
+      required: [endpoint]
+      properties:
+        endpoint: { type: string }
+
+    PushSent:
+      type: object
+      required: [sent]
+      properties:
+        sent: { type: integer, description: How many devices' push services took the message }
+
     Settings:
       type: object
-      required: [maxUploadBytes, sourceIntervalHours, baseCurrency, lapseSoonDays]
+      required: [maxUploadBytes, sourceIntervalHours, baseCurrency, lapseSoonDays, pushPublicKey]
       properties:
+        pushPublicKey: { type: string, description: "The VAPID public key a device subscribes to pushes with (applicationServerKey), base64url" }
         lapseSoonDays: { type: integer, description: How near points to lapse are soon enough to stand out }
         maxUploadBytes: { type: integer, format: int64, description: The largest file an upload may be (BACKEND_MAX_UPLOAD_MB) }
         sourceIntervalHours: { type: integer, description: "How often rates, closes, and exchanges are read" }

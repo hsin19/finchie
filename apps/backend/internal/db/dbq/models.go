@@ -128,6 +128,21 @@ type Price struct {
 	WithdrawnAt pgtype.Timestamptz
 }
 
+type PushKey struct {
+	OnlyOne    bool
+	PublicKey  string
+	PrivateKey string
+	CreatedAt  pgtype.Timestamptz
+}
+
+type PushSubscription struct {
+	ID        int64
+	Endpoint  string
+	P256dh    string
+	Auth      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Statement struct {
 	ID             int64
 	DocumentID     int64

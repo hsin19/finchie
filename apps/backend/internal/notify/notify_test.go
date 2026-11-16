@@ -1,8 +1,14 @@
 package notify_test
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +20,7 @@ import (
 	"github.com/hsin19/finchie/apps/backend/internal/ingest"
 	"github.com/hsin19/finchie/apps/backend/internal/notify"
 	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
+	"github.com/hsin19/finchie/apps/backend/internal/push"
 	"github.com/hsin19/finchie/apps/backend/internal/taipei"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
@@ -124,5 +131,69 @@ func TestANewerBalanceThatStillFallsShortIsANewSituation(t *testing.T) {
 	rows := evaluate(t, pool, "2026-10-21")
 	if len(rows) != 2 || rows[0].ID == first[0].ID || rows[0].ResolvedAt.Valid || !rows[1].ResolvedAt.Valid {
 		t.Fatalf("rows = %s, want a new one open and #%d resolved", describe(rows), first[0].ID)
+	}
+}
+
+// subscribed subscribes a device whose push service counts what it is sent.
+func subscribed(t *testing.T, pool *pgxpool.Pool) *atomic.Int32 {
+	t.Helper()
+	var received atomic.Int32
+	service := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		received.Add(1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(service.Close)
+	previous := push.Client
+	push.Client = service.Client()
+	t.Cleanup(func() { push.Client = previous })
+
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encode := base64.RawURLEncoding.EncodeToString
+	if err := push.Subscribe(t.Context(), dbq.New(pool), service.URL+"/device", encode(key.PublicKey().Bytes()), encode(make([]byte, 16))); err != nil {
+		t.Fatal(err)
+	}
+	return &received
+}
+
+func TestWhatIsRaisedIsPushedAsItHappensAndNeverAgain(t *testing.T) {
+	pool := testdb.Pool(t)
+	storeAutopay(t, pool)
+	received := subscribed(t, pool)
+
+	evaluate(t, pool, "2026-10-15")
+	if got := received.Load(); got != 1 {
+		t.Fatalf("pushes after the shortfall was raised = %d, want 1", got)
+	}
+	evaluate(t, pool, "2026-10-16")
+	if got := received.Load(); got != 1 {
+		t.Fatalf("pushes after working it out again = %d, want still 1", got)
+	}
+	// Resolved, and so again: news, pushed again.
+	evaluate(t, pool, "2026-10-23")
+	evaluate(t, pool, "2026-10-20")
+	if got := received.Load(); got != 2 {
+		t.Fatalf("pushes after it came back = %d, want 2", got)
+	}
+}
+
+func TestNothingIsPushedWhileADocumentIsBeingParsed(t *testing.T) {
+	pool := testdb.Pool(t)
+	storeAutopay(t, pool)
+	received := subscribed(t, pool)
+	// A document just uploaded is pending until its parse job is done.
+	if _, err := dbq.New(pool).UpsertDocument(t.Context(), dbq.UpsertDocumentParams{
+		Sha256: []byte("arriving"), Filename: "arriving.eml", ContentType: "message/rfc822", Content: []byte("From: bank"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rows := evaluate(t, pool, "2026-10-15"); len(rows) != 1 || rows[0].ResolvedAt.Valid {
+		t.Fatalf("rows = %s, want the shortfall raised all the same", describe(rows))
+	}
+	if got := received.Load(); got != 0 {
+		t.Fatalf("pushes while parsing = %d, want none", got)
 	}
 }

@@ -469,6 +469,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/push/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take pushes on this device
+         * @description The subscription the browser's PushManager gave for `pushPublicKey` (Settings): where its push
+         *     service takes messages, and the keys they are encrypted to. The same device subscribing again
+         *     replaces its keys. 400 for an endpoint that is not an https URL.
+         */
+        post: operations["subscribePush"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/push/unsubscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop pushes to a device */
+        post: operations["unsubscribePush"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/push/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push a message to every device subscribed, to see that pushes arrive */
+        post: operations["testPush"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -1399,7 +1455,24 @@ export interface components {
             ids: number[];
             handled: boolean;
         };
+        /** @description A device's push subscription, as PushSubscription.toJSON() gives it */
+        PushSubscription: {
+            endpoint: string;
+            keys: {
+                p256dh: string;
+                auth: string;
+            };
+        };
+        PushEndpoint: {
+            endpoint: string;
+        };
+        PushSent: {
+            /** @description How many devices' push services took the message */
+            sent: number;
+        };
         Settings: {
+            /** @description The VAPID public key a device subscribes to pushes with (applicationServerKey), base64url */
+            pushPublicKey: string;
             /** @description How near points to lapse are soon enough to stand out */
             lapseSoonDays: number;
             /**
@@ -2114,6 +2187,71 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    subscribePush: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushSubscription"];
+            };
+        };
+        responses: {
+            /** @description Kept */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+        };
+    };
+    unsubscribePush: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushEndpoint"];
+            };
+        };
+        responses: {
+            /** @description Dropped, or never kept */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    testPush: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many devices' push services took it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSent"];
+                };
             };
         };
     };
