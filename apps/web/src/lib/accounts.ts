@@ -2,6 +2,7 @@ import type {
     Account,
     AccountKind,
     Balance,
+    Debit,
     Position,
     Price,
     PriceSource,
@@ -24,6 +25,7 @@ import {
     roundWhole,
     sign,
     subtract,
+    sum,
 } from "#lib/money.js";
 import { resolve } from "$app/paths";
 import type { ResolvedPathname } from "$app/types";
@@ -295,6 +297,36 @@ export function accountStatus(account: Account, today: string): AccountStatus {
     status.stale = overdue && !status.excused;
     if (status.excused) status.note = `確認過沒變 · ${yearlyDate(account.checkAgainOn!, today)} 再提醒`;
     return status;
+}
+
+/** What a deposit account's newest balance in a unit lacks to cover the card bills its autopay takes after it. */
+export interface Shortfall {
+    unit: string;
+    asOf: string;
+    balance: string;
+    /** The bills, soonest due first, and what they come to. */
+    debits: Debit[];
+    owed: string;
+    lacks: string;
+}
+
+/**
+ * Where an account's newest balance does not cover the card bills its autopay takes after it (`debits`),
+ * while one of them is still to come out, today or later. An estimate: what came in since that balance
+ * shows only in the next statement. None for an overdue account, whose balance is too old to tell by; it
+ * is flagged as overdue instead.
+ */
+export function shortfalls(account: Account, today: string): Shortfall[] {
+    const all = account.debits ?? [];
+    if (all.length === 0 || accountStatus(account, today).stale) return [];
+    return [...new Set(all.map(d => d.unit))].flatMap(unit => {
+        const debits = all.filter(d => d.unit === unit);
+        const held = account.balances.find(b => b.unit === unit);
+        if (!held || !debits.some(d => !d.paidOn && d.dueDate >= today)) return [];
+        const owed = sum(debits.map(d => d.amount));
+        const lacks = subtract(owed, held.amount);
+        return sign(lacks) > 0 ? [{ unit, asOf: held.asOf, balance: held.amount, debits, owed, lacks }] : [];
+    });
 }
 
 /** "今天", "昨天", "41 天前". */

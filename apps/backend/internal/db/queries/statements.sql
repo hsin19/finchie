@@ -75,6 +75,16 @@ WHERE s.kind = 'credit_card'
 ORDER BY s.closing_date DESC, s.id DESC
 LIMIT @row_limit;
 
+-- name: CardBillPayments :many
+-- Every card bill, with when it was paid and, where a deposit account's line showed it, that account
+-- (ADR 0016): the account a bank's bills leave.
+SELECT s.id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due, s.paid_on,
+       a.id AS paid_from
+FROM statements s
+LEFT JOIN transactions t ON t.id = s.paid_by
+LEFT JOIN accounts a ON a.id = t.account_id AND a.kind = 'deposit'
+WHERE s.kind = 'credit_card';
+
 -- name: GetStatement :one
 SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due,
        s.balanced, s.paid_on,

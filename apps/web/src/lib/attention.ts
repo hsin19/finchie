@@ -8,6 +8,8 @@ import {
     daysAgo,
     lapsesSoon,
     nextLapse,
+    type Shortfall,
+    shortfalls,
 } from "#lib/accounts.js";
 import type {
     Account,
@@ -21,7 +23,7 @@ import { resolve } from "$app/paths";
 import type { ResolvedPathname } from "$app/types";
 
 export interface Need {
-    key: "documents" | "gaps" | "stale" | "lapsing";
+    key: "short" | "documents" | "gaps" | "stale" | "lapsing";
     text: string;
     /** Where to look into it. */
     href: ResolvedPathname;
@@ -35,13 +37,33 @@ export interface Need {
 const accountHref = (a: Account) => resolve("/accounts/[id]", { id: String(a.id) });
 const named = (a: Account) => `${institution(a.institution).name} ${accountName(a)}`.trim();
 
+/** "玉山 11/23 4,000 + 滙豐 11/09 3,000": what one balance is to cover, and what it lacks. */
+function describeShortfall(s: Shortfall, base: string): string {
+    const amount = (value: string) => `${formatAmount(value)}${s.unit === base ? "" : ` ${s.unit}`}`;
+    const bills = s.debits.map(d => `${institution(d.institution).name} ${slashDate(d.dueDate)} ${amount(d.amount)}`).join(" + ");
+    return `差 ${amount(s.lacks)}（${slashDate(s.asOf)} 餘額 ${amount(s.balance)}，要扣 ${bills}）`;
+}
+
 /**
- * In the order to deal with them: documents whose statement does not add up or that failed, accounts
- * whose balances do not join up, accounts whose source has gone quiet, and points about to lapse.
+ * In the order to deal with them: accounts whose autopay may not cover the card bills it is to take,
+ * before they are due; documents whose statement does not add up or that failed, accounts whose balances
+ * do not join up, accounts whose source has gone quiet, and points about to lapse.
  */
-export function needs({ byState, accounts, today }: { byState: readonly StateCount[]; accounts: readonly Account[]; today: string; }): Need[] {
+export function needs(
+    { byState, accounts, today, base }: { byState: readonly StateCount[]; accounts: readonly Account[]; today: string; base: string; },
+): Need[] {
     const found: Need[] = [];
     const count = (state: StateCount["state"]) => byState.find(s => s.state === state)?.count ?? 0;
+
+    const short = accounts.map(a => ({ a, lacking: shortfalls(a, today) })).filter(({ lacking }) => lacking.length > 0);
+    if (short.length > 0) {
+        found.push({
+            key: "short",
+            text: `${short.length} 個帳戶可能不夠扣卡費：照最新對帳單的餘額算，之後轉進來的還看不到`,
+            href: resolve("/accounts"),
+            names: short.map(({ a, lacking }) => ({ text: `${named(a)} ${lacking.map(s => describeShortfall(s, base)).join("；")}`, href: accountHref(a) })),
+        });
+    }
 
     const review = count("needs_review");
     const failed = count("failed");

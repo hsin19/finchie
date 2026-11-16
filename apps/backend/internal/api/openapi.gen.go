@@ -328,6 +328,11 @@ type Account struct {
 	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
 
+	// Debits A deposit account's: the card bills whose money leaves it after its newest balance in the bill's
+	// currency, which that balance therefore does not show gone yet, soonest due first. A bank's bills
+	// leave the account the newest of them a deposit line showed paid left (ADR 0016)
+	Debits *[]Debit `json:"debits,omitempty"`
+
 	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
 	Expiries []Expiry `json:"expiries"`
 
@@ -405,6 +410,11 @@ type AccountDetail struct {
 
 	// Continuity Whether its balances can be checked against its lines (card bills cannot yet, nor a deposit account whose balance moved in a unit no statement has listed a line of)
 	Continuity AccountContinuity `json:"continuity"`
+
+	// Debits A deposit account's: the card bills whose money leaves it after its newest balance in the bill's
+	// currency, which that balance therefore does not show gone yet, soonest due first. A bank's bills
+	// leave the account the newest of them a deposit line showed paid left (ADR 0016)
+	Debits *[]Debit `json:"debits,omitempty"`
 
 	// Expiries What will lapse of its units, by their newest report, soonest first; none of 0 or gone by (ADR 0019)
 	Expiries []Expiry `json:"expiries"`
@@ -600,6 +610,23 @@ type Check struct {
 	Stated Decimal `json:"stated"`
 
 	// Unit What both are in, as printed; empty when the statement prints none
+	Unit string `json:"unit"`
+}
+
+// Debit A card bill whose money leaves a deposit account
+type Debit struct {
+	// Amount What the bill says is due
+	Amount  Decimal            `json:"amount"`
+	DueDate openapi_types.Date `json:"dueDate"`
+
+	// Institution Example: esun
+	Institution string `json:"institution"`
+
+	// PaidOn When a later bill showed it paid, after the account's newest balance; absent while that is not known
+	PaidOn      *openapi_types.Date `json:"paidOn,omitempty"`
+	StatementId int64               `json:"statementId"`
+
+	// Unit Example: TWD
 	Unit string `json:"unit"`
 }
 

@@ -5,9 +5,9 @@ import ConfirmCurrent from "#lib/components/ConfirmCurrent.svelte";
 /** What needs the owner (attention.ts): shown first, and only when there is something. */
 let { needs }: { needs: Need[]; } = $props();
 
-// An account gone quiet may be no more than months without lines, which the owner can confirm; the others
-// are wrong until dealt with.
-const tone = (need: Need) => (need.key === "stale" ? "text-accent" : "text-neg");
+// An account gone quiet may be no more than months without lines, which the owner can confirm, and a
+// shortfall is an estimate from an old balance; the others are wrong until dealt with.
+const tone = (need: Need) => (need.key === "stale" || need.key === "short" ? "text-accent" : "text-neg");
 </script>
 
 <section class="panel border-neg px-3.5 py-2.5" aria-labelledby="needs-heading">

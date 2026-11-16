@@ -20,6 +20,7 @@ export type Expiry = Schemas["Expiry"];
 export type BalanceGap = Schemas["BalanceGap"];
 export type AccountSide = Schemas["AccountSide"];
 export type CardTotal = Schemas["CardTotal"];
+export type Debit = Schemas["Debit"];
 export type Check = Schemas["Check"];
 export type Document = Schemas["Document"];
 export type DocumentPage = Schemas["DocumentPage"];

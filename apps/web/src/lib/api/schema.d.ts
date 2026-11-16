@@ -718,6 +718,30 @@ export interface components {
             lots?: components["schemas"]["PointsLot"][];
             /** @description Points that lapsed between two bills by their program's rule, oldest first; the gaps they leave are not in `gaps` */
             lapsed?: components["schemas"]["LapsedPoints"][];
+            /**
+             * @description A deposit account's: the card bills whose money leaves it after its newest balance in the bill's
+             *     currency, which that balance therefore does not show gone yet, soonest due first. A bank's bills
+             *     leave the account the newest of them a deposit line showed paid left (ADR 0016)
+             */
+            debits?: components["schemas"]["Debit"][];
+        };
+        /** @description A card bill whose money leaves a deposit account */
+        Debit: {
+            /** Format: int64 */
+            statementId: number;
+            /** @example esun */
+            institution: string;
+            /** Format: date */
+            dueDate: string;
+            /** @example TWD */
+            unit: string;
+            /** @description What the bill says is due */
+            amount: components["schemas"]["Decimal"];
+            /**
+             * Format: date
+             * @description When a later bill showed it paid, after the account's newest balance; absent while that is not known
+             */
+            paidOn?: string;
         };
         AccountDetail: components["schemas"]["Account"] & {
             /** @description Every balance its sources reported, statements and snapshots, newest first */

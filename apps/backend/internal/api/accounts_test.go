@@ -381,6 +381,37 @@ func TestLinesShowWhereTheirMoneyWentAndBillsWhenTheyWerePaid(t *testing.T) {
 	}
 }
 
+func TestADepositAccountListsTheBillsItsAutopayTakesAfterItsNewestBalance(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	// September's bill was paid from E.SUN's savings on 9/22; October's, due 10/22, is to come out after
+	// the 9/30 balance the account's newest statement prints.
+	store(t, pool, "esun.eml", septemberDeposit("esun", savings, "5000", septemberLine(22, "-6350", "玉山卡款扣繳", "")))
+	store(t, pool, "taishin.eml", septemberDeposit("taishin", "876543****9234", "20000"))
+	store(t, pool, "bill.eml", septemberBill("6350"))
+	october := store(t, pool, "october.eml", pt.Response("esun.credit_card", pt.Bill("esun", pt.Day(10, 7), pt.Day(10, 22), "9000")))
+	var statementID int64
+	if err := pool.QueryRow(t.Context(), "SELECT id FROM statements WHERE document_id = $1", october).Scan(&statementID); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts := decode[[]Account](t, get(t, e, "/api/accounts"))
+	esun, taishin := accountNamed(t, accounts, savings), accountNamed(t, accounts, "876543****9234")
+	if esun.Debits == nil || len(*esun.Debits) != 1 {
+		t.Fatalf("E.SUN debits = %+v, want October's bill", esun.Debits)
+	}
+	if d := (*esun.Debits)[0]; d.StatementId != statementID || d.Institution != "esun" || d.DueDate.String() != "2026-10-22" ||
+		d.Unit != "TWD" || d.Amount != "9000" || d.PaidOn != nil {
+		t.Fatalf("E.SUN debit = %+v, want October's bill of 9000 due 10/22", d)
+	}
+	if taishin.Debits != nil {
+		t.Fatalf("Taishin debits = %+v, want none", *taishin.Debits)
+	}
+	detail := decode[AccountDetail](t, get(t, e, fmt.Sprintf("/api/accounts/%d", esun.Id)))
+	if detail.Debits == nil || len(*detail.Debits) != 1 {
+		t.Fatalf("detail debits = %+v", detail.Debits)
+	}
+}
+
 func TestASecuritiesAccountIsWorthItsHoldingsAtTheNewestCloseAndItsTradesAreNoSpending(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	sold := func(day int32, name, shares, amount, net string) *parserv2.Line {

@@ -957,6 +957,25 @@ components:
           type: array
           description: Points that lapsed between two bills by their program's rule, oldest first; the gaps they leave are not in `gaps`
           items: { $ref: "#/components/schemas/LapsedPoints" }
+        debits:
+          type: array
+          description: |
+            A deposit account's: the card bills whose money leaves it after its newest balance in the bill's
+            currency, which that balance therefore does not show gone yet, soonest due first. A bank's bills
+            leave the account the newest of them a deposit line showed paid left (ADR 0016)
+          items: { $ref: "#/components/schemas/Debit" }
+
+    Debit:
+      type: object
+      description: A card bill whose money leaves a deposit account
+      required: [statementId, institution, dueDate, unit, amount]
+      properties:
+        statementId: { type: integer, format: int64 }
+        institution: { type: string, example: esun }
+        dueDate: { type: string, format: date }
+        unit: { type: string, example: TWD }
+        amount: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: What the bill says is due }
+        paidOn: { type: string, format: date, description: "When a later bill showed it paid, after the account's newest balance; absent while that is not known" }
 
     AccountDetail:
       allOf:

@@ -29,8 +29,6 @@ const (
 	// An own transfer's, which a fitting counterparty proves, may be further apart: one bank posts it on
 	// the day, another on its next working day, past a holiday of up to nine days (the Lunar New Year).
 	ownTransferWindowDays = 10
-	// A bill counts as paid by a payment this many days past its due date at the latest.
-	paidGraceDays = 5
 	// A counterparty fits an account when at least this many digits both print agree.
 	minAgreeingDigits = 4
 )
@@ -215,7 +213,7 @@ func matchPaid(bills []dbq.CardBillsRow, lines []transferLine) map[int64]payment
 			paid[bill.ID] = payment{on: bill.ClosingDate}
 			continue
 		}
-		last := bill.DueDate.Time.AddDate(0, 0, paidGraceDays)
+		last := bill.DueDate.Time.AddDate(0, 0, domain.PaidGraceDays)
 		within := func(l transferLine) bool {
 			at := l.TransactionDate.Time
 			return !used[l.ID] && (bill.Currency == nil || l.Unit == *bill.Currency) &&

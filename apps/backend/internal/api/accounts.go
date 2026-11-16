@@ -58,7 +58,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		Id: account.Id, Institution: account.Institution, Kind: account.Kind, Side: account.Side, Number: account.Number,
 		Label: account.Label, Name: account.Name, FullNumber: account.FullNumber, CheckAgainOn: account.CheckAgainOn, Balances: account.Balances,
 		Continuity: account.Continuity, Worth: account.Worth, WorthFrom: account.WorthFrom, Valuation: account.Valuation,
-		Gaps: account.Gaps, Expiries: account.Expiries, Lots: account.Lots, Lapsed: account.Lapsed, History: history, Fills: fills,
+		Gaps: account.Gaps, Expiries: account.Expiries, Lots: account.Lots, Lapsed: account.Lapsed, Debits: account.Debits, History: history, Fills: fills,
 	}
 	if domain.AccountKind(account.Kind) == domain.Securities {
 		held, err := readPositions(ctx, queries, request.Id, rows, account.Balances)
@@ -98,6 +98,10 @@ func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Accou
 		return nil, nil, err
 	}
 	lotsOf, lapsedOf := pointsLots(programs)
+	debitsOf, err := readDebits(ctx, queries, latest)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	balancesOf := map[int64][]dbq.LatestBalancesRow{}
 	for _, b := range latest {
@@ -128,10 +132,58 @@ func readAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Accou
 		if lapsed := lapsedOf[row.ID]; len(lapsed) > 0 {
 			account.Lapsed = &lapsed
 		}
+		if debits := debitsOf[row.ID]; len(debits) > 0 {
+			account.Debits = &debits
+		}
 		accounts = append(accounts, account)
 		worths = append(worths, domain.Worth{Kind: row.Kind, Worth: standing.Worth})
 	}
 	return accounts, worths, nil
+}
+
+// readDebits works out the card bills that leave each deposit account after its newest balance, `latest`
+// (domain.Debits).
+func readDebits(ctx context.Context, queries *dbq.Queries, latest []dbq.LatestBalancesRow) (map[int64][]Debit, error) {
+	rows, err := queries.CardBillPayments(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("card bill payments: %w", err)
+	}
+	bills := make([]domain.CardBill, 0, len(rows))
+	for _, b := range rows {
+		if !b.ClosingDate.Valid || !b.DueDate.Valid || b.Currency == nil {
+			continue
+		}
+		bill := domain.CardBill{
+			ID: b.ID, Institution: b.Institution, ClosingDate: b.ClosingDate.Time, DueDate: b.DueDate.Time,
+			Unit: *b.Currency, TotalDue: numeric.ToRat(b.TotalDue),
+		}
+		if b.PaidFrom != nil {
+			bill.PaidFrom = *b.PaidFrom
+		}
+		if b.PaidOn.Valid {
+			bill.PaidOn = b.PaidOn.Time
+		}
+		bills = append(bills, bill)
+	}
+	newest := make(map[domain.AccountUnit]time.Time, len(latest))
+	for _, b := range latest {
+		newest[domain.AccountUnit{AccountID: b.AccountID, Unit: b.Unit}] = b.AsOf.Time
+	}
+
+	shown := map[int64][]Debit{}
+	for account, bills := range domain.Debits(bills, newest) {
+		for _, b := range bills {
+			debit := Debit{
+				StatementId: b.ID, Institution: b.Institution, DueDate: openapi_types.Date{Time: b.DueDate}, Unit: b.Unit,
+				Amount: numeric.Exact(b.TotalDue),
+			}
+			if !b.PaidOn.IsZero() {
+				debit.PaidOn = &openapi_types.Date{Time: b.PaidOn}
+			}
+			shown[account] = append(shown[account], debit)
+		}
+	}
+	return shown, nil
 }
 
 // pointsLots shows each account's points programs' lots, a day's together, soonest first, and what

@@ -12,6 +12,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cardBillPayments = `-- name: CardBillPayments :many
+SELECT s.id, s.institution, s.closing_date, s.due_date, s.currency, s.total_due, s.paid_on,
+       a.id AS paid_from
+FROM statements s
+LEFT JOIN transactions t ON t.id = s.paid_by
+LEFT JOIN accounts a ON a.id = t.account_id AND a.kind = 'deposit'
+WHERE s.kind = 'credit_card'
+`
+
+type CardBillPaymentsRow struct {
+	ID          int64
+	Institution string
+	ClosingDate pgtype.Date
+	DueDate     pgtype.Date
+	Currency    *string
+	TotalDue    pgtype.Numeric
+	PaidOn      pgtype.Date
+	PaidFrom    *int64
+}
+
+// Every card bill, with when it was paid and, where a deposit account's line showed it, that account
+// (ADR 0016): the account a bank's bills leave.
+func (q *Queries) CardBillPayments(ctx context.Context) ([]CardBillPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, cardBillPayments)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CardBillPaymentsRow
+	for rows.Next() {
+		var i CardBillPaymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Institution,
+			&i.ClosingDate,
+			&i.DueDate,
+			&i.Currency,
+			&i.TotalDue,
+			&i.PaidOn,
+			&i.PaidFrom,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteStatementsForDocument = `-- name: DeleteStatementsForDocument :many
 DELETE FROM statements
 WHERE document_id = $1

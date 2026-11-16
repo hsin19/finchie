@@ -25,6 +25,7 @@ import {
     listedBalances,
     nextLapse,
     readAccountsView,
+    shortfalls,
     shownNumber,
     shownPositions,
     sortAccounts,
@@ -226,6 +227,39 @@ describe("accountStatus", () => {
 
     it("says how long ago in words", () => {
         expect([daysAgo(0), daysAgo(1), daysAgo(41)]).toEqual(["今天", "昨天", "41 天前"]);
+    });
+});
+
+describe("shortfalls", () => {
+    // E.SUN's savings pays HSBC's bill on 11/09 and E.SUN's on 11/23; its newest balance is October's end.
+    const payer = (amount: string, rest: Partial<Account> = {}): Account => ({
+        ...account(1),
+        balances: [{ unit: "TWD", asOf: "2026-10-31", amount }],
+        debits: [
+            { statementId: 10, institution: "hsbc", dueDate: "2026-11-09", unit: "TWD", amount: "3000" },
+            { statementId: 11, institution: "esun", dueDate: "2026-11-23", unit: "TWD", amount: "4000.50" },
+        ],
+        ...rest,
+    });
+
+    it("is what the newest balance lacks to cover every bill taken after it, those already due included", () => {
+        expect(shortfalls(payer("5000"), "2026-11-13")).toEqual([
+            { unit: "TWD", asOf: "2026-10-31", balance: "5000", debits: payer("0").debits, owed: "7000.50", lacks: "2000.50" },
+        ]);
+    });
+
+    it("is nothing when the balance covers them, or once every bill is due", () => {
+        expect(shortfalls(payer("7000.50"), "2026-11-13")).toEqual([]);
+        expect(shortfalls(payer("5000"), "2026-11-24")).toEqual([]);
+    });
+
+    it("counts a bill a later bill showed paid, but not as still to come out", () => {
+        const paid = payer("5000", { debits: [{ statementId: 11, institution: "esun", dueDate: "2026-11-23", unit: "TWD", amount: "6000", paidOn: "2026-11-23" }] });
+        expect(shortfalls(paid, "2026-11-13")).toEqual([]);
+    });
+
+    it("tells nothing by a balance too old to go by", () => {
+        expect(shortfalls(payer("5000", { balances: [{ unit: "TWD", asOf: "2026-09-20", amount: "5000" }] }), "2026-11-13")).toEqual([]);
     });
 });
 

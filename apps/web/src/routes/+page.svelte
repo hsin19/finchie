@@ -42,7 +42,7 @@ const lastMonth = shiftMonth(now, -1);
 const monthNumber = (m: Month) => Number(m.slice(5));
 
 // What needs the owner comes first, and only when there is something.
-const found = $derived(needs({ byState: data.documentsByState, accounts: data.accounts, today: day }));
+const found = $derived(needs({ byState: data.documentsByState, accounts: data.accounts, today: day, base: data.settings.baseCurrency }));
 
 // This month's card bills and last month's, and what is still due.
 const bills = $derived(byClosingMonth(data.statements));
