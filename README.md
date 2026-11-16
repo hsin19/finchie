@@ -13,7 +13,7 @@ A self-hosted personal finance platform. It turns bank and credit card statement
 | Path | What it is | Status |
 |---|---|---|
 | [`apps/backend`](apps/backend/) | Go. The only public service: API, document ingestion, background jobs, and the web app (embedded). Owns the database. | ✅ Upload, parse, and read statements |
-| [`apps/parser`](apps/parser/) | Python. Stateless parser behind gRPC: a raw statement goes in, structured data comes out. Internal only. | ✅ 4 banks |
+| [`apps/parser`](apps/parser/) | Python. Stateless parser behind gRPC: a raw statement goes in, structured data comes out. Internal only. | ✅ 8 institutions: card bills, deposit and securities statements |
 | [`apps/mailbox`](apps/mailbox/) | Cloudflare Email Worker. Takes statements Gmail forwards to an address on Email Routing and uploads them to the backend. Deployed by hand | ✅ Automatic ingestion |
 | [`apps/web`](apps/web/) | SvelteKit single-page app. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend) | ✅ Overview (what needs a look, bills, net worth, a year of income and spending), notifications, statements, transactions, accounts, upload; installs to a home screen |
 
@@ -44,12 +44,18 @@ browser ── Cloudflare Access ── Tunnel ──▶ backend (Go) ── gRP
 
 ## Supported statements
 
-| Institution | Source | Notes |
+| Institution | Statements | Notes |
 |---|---|---|
-| E.SUN Bank | PDF attached to the e-statement e-mail | |
-| Taishin Bank | Password-protected PDF | One bill can list several Richart cards |
-| Cathay United Bank | Password-protected PDF | Deposit accounts come from the CUBE app's e-passbook (電子存摺), since the monthly bank statement e-mail carries only a link |
-| HSBC Taiwan | Password-protected PDF | Transaction descriptions are images, read with OCR |
+| E.SUN Bank | Card bill, combined statement (綜合對帳單) | |
+| Taishin Bank | Card bill, combined statement (綜合對帳單) | One bill can list several Richart cards |
+| Cathay United Bank | Card bill, e-passbook (電子存摺) | Deposit accounts come from the e-passbook exported from the CUBE app, since the monthly bank statement e-mail carries only a link |
+| HSBC Taiwan | Card bill | Transaction descriptions are images, read with OCR |
+| CTBC Bank | Bank statement (對帳單) | Its Chinese text has no Unicode mapping, so it is read with OCR |
+| Taipei Fubon Bank | Bank statement (銀行對帳單) | |
+| Next Bank | Combined statement (綜合對帳單) | |
+| Shin Kong Securities | Monthly statement (證券月對帳單) | Its daily trade reports are not read (ADR 0017) |
+
+A password-protected PDF opens with the password its bank's own rule builds from the owner's details ([ADR 0014](docs/adr/0014-recognizing-statements.md)); `apps/parser`'s README lists every parser and its rule. Crypto exchanges send no statements: MAX, Binance, and Bitget are read through read-only API keys ([ADR 0018](docs/adr/0018-exchange-accounts.md)).
 
 Statements are taken as e-mails only ([ADR 0014](docs/adr/0014-recognizing-statements.md)). Let Gmail forward them to the mailbox, which uploads them as they arrive ([ADR 0010](docs/adr/0010-mail-ingestion.md)): the documents page offers the Gmail filter to import, generated from the parsers. Or upload the `.eml` by hand, as the bank sent it or forwarded. A statement opens in the browser as its PDF, decrypted, without the password ([ADR 0012](docs/adr/0012-reading-documents.md)).
 

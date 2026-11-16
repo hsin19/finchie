@@ -70,7 +70,7 @@ SELECT s.id, s.document_id, s.institution, s.closing_date, s.due_date, s.currenc
        s.balanced, s.paid_on,
        (SELECT count(*) FROM transactions t WHERE t.statement_id = s.id)::integer AS transaction_count
 FROM statements s
--- Card bills only, until deposit statements get views of their own (ADR 0013).
+-- Card bills only: deposit and securities statements are shown through their accounts' lines.
 WHERE s.kind = 'credit_card'
 ORDER BY s.closing_date DESC, s.id DESC
 LIMIT @row_limit;

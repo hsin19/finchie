@@ -280,7 +280,7 @@ type ListStatementsRow struct {
 	TransactionCount int32
 }
 
-// Card bills only, until deposit statements get views of their own (ADR 0013).
+// Card bills only: deposit and securities statements are shown through their accounts' lines.
 func (q *Queries) ListStatements(ctx context.Context, rowLimit int32) ([]ListStatementsRow, error) {
 	rows, err := q.db.Query(ctx, listStatements, rowLimit)
 	if err != nil {
