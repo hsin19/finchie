@@ -54,7 +54,8 @@ const picked = $derived(pickerValue(filters));
                 {filters.closing} 結帳的帳單 <span class="text-mute">×</span>
             </button>
         {/if}
-        <select class="control" aria-label="帳戶或卡片" value={picked} onchange={event => void navigate(pickerChanges(event.currentTarget.value))}>
+        <!-- As wide as its longest account at most the row: on a phone that would run past the panel. -->
+        <select class="control max-w-full" aria-label="帳戶或卡片" value={picked} onchange={event => void navigate(pickerChanges(event.currentTarget.value))}>
             <option value="">all accounts</option>
             {#each options as option (option.value)}
                 <option value={option.value}>{option.label}</option>

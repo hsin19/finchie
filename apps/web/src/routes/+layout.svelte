@@ -156,14 +156,15 @@ function onkeydown(event: KeyboardEvent) {
 <div class="fixed inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] bg-ground"></div>
 
 <div class="mx-auto flex min-h-dvh max-w-[1240px] flex-col gap-3 px-3.5 pt-[calc(env(safe-area-inset-top)+0.875rem)] pb-28 md:px-5 md:pt-[calc(env(safe-area-inset-top)+1.25rem)] md:pb-6">
-    <header class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-2.5 md:panel md:px-3.5 md:py-2.5">
-        <div class="min-w-0 grow truncate text-[14px]">
+    <!-- One line at any width: the command gives way, cut short, and the links stay at the top right. -->
+    <header class="flex items-center gap-x-3 border-b border-line pb-2.5 md:panel md:gap-x-4 md:px-3.5 md:py-2.5">
+        <div class="min-w-0 flex-1 truncate text-[14px]">
             <a href={resolve("/")} aria-label="finchie" class="font-bold text-accent"><img src={asset("favicon.svg")} alt="" class="-mr-0.5 inline-block size-[18px] align-[-4px]" />inchie</a>
             {prompt.command}{#each prompt.flags as flag (flag.name)}
                 <span class="text-mute">{` ${flag.name}`}</span>{flag.value ? ` ${flag.value}` : ""}
             {/each}
         </div>
-        <nav aria-label="主要" class="hidden gap-1.5 md:flex">
+        <nav aria-label="主要" class="hidden shrink-0 gap-1.5 md:flex">
             {#each pages as item (item.key)}
                 <a
                     href={item.href}
@@ -175,7 +176,7 @@ function onkeydown(event: KeyboardEvent) {
         <a
             href={documents.href}
             aria-current={documents.current ? "page" : undefined}
-            class="flex min-h-9 items-center gap-1.5 text-[12px] md:text-[13px] {documents.current ? 'text-ink' : 'text-dim hover:text-ink'}"
+            class="flex min-h-9 shrink-0 items-center gap-1.5 text-[12px] md:text-[13px] {documents.current ? 'text-ink' : 'text-dim hover:text-ink'}"
         >
             <span class="hidden text-accent md:inline">[{documents.key}]</span>{documents.label}
             {#if data.pending.length > 0}<span class="text-accent">● {data.pending.length}</span>{/if}
@@ -183,7 +184,7 @@ function onkeydown(event: KeyboardEvent) {
         <a
             href={notifications.href}
             aria-current={notifications.current ? "page" : undefined}
-            class="flex min-h-9 items-center gap-1.5 text-[12px] md:text-[13px] {notifications.current ? 'text-ink' : 'text-dim hover:text-ink'}"
+            class="flex min-h-9 shrink-0 items-center gap-1.5 text-[12px] md:text-[13px] {notifications.current ? 'text-ink' : 'text-dim hover:text-ink'}"
         >
             <span class="hidden text-accent md:inline">[{notifications.key}]</span>{notifications.label}
             {#if data.unread > 0}<span class="text-neg" title="還沒看過的通知">● {data.unread}</span>{/if}
