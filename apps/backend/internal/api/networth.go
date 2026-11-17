@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -99,12 +100,37 @@ func series(from, to time.Time, daily bool) ([]time.Time, string) {
 	return days, ""
 }
 
-// netWorths works out net worth on each day: each account's balances that day assessed by the domain,
-// and, to tell how exact each figure is, every account's newest report.
+// netWorths works out net worth on each day (domain.Net).
 func netWorths(ctx context.Context, queries *dbq.Queries, days []time.Time) ([]domain.NetWorth, error) {
+	worths, err := worthsOn(ctx, queries, days, nil)
+	if err != nil {
+		return nil, err
+	}
+	nets := make([]domain.NetWorth, 0, len(days))
+	for i, day := range days {
+		nets = append(nets, domain.Net(day, worths[i]))
+	}
+	return nets, nil
+}
+
+// worthsOn is how each account stands on each day: its balances that day assessed by the domain, and, to
+// tell how exact each figure is, its newest report. An account nothing had reported yet on a day is missing
+// from that day's. Only the accounts `keep` keeps, every one when it is nil: a year of days of every
+// account takes seconds.
+func worthsOn(ctx context.Context, queries *dbq.Queries, days []time.Time, keep func(dbq.ListAccountsRow) bool) ([][]domain.Worth, error) {
 	accounts, err := queries.ListAccounts(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
+	}
+	ids := []int64{}
+	if keep != nil {
+		accounts = slices.DeleteFunc(accounts, func(a dbq.ListAccountsRow) bool { return !keep(a) })
+		for _, a := range accounts {
+			ids = append(ids, a.ID)
+		}
+		if len(ids) == 0 {
+			return make([][]domain.Worth, len(days)), nil
+		}
 	}
 	latest, err := queries.LatestBalances(ctx, nil)
 	if err != nil {
@@ -114,11 +140,11 @@ func netWorths(ctx context.Context, queries *dbq.Queries, days []time.Time) ([]d
 	for _, day := range days {
 		dates = append(dates, pgtype.Date{Time: day, Valid: true})
 	}
-	held, err := queries.BalancesOn(ctx, dbq.BalancesOnParams{Days: dates, Itemized: domain.KindsWhere(domain.AccountKind.Itemized)})
+	held, err := queries.BalancesOn(ctx, dbq.BalancesOnParams{Days: dates, Itemized: domain.KindsWhere(domain.AccountKind.Itemized), Accounts: ids})
 	if err != nil {
 		return nil, fmt.Errorf("balances on days: %w", err)
 	}
-	valued, err := queries.ValuationsOn(ctx, dates)
+	valued, err := queries.ValuationsOn(ctx, dbq.ValuationsOnParams{Days: dates, Accounts: ids})
 	if err != nil {
 		return nil, fmt.Errorf("valuations on days: %w", err)
 	}
@@ -155,7 +181,7 @@ func netWorths(ctx context.Context, queries *dbq.Queries, days []time.Time) ([]d
 		now[a.ID] = domain.Assess(a.Kind, latestOf[a.ID], domain.Gaps{}, nil)
 		through[a.ID] = domain.ReportedThrough(now[a.ID].Newest, a.CheckAgainOn.Time, today)
 	}
-	nets := make([]domain.NetWorth, 0, len(days))
+	all := make([][]domain.Worth, 0, len(days))
 	for _, day := range days {
 		worths := make([]domain.Worth, 0, len(accounts))
 		for _, a := range accounts {
@@ -170,7 +196,7 @@ func netWorths(ctx context.Context, queries *dbq.Queries, days []time.Time) ([]d
 				ByHand: a.Institution == domain.OwnerInstitution, Empty: len(latestOf[a.ID]) > 0 && len(now[a.ID].Held) == 0,
 			})
 		}
-		nets = append(nets, domain.Net(day, worths))
+		all = append(all, worths)
 	}
-	return nets, nil
+	return all, nil
 }

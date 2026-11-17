@@ -324,10 +324,11 @@ WITH days AS (
     SELECT DISTINCT ON (d.day, b.account_id, b.unit_id) d.day, b.account_id, b.unit_id, b.as_of, b.amount, b.statement_id
     FROM days d
     JOIN balances b ON b.as_of <= d.day
+    WHERE cardinality($2::bigint[]) = 0 OR b.account_id = ANY ($2::bigint[])
     ORDER BY d.day, b.account_id, b.unit_id, b.as_of DESC, b.id DESC
 ), moved AS (
     SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
-           (h.amount + CASE WHEN a.kind = ANY ($2::text[]) THEN coalesce((
+           (h.amount + CASE WHEN a.kind = ANY ($3::text[]) THEN coalesce((
                SELECT sum(t.amount) FROM counted_lines t
                WHERE t.account_id = h.account_id AND t.unit_id = h.unit_id
                  AND t.transaction_date > h.as_of AND t.transaction_date <= h.day), 0) ELSE 0 END)::numeric AS amount
@@ -345,6 +346,7 @@ ORDER BY m.day, m.account_id, u.symbol
 
 type BalancesOnParams struct {
 	Days     []pgtype.Date
+	Accounts []int64
 	Itemized []string
 }
 
@@ -361,12 +363,13 @@ type BalancesOnRow struct {
 // What each account held of each unit at the end of each day (ADR 0023): its newest balance on or before
 // the day, and for the itemized kinds the lines that count (counted_lines, a fill of a gap among them) dated
 // after that balance up to the day; with its worth in
-// NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
+// NT$ at the unit's newest price at the end of that day in Taipei, none without one then. Of the accounts
+// listed, or of every one when none is.
 // The day after is an interval, not `+ 1`: Database Observability (Grafana Alloy) prepares this query with
 // its constants as parameters, and a date plus an untyped parameter matches several operators, leaving it
 // unplannable.
 func (q *Queries) BalancesOn(ctx context.Context, arg BalancesOnParams) ([]BalancesOnRow, error) {
-	rows, err := q.db.Query(ctx, balancesOn, arg.Days, arg.Itemized)
+	rows, err := q.db.Query(ctx, balancesOn, arg.Days, arg.Accounts, arg.Itemized)
 	if err != nil {
 		return nil, err
 	}
@@ -944,6 +947,7 @@ WITH days AS (
     SELECT DISTINCT ON (d.day, v.account_id) d.day, v.account_id, v.unit_id, v.as_of, v.amount
     FROM days d
     JOIN valuations v ON v.as_of <= d.day
+    WHERE cardinality($2::bigint[]) = 0 OR v.account_id = ANY ($2::bigint[])
     ORDER BY d.day, v.account_id, v.as_of DESC
 )
 SELECT v.day::date AS day, v.account_id, v.as_of,
@@ -954,6 +958,11 @@ LEFT JOIN LATERAL price_at(v.unit_id, ((v.day + '1 day'::interval) AT TIME ZONE 
 ORDER BY v.day, v.account_id
 `
 
+type ValuationsOnParams struct {
+	Days     []pgtype.Date
+	Accounts []int64
+}
+
 type ValuationsOnRow struct {
 	Day       pgtype.Date
 	AccountID int64
@@ -961,10 +970,11 @@ type ValuationsOnRow struct {
 	Worth     pgtype.Numeric
 }
 
-// Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then.
+// Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then. Of the
+// accounts listed, or of every one when none is.
 // An interval, not `+ 1`: see BalancesOn.
-func (q *Queries) ValuationsOn(ctx context.Context, days []pgtype.Date) ([]ValuationsOnRow, error) {
-	rows, err := q.db.Query(ctx, valuationsOn, days)
+func (q *Queries) ValuationsOn(ctx context.Context, arg ValuationsOnParams) ([]ValuationsOnRow, error) {
+	rows, err := q.db.Query(ctx, valuationsOn, arg.Days, arg.Accounts)
 	if err != nil {
 		return nil, err
 	}

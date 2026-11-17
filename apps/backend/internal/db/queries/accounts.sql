@@ -230,13 +230,15 @@ LIMIT @row_limit OFFSET @row_offset;
 -- What each account held of each unit at the end of each day (ADR 0023): its newest balance on or before
 -- the day, and for the itemized kinds the lines that count (counted_lines, a fill of a gap among them) dated
 -- after that balance up to the day; with its worth in
--- NT$ at the unit's newest price at the end of that day in Taipei, none without one then.
+-- NT$ at the unit's newest price at the end of that day in Taipei, none without one then. Of the accounts
+-- listed, or of every one when none is.
 WITH days AS (
     SELECT d::date AS day FROM unnest(@days::date[]) d
 ), held AS (
     SELECT DISTINCT ON (d.day, b.account_id, b.unit_id) d.day, b.account_id, b.unit_id, b.as_of, b.amount, b.statement_id
     FROM days d
     JOIN balances b ON b.as_of <= d.day
+    WHERE cardinality(@accounts::bigint[]) = 0 OR b.account_id = ANY (@accounts::bigint[])
     ORDER BY d.day, b.account_id, b.unit_id, b.as_of DESC, b.id DESC
 ), moved AS (
     SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
@@ -259,13 +261,15 @@ LEFT JOIN LATERAL price_at(m.unit_id, ((m.day + '1 day'::interval) AT TIME ZONE 
 ORDER BY m.day, m.account_id, u.symbol;
 
 -- name: ValuationsOn :many
--- Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then.
+-- Each account's newest valuation on or before each day (ADR 0018), with its worth in NT$ then. Of the
+-- accounts listed, or of every one when none is.
 WITH days AS (
     SELECT d::date AS day FROM unnest(@days::date[]) d
 ), valued AS (
     SELECT DISTINCT ON (d.day, v.account_id) d.day, v.account_id, v.unit_id, v.as_of, v.amount
     FROM days d
     JOIN valuations v ON v.as_of <= d.day
+    WHERE cardinality(@accounts::bigint[]) = 0 OR v.account_id = ANY (@accounts::bigint[])
     ORDER BY d.day, v.account_id, v.as_of DESC
 )
 SELECT v.day::date AS day, v.account_id, v.as_of,
