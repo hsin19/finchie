@@ -7,6 +7,7 @@ import type {
 } from "#lib/api/client.js";
 import Counterpart from "#lib/components/Counterpart.svelte";
 import FileLink from "#lib/components/FileLink.svelte";
+import PayeeName from "#lib/components/PayeeName.svelte";
 import Tag from "#lib/components/Tag.svelte";
 import {
     monthOf,
@@ -134,7 +135,7 @@ function statementLabel(statementId: number) {
         {/if}
         {#if t.counterparty}
             <dt class="text-mute">counterparty</dt>
-            <dd class="m-0 break-words text-dim">{t.counterparty}</dd>
+            <dd class="m-0 break-words"><PayeeName counterparty={t.counterparty} name={t.counterpartyName} /></dd>
         {/if}
         {#if t.counterpart}
             <dt class="text-mute">{t.accountKind === "deposit" && t.counterpart.accountKind === "credit_card" ? "paid" : "transfer"}</dt>

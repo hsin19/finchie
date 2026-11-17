@@ -154,7 +154,7 @@ function amountTone(value: string) {
                                 </td>
                             {:else}
                                 <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
-                                <td class="px-2 py-2 text-mute">{line.counterparty ?? ""}</td>
+                                <td class="px-2 py-2 text-mute" title={line.counterpartyName ? (line.counterparty ?? "") : ""}>{line.counterpartyName ?? line.counterparty ?? ""}</td>
                             {/if}
                             <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
                                 {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>

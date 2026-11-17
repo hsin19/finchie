@@ -93,3 +93,8 @@ export function handleNotifications(ids: number[], handled = true) {
 export function readNotifications(ids: number[]) {
     return change(api().POST("/api/notifications/read", { body: { ids } }));
 }
+
+/** Names whom money goes to or comes from, by the counterparty as the bank prints it; an empty name forgets it. */
+export function namePayee(counterparty: string, name: string) {
+    return change(api().POST("/api/payees", { body: { counterparty, name } }));
+}
