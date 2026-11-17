@@ -261,6 +261,14 @@ describe("accountPage", () => {
     it("gives an account the owner keeps a form and no lines", () => {
         expect(accountPage({ kind: "points", institution: "owner" })).toMatchObject({ expiring: true, lines: undefined, form: true });
     });
+
+    it("shows shares and coins against what went into them, but not one the owner keeps", () => {
+        expect(accountPage({ kind: "securities", institution: "skis" }).invested).toBe(true);
+        expect(accountPage({ kind: "exchange", institution: "max" }).invested).toBe(true);
+        expect(accountPage({ kind: "deposit", institution: "esun" }).invested).toBe(false);
+        // No flows to tell what went in from what it made.
+        expect(accountPage({ kind: "exchange", institution: "owner" }).invested).toBe(false);
+    });
 });
 
 describe("shownPositions", () => {

@@ -27,6 +27,7 @@ export type DocumentPage = Schemas["DocumentPage"];
 export type DocumentPreview = Schemas["DocumentPreview"];
 export type DocumentFailure = Schemas["DocumentFailure"];
 export type DocumentStatus = Schemas["DocumentStatus"];
+export type InvestmentPoint = Schemas["InvestmentPoint"];
 export type KindTotal = Schemas["KindTotal"];
 export type LineCounterpart = Schemas["LineCounterpart"];
 export type NetWorth = Schemas["NetWorth"];

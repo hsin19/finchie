@@ -15,6 +15,7 @@ import type {
     AccountSide,
 } from "#lib/api/client.js";
 import AccountStatus from "#lib/components/AccountStatus.svelte";
+import InvestmentTrend from "#lib/components/InvestmentTrend.svelte";
 import NetWorthTrend from "#lib/components/NetWorthTrend.svelte";
 import NewAccount from "#lib/components/NewAccount.svelte";
 import { today } from "#lib/dates.js";
@@ -179,6 +180,13 @@ function href(account: Account) {
     <NetWorthTrend points={data.history} />
 {:else if data.historyError}
     <p class="m-0 text-[12px] text-mute">讀不到淨額走勢：{data.historyError}</p>
+{/if}
+
+<!-- Nothing to say for an owner without securities or exchange accounts. -->
+{#if data.investments && data.investments.length > 0}
+    <InvestmentTrend points={data.investments} />
+{:else if data.investmentsError}
+    <p class="m-0 text-[12px] text-mute">讀不到投資走勢：{data.investmentsError}</p>
 {/if}
 
 <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-mute">

@@ -407,6 +407,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/investments/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the securities and exchange accounts are worth against what went into them, over time
+         * @description For each day as in /api/net-worth/history. What went into an exchange is every deposit and
+         *     withdrawal it ever reported, from or to a bank, a wallet, or another exchange, at the day's price,
+         *     or at the first one for a day before Finchie had any. What went into a securities account before
+         *     Finchie saw it is unknown, so it counts what it was worth on the first of these days it has a worth
+         *     as put in that day, then its trades' money paid or received. The series starts on the first day an
+         *     account has a worth. With `account`, that account's alone.
+         */
+        get: operations["getInvestmentHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications": {
         parameters: {
             query?: never;
@@ -1405,6 +1430,24 @@ export interface components {
             /** @description Every account had reported by the day: the figure is exact */
             complete: boolean;
         };
+        InvestmentPoint: {
+            /** Format: date */
+            on: string;
+            /** @description What the accounts with a worth on the day are worth */
+            worth: components["schemas"]["Decimal"];
+            /** @description What went into those accounts, net; negative when more came out */
+            invested: components["schemas"]["Decimal"];
+            /** @description Worth less invested */
+            gain: components["schemas"]["Decimal"];
+            /** @description Gain over invested, in percent; absent while nothing net is in */
+            returnPercent?: components["schemas"]["Decimal"];
+            /** @description Accounts without a worth on the day, left out of worth and invested */
+            unvalued: number;
+            /** @description Coins or currencies that crossed in or out and have never had a price in NT$, left out of invested */
+            unpriced: number;
+            /** @description Every account had reported by the day. What went in may still hold estimates: what crossed before Finchie had a price for it is at the first one */
+            complete: boolean;
+        };
         KindWorth: {
             kind: components["schemas"]["AccountKind"];
             worth: components["schemas"]["Decimal"];
@@ -2156,6 +2199,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NetWorthPoint"][];
+                };
+            };
+            400: components["responses"]["Problem"];
+        };
+    };
+    getInvestmentHistory: {
+        parameters: {
+            query: {
+                /** @description One securities or exchange account; nothing for another */
+                account?: number;
+                from: string;
+                to?: string;
+                step?: components["schemas"]["HistoryStep"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentPoint"][];
                 };
             };
             400: components["responses"]["Problem"];
