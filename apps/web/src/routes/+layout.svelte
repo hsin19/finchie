@@ -237,14 +237,22 @@ function onkeydown(event: KeyboardEvent) {
     </header>
 
     <main class="flex grow flex-col gap-3 transition-opacity {slow && !elsewhere ? 'opacity-60' : ''}" aria-busy={slow}>
+        <!-- The page left stays where it is, unseen, under the skeleton: SvelteKit keeps its scroll and its
+             snapshots for Back only once the new page's data is in, and a page taken away by then would leave
+             nothing to keep. The skeleton sticks to the top of the screen, wherever the page was scrolled. -->
         {#if slow && elsewhere}
-            <PageSkeleton route={navigating.to?.route.id ?? null} />
-        {:else}
+            <div class="sticky top-[calc(env(safe-area-inset-top)+0.875rem)] z-[5] -mb-3 h-0">
+                <div class="absolute inset-x-0 top-0 bg-ground">
+                    <PageSkeleton route={navigating.to?.route.id ?? null} />
+                </div>
+            </div>
+        {/if}
+        <div class={["contents", slow && elsewhere && "invisible"]}>
             <!-- A page shows one entity: another id remounts it, so no draft or message carries over (entityKey). -->
             {#key entityKey(page.params)}
                 {@render children()}
             {/key}
-        {/if}
+        </div>
     </main>
 
     <footer class="hidden flex-wrap gap-x-5 gap-y-1 border-t border-dashed border-line pt-2.5 text-[12px] text-mute md:flex">

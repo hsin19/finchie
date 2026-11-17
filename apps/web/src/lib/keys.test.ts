@@ -98,6 +98,16 @@ describe("listen", () => {
         expect(calls).toEqual(["page"]);
     });
 
+    it("lets the layout have the page's keys while the page rests", () => {
+        const calls: string[] = [];
+        const stopLayout = listen(window, { "/": () => calls.push("layout") }, { global: true });
+        const stopPage = listen(window, { "/": () => calls.push("page") }, { active: () => false });
+        slash();
+        stopPage();
+        stopLayout();
+        expect(calls).toEqual(["layout"]);
+    });
+
     it("lets the layout have keys the page does not use", () => {
         const calls: string[] = [];
         const stopLayout = listen(window, { "/": () => calls.push("layout") }, { global: true });

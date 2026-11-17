@@ -24,14 +24,15 @@ export type KeyHandlers = Record<string, (event: KeyboardEvent) => void>;
  * Listens on `target` (the window) for single-key shortcuts; returns the function that stops. Page
  * shortcuts listen in the capture phase and global ones (the layout's) in the bubble phase, so a page
  * always gets the key first. Mount order cannot decide it: after a client-side navigation the layout
- * has been listening longer than the page that just mounted.
+ * has been listening longer than the page that just mounted. While `active` says no, the keys are
+ * left alone, for the layout to take.
  */
-export function listen(target: EventTarget, handlers: KeyHandlers, { global = false } = {}): () => void {
+export function listen(target: EventTarget, handlers: KeyHandlers, { global = false, active = (): boolean => true }: { global?: boolean; active?: () => boolean; } = {}): () => void {
     const options = { capture: !global };
     const listener = (event: Event) => {
         const key = event as KeyboardEvent;
         const handler = handlers[key.key];
-        if (!handler || !claims(key)) return;
+        if (!handler || !active() || !claims(key)) return;
         key.preventDefault();
         handler(key);
     };
