@@ -272,6 +272,8 @@ export interface AccountPage {
     holdings: boolean;
     /** Each security's shares, cost, and gains (ADR 0017). */
     positions: boolean;
+    /** Its worth against what went into it, by day: shares and coins, not one kept by hand (`/api/investments/history`). */
+    invested: boolean;
     /** What will lapse by when (ADR 0019). */
     expiring: boolean;
     /** Its lines, what their amounts mean, and what it means to have none; absent for one kept by hand. */
@@ -296,6 +298,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         noWorth: "",
         holdings: false,
         positions: false,
+        invested: false,
         expiring: false,
         lines: { note: "存入是正數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
@@ -308,6 +311,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         noWorth: "",
         holdings: false,
         positions: false,
+        invested: false,
         expiring: false,
         lines: { note: "照帳單印的：消費是正數，繳款與退款是負數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
@@ -321,6 +325,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         noWorth: "",
         holdings: false,
         positions: false,
+        invested: false,
         expiring: false,
         lines: { note: "照對帳單印的", trade: false, empty: BALANCE_ONLY },
         history: "statements",
@@ -333,6 +338,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         noWorth: "有證券沒有收盤價",
         holdings: false,
         positions: true,
+        invested: true,
         expiring: false,
         lines: { note: "買進的股數是正數", trade: true, empty: BALANCE_ONLY },
         history: "statements",
@@ -345,6 +351,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         noWorth: "有幣種沒有價格",
         holdings: true,
         positions: false,
+        invested: true,
         expiring: false,
         lines: { note: "入金、出金與充幣、提幣，不含買賣：進來是正數", trade: false, empty: "還沒有入金、出金、充幣或提幣。" },
         history: "days",
@@ -357,6 +364,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
         noWorth: "",
         holdings: false,
         positions: false,
+        invested: false,
         expiring: true,
         lines: { note: "帳單上每一期的合計，獲得是正數", trade: false, empty: BALANCE_ONLY },
         history: "statements",
@@ -369,7 +377,7 @@ const pages: Record<AccountKind, Omit<AccountPage, "form">> = {
 export function accountPage(account: Pick<Account, "kind" | "institution">): AccountPage {
     const owned = isOwned(account);
     const page = pages[account.kind];
-    return { ...page, lines: owned ? undefined : page.lines, form: owned };
+    return { ...page, lines: owned ? undefined : page.lines, invested: page.invested && !owned, form: owned };
 }
 
 /** Kinds an owner can keep by hand: every one but a card's, which its bank's bills report (ADR 0022). */

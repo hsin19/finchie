@@ -1,6 +1,7 @@
 <script lang="ts">
 import { accountPage } from "#lib/accounts.js";
 import HoldingsForm from "#lib/components/HoldingsForm.svelte";
+import InvestmentTrend from "#lib/components/InvestmentTrend.svelte";
 import UnitPrices from "#lib/components/UnitPrices.svelte";
 import { today } from "#lib/dates.js";
 import { nameCommand } from "#lib/heading.svelte.js";
@@ -28,6 +29,12 @@ const layout = $derived(accountPage(account));
 <AccountHeader {account} {layout} today={today()} {base} />
 
 <Gaps {account} explanation={layout.gaps} />
+
+{#if data.invested}
+    <InvestmentTrend points={data.invested} kind={account.kind === "exchange" ? "exchange" : "securities"} />
+{:else if data.investedError}
+    <p class="m-0 text-[12px] text-mute">讀不到投資走勢：{data.investedError}</p>
+{/if}
 
 {#if layout.holdings}
     <Holdings {account} {base} intervalHours={data.settings.sourceIntervalHours} />
