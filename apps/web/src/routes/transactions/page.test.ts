@@ -1,3 +1,4 @@
+import { valueOf } from "#lib/stream.svelte.js";
 import {
     afterEach,
     beforeEach,
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-/** Runs the load for `query` against an API whose search matches `total` rows. */
+/** Runs the load for `query` against an API whose search matches `total` rows; `result` is its data, once in. */
 function run(query: string, total: number) {
     const requested: URL[] = [];
     const fetch = async (request: Request) => {
@@ -31,8 +32,9 @@ function run(query: string, total: number) {
         const body = { items: [], total, sum: "0", flows: [], byKind: [], byCard: [], byAccount: [] };
         return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
     };
-    const event = { url: new URL(`https://finchie.test/transactions${query}`), fetch, depends: () => {}, parent: async () => ({ latestMonth: "2026-10" }) };
-    return { result: load(event as unknown as Event), requested };
+    const event = { url: new URL(`https://finchie.test/transactions${query}`), fetch, depends: () => {}, parent: async () => ({ ledger: { value: { latestMonth: "2026-10" } } }) };
+    const result = (async () => valueOf((await load(event as unknown as Event)).content))();
+    return { result, requested };
 }
 
 describe("transactions load", () => {

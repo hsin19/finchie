@@ -12,7 +12,7 @@ export interface CommandLine {
     flags: { name: string; value: string; }[];
 }
 
-/** A page's command: its own (`custom`, from page data) or its path; "/" is the overview. */
+/** A page's command: the one its content names (`custom`, nameCommand in heading.svelte.ts) or its path; "/" is the overview. */
 export function commandLine(pathname: string, params: Pick<URLSearchParams, "keys" | "getAll">, custom?: string): CommandLine {
     const command = custom ?? (pathname === "/" ? "overview" : pathname.slice(1).replaceAll("/", " "));
     const flags = [...new Set(params.keys())].map(key => ({

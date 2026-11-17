@@ -3,7 +3,7 @@ import {
     LEDGER,
     need,
 } from "#lib/api/client.js";
-import { institution } from "#lib/institutions.js";
+import { defer } from "#lib/stream.svelte.js";
 import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 
@@ -13,14 +13,9 @@ export const load = (async ({ fetch, params, depends }) => {
     if (!Number.isSafeInteger(id) || id <= 0) error(404, `account ${params.id} not found`);
 
     const client = api(fetch);
-    const [account, lines] = await Promise.all([
+    const content = Promise.all([
         client.GET("/api/accounts/{id}", { params: { path: { id } } }),
         client.GET("/api/accounts/{id}/lines", { params: { path: { id }, query: { limit: 500 } } }),
-    ]);
-    const found = need(account);
-    return {
-        account: found,
-        lines: need(lines),
-        command: `accounts show ${institution(found.institution).code.toLowerCase()}/${found.number || found.kind}`,
-    };
+    ]).then(([account, lines]) => ({ account: need(account), lines: need(lines) }));
+    return { content: await defer(content) };
 }) satisfies PageLoad;

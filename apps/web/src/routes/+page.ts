@@ -11,26 +11,30 @@ import {
     today,
 } from "#lib/dates.js";
 import { trendQuery } from "#lib/networth.js";
+import { defer } from "#lib/stream.svelte.js";
 import type { PageLoad } from "./$types";
 
 export const load = (async ({ fetch, depends }) => {
     depends(LEDGER);
     const client = api(fetch);
     const months = cashflowMonths(thisMonth());
-    const [accounts, netWorth, history, ...searches] = await Promise.all([
-        client.GET("/api/accounts"),
-        client.GET("/api/net-worth"),
-        // Last month's end and today: how net worth moved this month.
-        client.GET("/api/net-worth/history", { params: { query: trendQuery(today(), 2) } }),
-        // A month's totals only (limit 0), as the backend adds them up.
-        ...months.map(m => client.GET("/api/transactions", { params: { query: { ...monthRange(m), limit: 0 } } })),
-    ]);
-    return {
-        accounts: need(accounts),
-        netWorth: need(netWorth),
-        // The page is of use without it.
-        history: attempt(history).data,
-        months,
-        searches: searches.map(need),
-    };
+    const content = (async () => {
+        const [accounts, netWorth, history, ...searches] = await Promise.all([
+            client.GET("/api/accounts"),
+            client.GET("/api/net-worth"),
+            // Last month's end and today: how net worth moved this month.
+            client.GET("/api/net-worth/history", { params: { query: trendQuery(today(), 2) } }),
+            // A month's totals only (limit 0), as the backend adds them up.
+            ...months.map(m => client.GET("/api/transactions", { params: { query: { ...monthRange(m), limit: 0 } } })),
+        ]);
+        return {
+            accounts: need(accounts),
+            netWorth: need(netWorth),
+            // The page is of use without it.
+            history: attempt(history).data,
+            months,
+            searches: searches.map(need),
+        };
+    })();
+    return { content: await defer(content) };
 }) satisfies PageLoad;

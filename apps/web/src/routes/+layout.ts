@@ -11,6 +11,7 @@ import {
     shiftMonth,
     thisMonth,
 } from "#lib/dates.js";
+import { defer } from "#lib/stream.svelte.js";
 import type { LayoutLoad } from "./$types";
 
 // A single-page app: nothing renders on a server, the backend serves the shell for every route
@@ -27,13 +28,18 @@ export const load = (async ({ fetch, depends }) => {
     depends(LEDGER);
     const client = api(fetch);
     settings ??= client.GET("/api/settings").then(need);
-    const [statements, documents, pending, newest, notifications, deployment] = await Promise.all([
+    // Every page shows this beside its own data; on the app's first page it comes while the layout draws.
+    return { ledger: await defer(ledger(client, settings)) };
+}) satisfies LayoutLoad;
+
+async function ledger(client: ReturnType<typeof api>, deployment: Promise<Settings>) {
+    const [statements, documents, pending, newest, notifications, settled] = await Promise.all([
         client.GET("/api/statements", { params: { query: { limit: WINDOW } } }),
         client.GET("/api/documents", { params: { query: { limit: WINDOW } } }),
         client.GET("/api/documents", { params: { query: { state: ["pending"], limit: WINDOW } } }),
         client.GET("/api/transactions", { params: { query: { limit: 1 } } }),
         client.GET("/api/notifications", { params: { query: { open: true, limit: WINDOW } } }),
-        settings.catch(error => {
+        deployment.catch((error: unknown) => {
             settings = undefined;
             throw error;
         }),
@@ -51,7 +57,7 @@ export const load = (async ({ fetch, depends }) => {
     const docPage = need(documents);
     const notified = need(notifications);
     return {
-        settings: deployment,
+        settings: settled,
         // The newest card statements, newest first: a window, not all of them, though years of them
         // fit. What adds them up (a month's bill, the year so far, what is unpaid) is recent; the
         // statement list (/statements?all) and the month picker say how many are shown.
@@ -70,4 +76,4 @@ export const load = (async ({ fetch, depends }) => {
         latestMonth,
         months: monthsBetween(oldest, newestMonth),
     };
-}) satisfies LayoutLoad;
+}

@@ -39,6 +39,7 @@ import {
     sign,
     subtract,
 } from "#lib/money.js";
+import type { Shown } from "#lib/stream.svelte.js";
 import { tone } from "#lib/tone.js";
 import { statementsHref } from "#lib/urls.js";
 import { goto } from "$app/navigation";
@@ -48,7 +49,7 @@ import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import List from "@lucide/svelte/icons/list";
 import type { PageData } from "./$types";
 
-let { data }: { data: Extract<PageData, { view: "period"; }>; } = $props();
+let { data }: { data: Extract<Shown<PageData>, { view: "period"; }>; } = $props();
 
 const previousMonth = $derived(shiftMonth(data.month, -1));
 
