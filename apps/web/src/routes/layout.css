@@ -1,10 +1,11 @@
 @import "tailwindcss";
 @import "@fontsource-variable/jetbrains-mono";
-@import "@fontsource-variable/noto-sans-tc";
 
 /* Design D, "terminal" (ADR 0007): one dark theme, amber accent, monospace everywhere. */
 @theme {
-    --font-mono: "JetBrains Mono Variable", "Noto Sans TC Variable", ui-monospace, monospace;
+    /* Chinese in the system's own font (macOS and iOS, Windows, Android and Linux): a web font of it was
+       some 800 KB of subsets for a page, on a slow network the page's data waited behind. */
+    --font-mono: "JetBrains Mono Variable", "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", ui-monospace, monospace;
     --font-sans: var(--font-mono);
 
     --color-ground: #0a0a0b;

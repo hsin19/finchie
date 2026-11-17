@@ -11,9 +11,6 @@ importers:
       '@fontsource-variable/jetbrains-mono':
         specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource-variable/noto-sans-tc':
-        specifier: ^5.3.1
-        version: 5.3.1
       '@lucide/svelte':
         specifier: ^1.73.0
         version: 1.73.0(svelte@5.57.3(@typescript-eslint/types@8.72.1))
@@ -251,9 +248,6 @@ packages:
 
   '@fontsource-variable/jetbrains-mono@5.3.0':
     resolution: {integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==}
-
-  '@fontsource-variable/noto-sans-tc@5.3.1':
-    resolution: {integrity: sha512-gueh+AySNkihE+HvizXLHltxt5/xVFSvw6ISnKTlpb/lG5QQm6u/KwuempTJ/jDYMST3xwiERYTTyseoJ/Kxew==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -1819,8 +1813,6 @@ snapshots:
       levn: 0.4.1
 
   '@fontsource-variable/jetbrains-mono@5.3.0': {}
-
-  '@fontsource-variable/noto-sans-tc@5.3.1': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

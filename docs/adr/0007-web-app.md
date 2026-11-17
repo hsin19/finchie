@@ -14,7 +14,7 @@ The web app is a SvelteKit single-page app in `apps/web/`, embedded in the backe
 | Live status | The layout polls while any document is `pending` (backing off from 1.5 s to 15 s, and pausing while the tab is hidden) | Parsing takes seconds; polling is simpler than a push channel |
 | Money | Decimal strings added as scaled `BigInt`s (`apps/web/src/lib/money.ts`) | ADR 0004 holds in the browser too; floating point only sizes bars |
 | Styling | Tailwind v4; design tokens in `@theme` in `apps/web/src/routes/layout.css` | |
-| Fonts | JetBrains Mono and Noto Sans TC, self-hosted through Fontsource | No requests to third-party font hosts; Noto's unicode-range subsets load only the characters a page uses |
+| Fonts | JetBrains Mono and Noto Sans TC, self-hosted through Fontsource (Noto Sans TC was later dropped for the system's Chinese font: its subsets came to some 800 KB for a page, and on a slow network the page's data waited behind them) | No requests to third-party font hosts; Noto's unicode-range subsets load only the characters a page uses |
 | Tooling | pnpm, Vite, Vitest, ESLint with `eslint-plugin-svelte`, svelte-check, dprint | The same set as show-me-way |
 
 ### Design: "terminal"
