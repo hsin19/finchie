@@ -861,6 +861,31 @@ type HoldingsUpdate struct {
 	} `json:"holdings"`
 }
 
+// InvestmentPoint defines model for InvestmentPoint.
+type InvestmentPoint struct {
+	// Complete Every account had reported by the day. What went in may still hold estimates: what crossed before Finchie had a price for it is at the first one
+	Complete bool `json:"complete"`
+
+	// Gain Worth less invested
+	Gain Decimal `json:"gain"`
+
+	// Invested What went into those accounts, net; negative when more came out
+	Invested Decimal            `json:"invested"`
+	On       openapi_types.Date `json:"on"`
+
+	// ReturnPercent Gain over invested, in percent; absent while nothing net is in
+	ReturnPercent *Decimal `json:"returnPercent,omitempty"`
+
+	// Unpriced Coins or currencies that crossed in or out and have never had a price in NT$, left out of invested
+	Unpriced int `json:"unpriced"`
+
+	// Unvalued Accounts without a worth on the day, left out of worth and invested
+	Unvalued int `json:"unvalued"`
+
+	// Worth What the accounts with a worth on the day are worth
+	Worth Decimal `json:"worth"`
+}
+
 // KindTotal defines model for KindTotal.
 type KindTotal struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
@@ -1520,6 +1545,15 @@ type UploadDocumentMultipartBody struct {
 	File openapi_types.File `json:"file"`
 }
 
+// GetInvestmentHistoryParams defines parameters for GetInvestmentHistory.
+type GetInvestmentHistoryParams struct {
+	// Account One securities or exchange account; nothing for another
+	Account *int64              `form:"account,omitempty" json:"account,omitempty"`
+	From    openapi_types.Date  `form:"from" json:"from"`
+	To      *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+	Step    *HistoryStep        `form:"step,omitempty" json:"step,omitempty"`
+}
+
 // GetNetWorthParams defines parameters for GetNetWorth.
 type GetNetWorthParams struct {
 	// On The day, Taipei's today when left out
@@ -1686,6 +1720,9 @@ type ServerInterface interface {
 	// ReparseDocument Parse the stored original again, e.g. after a parser fix
 	// (POST /api/documents/{id}/reparse)
 	ReparseDocument(ctx *echo.Context, id Id) error
+	// GetInvestmentHistory What the securities and exchange accounts are worth against what went into them, over time
+	// (GET /api/investments/history)
+	GetInvestmentHistory(ctx *echo.Context, params GetInvestmentHistoryParams) error
 	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
 	// (GET /api/mail-filters.xml)
 	GetMailFilters(ctx *echo.Context) error
@@ -2100,6 +2137,45 @@ func (w *ServerInterfaceWrapper) ReparseDocument(ctx *echo.Context) error {
 
 	// Invoke the callback with all the unmarshaled arguments
 	err = w.Handler.ReparseDocument(ctx, id)
+	return err
+}
+
+// GetInvestmentHistory converts echo context to params.
+func (w *ServerInterfaceWrapper) GetInvestmentHistory(ctx *echo.Context) error {
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetInvestmentHistoryParams
+	// ------------- Optional query parameter "account" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "account", ctx.QueryParams(), &params.Account, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter account: %s", err))
+	}
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", ctx.QueryParams(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter from: %s", err))
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", ctx.QueryParams(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter to: %s", err))
+	}
+
+	// ------------- Optional query parameter "step" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "step", ctx.QueryParams(), &params.Step, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter step: %s", err))
+	}
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.GetInvestmentHistory(ctx, params)
 	return err
 }
 
@@ -2553,6 +2629,7 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.GET(options.BaseURL+"/api/accounts/:id/lines", wrapper.ListAccountLines, options.OperationMiddlewares["listAccountLines"]...)
 	router.GET(options.BaseURL+"/api/net-worth", wrapper.GetNetWorth, options.OperationMiddlewares["getNetWorth"]...)
 	router.GET(options.BaseURL+"/api/net-worth/history", wrapper.GetNetWorthHistory, options.OperationMiddlewares["getNetWorthHistory"]...)
+	router.GET(options.BaseURL+"/api/investments/history", wrapper.GetInvestmentHistory, options.OperationMiddlewares["getInvestmentHistory"]...)
 	router.GET(options.BaseURL+"/api/notifications", wrapper.ListNotifications, options.OperationMiddlewares["listNotifications"]...)
 	router.POST(options.BaseURL+"/api/notifications/read", wrapper.ReadNotifications, options.OperationMiddlewares["readNotifications"]...)
 	router.POST(options.BaseURL+"/api/notifications/handle", wrapper.HandleNotifications, options.OperationMiddlewares["handleNotifications"]...)
@@ -3533,6 +3610,42 @@ func (response ReparseDocument404JSONResponse) VisitReparseDocumentResponse(w ht
 	return err
 }
 
+type GetInvestmentHistoryRequestObject struct {
+	Params GetInvestmentHistoryParams
+}
+
+type GetInvestmentHistoryResponseObject interface {
+	VisitGetInvestmentHistoryResponse(w http.ResponseWriter) error
+}
+
+type GetInvestmentHistory200JSONResponse []InvestmentPoint
+
+func (response GetInvestmentHistory200JSONResponse) VisitGetInvestmentHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInvestmentHistory400JSONResponse struct{ ProblemJSONResponse }
+
+func (response GetInvestmentHistory400JSONResponse) VisitGetInvestmentHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMailFiltersRequestObject struct {
 }
 
@@ -4120,6 +4233,9 @@ type StrictServerInterface interface {
 	// ReparseDocument Parse the stored original again, e.g. after a parser fix
 	// (POST /api/documents/{id}/reparse)
 	ReparseDocument(ctx context.Context, request ReparseDocumentRequestObject) (ReparseDocumentResponseObject, error)
+	// GetInvestmentHistory What the securities and exchange accounts are worth against what went into them, over time
+	// (GET /api/investments/history)
+	GetInvestmentHistory(ctx context.Context, request GetInvestmentHistoryRequestObject) (GetInvestmentHistoryResponseObject, error)
 	// GetMailFilters The Gmail filter that forwards statement e-mails to the mailbox
 	// (GET /api/mail-filters.xml)
 	GetMailFilters(ctx context.Context, request GetMailFiltersRequestObject) (GetMailFiltersResponseObject, error)
@@ -4779,6 +4895,31 @@ func (sh *strictHandler) ReparseDocument(ctx *echo.Context, id Id) error {
 		return err
 	} else if validResponse, ok := response.(ReparseDocumentResponseObject); ok {
 		return validResponse.VisitReparseDocumentResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// GetInvestmentHistory operation middleware
+func (sh *strictHandler) GetInvestmentHistory(ctx *echo.Context, params GetInvestmentHistoryParams) error {
+	var request GetInvestmentHistoryRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetInvestmentHistory(ctx.Request().Context(), request.(GetInvestmentHistoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetInvestmentHistory")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(GetInvestmentHistoryResponseObject); ok {
+		return validResponse.VisitGetInvestmentHistoryResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

@@ -570,6 +570,42 @@ paths:
                 items: { $ref: "#/components/schemas/NetWorthPoint" }
         "400": { $ref: "#/components/responses/Problem" }
 
+  /api/investments/history:
+    get:
+      operationId: getInvestmentHistory
+      summary: What the securities and exchange accounts are worth against what went into them, over time
+      description: |
+        For each day as in /api/net-worth/history. What went into an exchange is every deposit and
+        withdrawal it ever reported, from or to a bank, a wallet, or another exchange, at the day's price,
+        or at the first one for a day before Finchie had any. What went into a securities account before
+        Finchie saw it is unknown, so it counts what it was worth on the first of these days it has a worth
+        as put in that day, then its trades' money paid or received. The series starts on the first day an
+        account has a worth. With `account`, that account's alone.
+      parameters:
+        - name: account
+          in: query
+          description: One securities or exchange account; nothing for another
+          schema: { type: integer, format: int64 }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: step
+          in: query
+          schema: { $ref: "#/components/schemas/HistoryStep" }
+      responses:
+        "200":
+          description: The series, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InvestmentPoint" }
+        "400": { $ref: "#/components/responses/Problem" }
+
   /api/notifications:
     get:
       operationId: listNotifications
@@ -1603,6 +1639,19 @@ components:
         net: { $ref: "#/components/schemas/Decimal" }
         unvalued: { type: integer }
         complete: { type: boolean, description: "Every account had reported by the day: the figure is exact" }
+
+    InvestmentPoint:
+      type: object
+      required: ["on", worth, invested, gain, unvalued, unpriced, complete]
+      properties:
+        "on": { type: string, format: date }
+        worth: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "What the accounts with a worth on the day are worth" }
+        invested: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "What went into those accounts, net; negative when more came out" }
+        gain: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "Worth less invested" }
+        returnPercent: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "Gain over invested, in percent; absent while nothing net is in" }
+        unvalued: { type: integer, description: "Accounts without a worth on the day, left out of worth and invested" }
+        unpriced: { type: integer, description: "Coins or currencies that crossed in or out and have never had a price in NT$, left out of invested" }
+        complete: { type: boolean, description: "Every account had reported by the day. What went in may still hold estimates: what crossed before Finchie had a price for it is at the first one" }
 
     KindWorth:
       type: object
