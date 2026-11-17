@@ -664,6 +664,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PushSent" }
 
+  /api/payees:
+    post:
+      operationId: namePayee
+      summary: Name a counterparty, or forget its name
+      description: |
+        The owner's name for whom money goes to or comes from, by the counterparty as the bank prints it
+        (a line's `counterparty`): every line of it shows the name, and search finds them by it. An empty
+        name forgets it. 400 without a counterparty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Payee" }
+      responses:
+        "204":
+          description: Named
+        "400":
+          $ref: "#/components/responses/Problem"
+
   /api/settings:
     get:
       operationId: getSettings
@@ -821,7 +840,7 @@ paths:
           schema: { type: boolean }
         - name: q
           in: query
-          description: Case-insensitive substring of the description or the memo
+          description: Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
           schema: { type: string }
         - name: sort
           in: query
@@ -1371,6 +1390,7 @@ components:
         description: { type: string }
         memo: { type: string, nullable: true }
         counterparty: { type: string, nullable: true }
+        counterpartyName: { type: string, nullable: true, description: "The owner's name for the counterparty (/api/payees)" }
         kind: { type: string, description: "A card line's kind, or interest, fee, or other on a deposit account" }
         unit: { type: string }
         amount: { $ref: "#/components/schemas/Decimal" }
@@ -1445,6 +1465,7 @@ components:
         unit: { type: string, description: "ISO 4217, or a points program's code" }
         memo: { type: string }
         counterparty: { type: string }
+        counterpartyName: { type: string, description: "The owner's name for the counterparty (/api/payees)" }
         balance: { $ref: "#/components/schemas/Decimal" }
         flow:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
@@ -1687,6 +1708,13 @@ components:
       required: [sent]
       properties:
         sent: { type: integer, description: How many devices' push services took the message }
+
+    Payee:
+      type: object
+      required: [counterparty, name]
+      properties:
+        counterparty: { type: string, description: As the bank prints it, example: "00442168037069" }
+        name: { type: string, description: Empty forgets it, example: 房東 }
 
     Settings:
       type: object

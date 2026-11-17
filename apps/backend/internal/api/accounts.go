@@ -297,7 +297,8 @@ func (s *Server) ListAccountLines(ctx context.Context, request ListAccountLinesR
 	for _, r := range rows {
 		line := AccountLine{
 			Id: r.ID, StatementId: r.StatementID, Date: openapi_types.Date{Time: r.TransactionDate.Time},
-			Description: r.Description, Memo: r.Memo, Counterparty: r.Counterparty, Kind: r.Kind, Unit: r.Unit,
+			Description: r.Description, Memo: r.Memo, Counterparty: r.Counterparty,
+			CounterpartyName: r.CounterpartyName, Kind: r.Kind, Unit: r.Unit,
 			Amount: numeric.String(r.Amount),
 		}
 		if domain.LineKind(r.Kind) == domain.Fill {

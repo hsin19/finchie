@@ -118,6 +118,12 @@ type Notification struct {
 	ResolvedAt pgtype.Timestamptz
 }
 
+type Payee struct {
+	Counterparty string
+	Name         string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Price struct {
 	UnitID      int64
 	AsOf        pgtype.Timestamptz

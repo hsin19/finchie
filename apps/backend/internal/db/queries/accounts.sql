@@ -197,7 +197,8 @@ ORDER BY t.transaction_date DESC, u.symbol;
 -- Newest first, the lines that count (counted_lines). Amounts as the source reports them: money in is
 -- positive on a deposit account, a purchase is positive on a card bill. A fill is one line for the whole
 -- period no statement covers, with no statement, below a statement's lines of the same day.
-SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, u.symbol AS unit,
+SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, pn.name AS counterparty_name,
+       t.kind, u.symbol AS unit,
        t.amount, t.balance,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -211,6 +212,7 @@ SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counte
        step.from_date AS fill_from, step.to_date AS fill_to
 FROM counted_lines t
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id

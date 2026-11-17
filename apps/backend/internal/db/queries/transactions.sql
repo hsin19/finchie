@@ -11,13 +11,14 @@ WITH matched AS (
     FROM transactions t
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN payees py ON py.counterparty = t.counterparty
     WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
       AND (sqlc.narg(kinds)::text[] IS NULL OR t.kind = ANY (sqlc.narg(kinds)::text[]))
       AND (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
       AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 = sqlc.narg(card_last4)::text)
       AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)
       AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
-                       t.description, t.memo,
+                       t.description, t.memo, t.counterparty, py.name,
                        from_date => sqlc.narg(from_date)::date, to_date => sqlc.narg(to_date)::date,
                        closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
                        overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
@@ -28,7 +29,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
        owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -43,6 +44,7 @@ JOIN transactions t ON t.id = m.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -93,12 +95,13 @@ WITH lines AS (
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
     JOIN units u ON u.id = t.unit_id
+    LEFT JOIN payees py ON py.counterparty = t.counterparty
     LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                        FROM transactions c
                        WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
     WHERE NOT (@fold::boolean AND t.parent_id IS NOT NULL)
       AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
-                       t.description, t.memo,
+                       t.description, t.memo, t.counterparty, py.name,
                        from_date => sqlc.narg(from_date)::date, to_date => sqlc.narg(to_date)::date,
                        closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
                        overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
@@ -133,11 +136,12 @@ SELECT t.kind,
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+LEFT JOIN payees py ON py.counterparty = t.counterparty
 WHERE (sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
   AND (sqlc.narg(card_last4)::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM sqlc.narg(card_last4)::text)
   AND (sqlc.narg(account_id)::bigint IS NULL OR t.account_id = sqlc.narg(account_id)::bigint)
   AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
-      t.description, t.memo,
+      t.description, t.memo, t.counterparty, py.name,
       from_date => sqlc.narg(from_date)::date, to_date => sqlc.narg(to_date)::date,
       closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
       overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
@@ -153,7 +157,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
        owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -167,6 +171,7 @@ FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id

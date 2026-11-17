@@ -318,7 +318,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
        owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -332,6 +332,7 @@ FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -374,6 +375,7 @@ type ListTransactionsRow struct {
 	Unit                     string
 	Memo                     *string
 	Counterparty             *string
+	CounterpartyName         *string
 	Balance                  pgtype.Numeric
 	Flow                     pgtype.Numeric
 	TradeCategory            *string
@@ -430,6 +432,7 @@ func (q *Queries) ListTransactions(ctx context.Context, statementID int64) ([]Li
 			&i.Unit,
 			&i.Memo,
 			&i.Counterparty,
+			&i.CounterpartyName,
 			&i.Balance,
 			&i.Flow,
 			&i.TradeCategory,

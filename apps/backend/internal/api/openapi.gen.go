@@ -554,10 +554,13 @@ type AccountLine struct {
 	Balance *Decimal `json:"balance,omitempty"`
 
 	// Counterpart The other line of a transfer or card payment (ADR 0016)
-	Counterpart  *LineCounterpart   `json:"counterpart,omitempty"`
-	Counterparty *string            `json:"counterparty,omitempty"`
-	Date         openapi_types.Date `json:"date"`
-	Description  string             `json:"description"`
+	Counterpart  *LineCounterpart `json:"counterpart,omitempty"`
+	Counterparty *string          `json:"counterparty,omitempty"`
+
+	// CounterpartyName The owner's name for the counterparty (/api/payees)
+	CounterpartyName *string            `json:"counterpartyName,omitempty"`
+	Date             openapi_types.Date `json:"date"`
+	Description      string             `json:"description"`
 
 	// Fill The owner's fill of a gap, as a line
 	Fill *LineFill `json:"fill,omitempty"`
@@ -1080,6 +1083,19 @@ type NotificationList struct {
 	Unread int `json:"unread"`
 }
 
+// Payee defines model for Payee.
+type Payee struct {
+	// Counterparty As the bank prints it
+	//
+	// Example: 00442168037069
+	Counterparty string `json:"counterparty"`
+
+	// Name Empty forgets it
+	//
+	// Example: 房東
+	Name string `json:"name"`
+}
+
 // PointsLot Points that lapse together (ADR 0019)
 type PointsLot struct {
 	// Amount Decimal number as a string, e.g. "-6552.97"
@@ -1326,8 +1342,11 @@ type Transaction struct {
 	// Counterpart The other line of a transfer or card payment (ADR 0016)
 	Counterpart  *LineCounterpart `json:"counterpart,omitempty"`
 	Counterparty *string          `json:"counterparty,omitempty"`
-	Country      *string          `json:"country,omitempty"`
-	Description  string           `json:"description"`
+
+	// CounterpartyName The owner's name for the counterparty (/api/payees)
+	CounterpartyName *string `json:"counterpartyName,omitempty"`
+	Country          *string `json:"country,omitempty"`
+	Description      string  `json:"description"`
 
 	// Flow Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it
 	Flow        Decimal `json:"flow"`
@@ -1556,7 +1575,7 @@ type SearchTransactionsParams struct {
 	// HideTransfers Leave out transfers between the owner's lines and card payments (ADR 0016)
 	HideTransfers *bool `form:"hideTransfers,omitempty" json:"hideTransfers,omitempty"`
 
-	// Q Case-insensitive substring of the description or the memo
+	// Q Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Sort Row order; largest and smallest compare amounts by size, ignoring the sign
@@ -1595,6 +1614,9 @@ type HandleNotificationsJSONRequestBody = NotificationHandle
 
 // ReadNotificationsJSONRequestBody defines body for ReadNotifications for application/json ContentType.
 type ReadNotificationsJSONRequestBody = NotificationIds
+
+// NamePayeeJSONRequestBody defines body for NamePayee for application/json ContentType.
+type NamePayeeJSONRequestBody = Payee
 
 // SubscribePushJSONRequestBody defines body for SubscribePush for application/json ContentType.
 type SubscribePushJSONRequestBody = PushSubscription
@@ -1682,6 +1704,9 @@ type ServerInterface interface {
 	// ReadNotifications Mark notifications read
 	// (POST /api/notifications/read)
 	ReadNotifications(ctx *echo.Context) error
+	// NamePayee Name a counterparty, or forget its name
+	// (POST /api/payees)
+	NamePayee(ctx *echo.Context) error
 	// SubscribePush Take pushes on this device
 	// (POST /api/push/subscribe)
 	SubscribePush(ctx *echo.Context) error
@@ -2180,6 +2205,15 @@ func (w *ServerInterfaceWrapper) ReadNotifications(ctx *echo.Context) error {
 	return err
 }
 
+// NamePayee converts echo context to params.
+func (w *ServerInterfaceWrapper) NamePayee(ctx *echo.Context) error {
+	var err error
+
+	// Invoke the callback with all the unmarshaled arguments
+	err = w.Handler.NamePayee(ctx)
+	return err
+}
+
 // SubscribePush converts echo context to params.
 func (w *ServerInterfaceWrapper) SubscribePush(ctx *echo.Context) error {
 	var err error
@@ -2525,6 +2559,7 @@ func RegisterHandlersWithOptions(router EchoRouter, si ServerInterface, options 
 	router.POST(options.BaseURL+"/api/push/subscribe", wrapper.SubscribePush, options.OperationMiddlewares["subscribePush"]...)
 	router.POST(options.BaseURL+"/api/push/unsubscribe", wrapper.UnsubscribePush, options.OperationMiddlewares["unsubscribePush"]...)
 	router.POST(options.BaseURL+"/api/push/test", wrapper.TestPush, options.OperationMiddlewares["testPush"]...)
+	router.POST(options.BaseURL+"/api/payees", wrapper.NamePayee, options.OperationMiddlewares["namePayee"]...)
 	router.GET(options.BaseURL+"/api/settings", wrapper.GetSettings, options.OperationMiddlewares["getSettings"]...)
 	router.GET(options.BaseURL+"/api/mail-filters.xml", wrapper.GetMailFilters, options.OperationMiddlewares["getMailFilters"]...)
 	router.GET(options.BaseURL+"/api/statements", wrapper.ListStatements, options.OperationMiddlewares["listStatements"]...)
@@ -3659,6 +3694,36 @@ func (response ReadNotifications204Response) VisitReadNotificationsResponse(w ht
 	return nil
 }
 
+type NamePayeeRequestObject struct {
+	Body *NamePayeeJSONRequestBody
+}
+
+type NamePayeeResponseObject interface {
+	VisitNamePayeeResponse(w http.ResponseWriter) error
+}
+
+type NamePayee204Response struct {
+}
+
+func (response NamePayee204Response) VisitNamePayeeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type NamePayee400JSONResponse struct{ ProblemJSONResponse }
+
+func (response NamePayee400JSONResponse) VisitNamePayeeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SubscribePushRequestObject struct {
 	Body *SubscribePushJSONRequestBody
 }
@@ -4073,6 +4138,9 @@ type StrictServerInterface interface {
 	// ReadNotifications Mark notifications read
 	// (POST /api/notifications/read)
 	ReadNotifications(ctx context.Context, request ReadNotificationsRequestObject) (ReadNotificationsResponseObject, error)
+	// NamePayee Name a counterparty, or forget its name
+	// (POST /api/payees)
+	NamePayee(ctx context.Context, request NamePayeeRequestObject) (NamePayeeResponseObject, error)
 	// SubscribePush Take pushes on this device
 	// (POST /api/push/subscribe)
 	SubscribePush(ctx context.Context, request SubscribePushRequestObject) (SubscribePushResponseObject, error)
@@ -4901,6 +4969,52 @@ func (sh *strictHandler) ReadNotifications(ctx *echo.Context) error {
 		return err
 	} else if validResponse, ok := response.(ReadNotificationsResponseObject); ok {
 		return validResponse.VisitReadNotificationsResponse(ctx.Response())
+	} else if response != nil {
+		return fmt.Errorf("unexpected response type: %T", response)
+	}
+	return nil
+}
+
+// NamePayee operation middleware
+func (sh *strictHandler) NamePayee(ctx *echo.Context) error {
+	var request NamePayeeRequestObject
+
+	var body NamePayeeJSONRequestBody
+	var err error
+	if _, ok := ctx.Echo().Binder.(*echo.DefaultBinder); ok {
+		// A request validator built on kin-openapi's openapi3filter with
+		// KeepValidatedValue leaves the value it validated on the body. Bind
+		// that value, matching member names exactly, so the handler receives
+		// what was validated instead of a second, case-insensitive decode.
+		// Otherwise bind only the request body, so that path and query
+		// parameters are not also bound into the body struct.
+		if vb, ok := ctx.Request().Body.(interface{ ValidatedValue() any }); !ok || runtime.BindJSONValue(vb.ValidatedValue(), &body) != nil {
+			err = echo.BindBody(ctx, &body)
+		}
+	} else {
+		// A custom binder is installed on the Echo instance; defer to it
+		// entirely, since echo.Binder does not expose body-only binding and
+		// the binder may do more than decode (for example call ctx.Validate).
+		err = ctx.Bind(&body)
+	}
+	if err != nil {
+		return err
+	}
+	request.Body = &body
+
+	handler := func(ctx *echo.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.NamePayee(ctx.Request().Context(), request.(NamePayeeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "NamePayee")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		return err
+	} else if validResponse, ok := response.(NamePayeeResponseObject); ok {
+		return validResponse.VisitNamePayeeResponse(ctx.Response())
 	} else if response != nil {
 		return fmt.Errorf("unexpected response type: %T", response)
 	}

@@ -90,11 +90,12 @@ SELECT t.kind,
 FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
+LEFT JOIN payees py ON py.counterparty = t.counterparty
 WHERE ($1::text IS NULL OR s.institution = $1::text)
   AND ($2::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $2::text)
   AND ($3::bigint IS NULL OR t.account_id = $3::bigint)
   AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
-      t.description, t.memo,
+      t.description, t.memo, t.counterparty, py.name,
       from_date => $4::date, to_date => $5::date,
       closing_from => $6::date, closing_to => $7::date,
       overseas => $8::boolean, of_account_kind => $9::text,
@@ -236,13 +237,14 @@ WITH matched AS (
     FROM transactions t
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN payees py ON py.counterparty = t.counterparty
     WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
       AND ($5::text[] IS NULL OR t.kind = ANY ($5::text[]))
       AND ($6::text IS NULL OR s.institution = $6::text)
       AND ($7::text IS NULL OR t.card_last4 = $7::text)
       AND ($8::bigint IS NULL OR t.account_id = $8::bigint)
       AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
-                       t.description, t.memo,
+                       t.description, t.memo, t.counterparty, py.name,
                        from_date => $9::date, to_date => $10::date,
                        closing_from => $11::date, closing_to => $12::date,
                        overseas => $13::boolean, of_account_kind => $14::text,
@@ -253,7 +255,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
        owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -268,6 +270,7 @@ JOIN transactions t ON t.id = m.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -333,6 +336,7 @@ type SearchTransactionsRow struct {
 	Unit                     string
 	Memo                     *string
 	Counterparty             *string
+	CounterpartyName         *string
 	Balance                  pgtype.Numeric
 	Flow                     pgtype.Numeric
 	TradeCategory            *string
@@ -412,6 +416,7 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 			&i.Unit,
 			&i.Memo,
 			&i.Counterparty,
+			&i.CounterpartyName,
 			&i.Balance,
 			&i.Flow,
 			&i.TradeCategory,
@@ -498,7 +503,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- Its account, and the amount seen from the owner (ADR 0013): money out negative, a card line's
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
-       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, t.balance,
+       coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
        owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -512,6 +517,7 @@ FROM transactions t
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -556,6 +562,7 @@ type TransactionFamilyRow struct {
 	Unit                     string
 	Memo                     *string
 	Counterparty             *string
+	CounterpartyName         *string
 	Balance                  pgtype.Numeric
 	Flow                     pgtype.Numeric
 	TradeCategory            *string
@@ -612,6 +619,7 @@ func (q *Queries) TransactionFamily(ctx context.Context, id int64) ([]Transactio
 			&i.Unit,
 			&i.Memo,
 			&i.Counterparty,
+			&i.CounterpartyName,
 			&i.Balance,
 			&i.Flow,
 			&i.TradeCategory,
@@ -660,12 +668,13 @@ WITH lines AS (
     JOIN statements s ON s.id = t.statement_id
     JOIN accounts a ON a.id = t.account_id
     JOIN units u ON u.id = t.unit_id
+    LEFT JOIN payees py ON py.counterparty = t.counterparty
     LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                        FROM transactions c
                        WHERE $5::boolean AND c.parent_id = t.id) kids ON true
     WHERE NOT ($5::boolean AND t.parent_id IS NOT NULL)
       AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
-                       t.description, t.memo,
+                       t.description, t.memo, t.counterparty, py.name,
                        from_date => $6::date, to_date => $7::date,
                        closing_from => $8::date, closing_to => $9::date,
                        overseas => $10::boolean, of_account_kind => $11::text,

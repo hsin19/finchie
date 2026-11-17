@@ -91,6 +91,7 @@ func toTransaction(row dbq.ListTransactionsRow) (Transaction, error) {
 		AccountKind:      AccountKind(row.AccountKind),
 		Memo:             row.Memo,
 		Counterparty:     row.Counterparty,
+		CounterpartyName: row.CounterpartyName,
 		Counterpart: lineCounterpart(row.CounterpartID, row.CounterpartStatementID, row.CounterpartDate, row.CounterpartAccountID,
 			row.CounterpartAccountKind, row.CounterpartInstitution, row.CounterpartAccountName,
 			cmp.Or(row.CounterpartFullNumber, row.CounterpartAccountNumber)),

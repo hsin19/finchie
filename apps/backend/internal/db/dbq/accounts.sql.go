@@ -196,7 +196,8 @@ func (q *Queries) AccountGaps(ctx context.Context, arg AccountGapsParams) ([]Acc
 }
 
 const accountLines = `-- name: AccountLines :many
-SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, t.kind, u.symbol AS unit,
+SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counterparty, pn.name AS counterparty_name,
+       t.kind, u.symbol AS unit,
        t.amount, t.balance,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
@@ -210,6 +211,7 @@ SELECT t.id, t.statement_id, t.transaction_date, t.description, t.memo, t.counte
        step.from_date AS fill_from, step.to_date AS fill_to
 FROM counted_lines t
 JOIN units u ON u.id = t.unit_id
+LEFT JOIN payees pn ON pn.counterparty = t.counterparty
 LEFT JOIN trades tr ON tr.transaction_id = t.id
 LEFT JOIN transactions c ON c.id = t.counterpart_id
 LEFT JOIN accounts ca ON ca.id = c.account_id
@@ -237,6 +239,7 @@ type AccountLinesRow struct {
 	Description              string
 	Memo                     *string
 	Counterparty             *string
+	CounterpartyName         *string
 	Kind                     string
 	Unit                     string
 	Amount                   pgtype.Numeric
@@ -280,6 +283,7 @@ func (q *Queries) AccountLines(ctx context.Context, arg AccountLinesParams) ([]A
 			&i.Description,
 			&i.Memo,
 			&i.Counterparty,
+			&i.CounterpartyName,
 			&i.Kind,
 			&i.Unit,
 			&i.Amount,

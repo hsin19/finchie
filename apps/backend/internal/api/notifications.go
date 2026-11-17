@@ -84,7 +84,7 @@ func (s *Server) HandleNotifications(ctx context.Context, request HandleNotifica
 func notifyAfterChanges(pool *pgxpool.Pool) StrictMiddlewareFunc {
 	skip := map[string]bool{
 		"UploadDocument": true, "ReadNotifications": true, "HandleNotifications": true,
-		"SubscribePush": true, "UnsubscribePush": true, "TestPush": true,
+		"SubscribePush": true, "UnsubscribePush": true, "TestPush": true, "NamePayee": true,
 	}
 	return func(next StrictHandlerFunc, operationID string) StrictHandlerFunc {
 		return func(c *echo.Context, request any) (any, error) {

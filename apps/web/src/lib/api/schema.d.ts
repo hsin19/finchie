@@ -525,6 +525,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/payees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Name a counterparty, or forget its name
+         * @description The owner's name for whom money goes to or comes from, by the counterparty as the bank prints it
+         *     (a line's `counterparty`): every line of it shows the name, and search finds them by it. An empty
+         *     name forgets it. 400 without a counterparty.
+         */
+        post: operations["namePayee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -1181,6 +1203,8 @@ export interface components {
             description: string;
             memo?: string | null;
             counterparty?: string | null;
+            /** @description The owner's name for the counterparty (/api/payees) */
+            counterpartyName?: string | null;
             /** @description A card line's kind, or interest, fee, or other on a deposit account */
             kind: string;
             unit: string;
@@ -1272,6 +1296,8 @@ export interface components {
             unit: string;
             memo?: string;
             counterparty?: string;
+            /** @description The owner's name for the counterparty (/api/payees) */
+            counterpartyName?: string;
             balance?: components["schemas"]["Decimal"];
             /** @description Seen from the owner: money out negative, a card line's sign turned (ADR 0013); in search, net of the children folded into it */
             flow: components["schemas"]["Decimal"];
@@ -1469,6 +1495,18 @@ export interface components {
         PushSent: {
             /** @description How many devices' push services took the message */
             sent: number;
+        };
+        Payee: {
+            /**
+             * @description As the bank prints it
+             * @example 00442168037069
+             */
+            counterparty: string;
+            /**
+             * @description Empty forgets it
+             * @example 房東
+             */
+            name: string;
         };
         Settings: {
             /** @description The VAPID public key a device subscribes to pushes with (applicationServerKey), base64url */
@@ -2255,6 +2293,29 @@ export interface operations {
             };
         };
     };
+    namePayee: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Payee"];
+            };
+        };
+        responses: {
+            /** @description Named */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+        };
+    };
     getSettings: {
         parameters: {
             query?: never;
@@ -2411,7 +2472,7 @@ export interface operations {
                 account?: number;
                 /** @description Leave out transfers between the owner's lines and card payments (ADR 0016) */
                 hideTransfers?: boolean;
-                /** @description Case-insensitive substring of the description or the memo */
+                /** @description Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it */
                 q?: string;
                 /** @description Row order; largest and smallest compare amounts by size, ignoring the sign */
                 sort?: components["schemas"]["TransactionSort"];
