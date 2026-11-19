@@ -79,7 +79,7 @@ const views = ["chart", "table"] as const;
                     <div class="absolute right-0 border-t {tick === 0 ? 'border-line-strong' : 'border-rule'}" style:left="{GUTTER}px" style:bottom></div>
                     <span class="absolute left-0 translate-y-1/2 pr-1.5 text-right text-[10px] text-mute tabular-nums" style:width="{GUTTER}px" style:bottom>{compact(tick)}</span>
                 {/each}
-                <div class="absolute inset-y-0 right-0 flex" style:left="{GUTTER}px">
+                <div class="absolute inset-y-0 right-0 flex" style:left="{GUTTER}px" data-sveltekit-preload-data="tap">
                     {#each bills as bill, i (bill.month)}
                         {@const { parts, total } = stack(bill)}
                         <a

@@ -18,6 +18,11 @@ export default defineConfig({
             version: { name: (process.env.VERSION || "dev").replace(/^v/, "") },
         }),
     ],
+    build: {
+        // A small font subset would otherwise be inlined into the CSS every page waits for, though the
+        // browser fetches a subset only when the page has its characters.
+        assetsInlineLimit: file => (file.endsWith(".woff2") ? false : undefined),
+    },
     server: {
         // `task backend:run` listens on :8080.
         proxy: { "/api": "http://localhost:8080" },

@@ -15,19 +15,23 @@ export const load = (async ({ fetch, params, depends }) => {
 
     const client = api(fetch);
     const content = (async () => {
-        const found = await client.GET("/api/statements/{id}", { params: { path: { id } } });
+        // All asked at once: two round trips, not three. Should the statement be gone, the others' answers
+        // are thrown away.
+        const [found, transactions, accounts] = await Promise.all([
+            client.GET("/api/statements/{id}", { params: { path: { id } } }),
+            client.GET("/api/statements/{id}/transactions", { params: { path: { id } } }),
+            client.GET("/api/accounts"),
+        ]);
         // Gone: a re-parse found its document a duplicate, or an old link.
         if (found.response.status === 404) error(404, `statement ${id} not found: a re-parse may have replaced it`);
         const statement = need(found);
-        const [transactions, document, accounts] = await Promise.all([
-            client.GET("/api/statements/{id}/transactions", { params: { path: { id } } }),
-            client.GET("/api/documents/{id}", { params: { path: { id: statement.documentId } } }),
-            client.GET("/api/accounts"),
-        ]);
         // The points a card bill reports have an account of their own (ADR 0019): its balance after this
         // bill, even when no points moved in the period, and what will lapse.
         const pointsAccounts = need(accounts).filter(a => a.kind === "points" && a.institution === statement.institution);
-        const points = await Promise.all(pointsAccounts.map(async a => need(await client.GET("/api/accounts/{id}", { params: { path: { id: a.id } } }))));
+        const [document, points] = await Promise.all([
+            client.GET("/api/documents/{id}", { params: { path: { id: statement.documentId } } }),
+            Promise.all(pointsAccounts.map(async a => need(await client.GET("/api/accounts/{id}", { params: { path: { id: a.id } } })))),
+        ]);
         return { statement, transactions: need(transactions), points, document: need(document) };
     })();
     return { content: await defer(content) };
