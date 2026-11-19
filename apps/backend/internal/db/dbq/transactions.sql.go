@@ -55,33 +55,6 @@ func (q *Queries) CardBills(ctx context.Context) ([]CardBillsRow, error) {
 	return items, nil
 }
 
-const clearPaid = `-- name: ClearPaid :exec
-UPDATE statements SET paid_on = NULL, paid_by = NULL WHERE paid_on IS NOT NULL OR paid_by IS NOT NULL
-`
-
-func (q *Queries) ClearPaid(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, clearPaid)
-	return err
-}
-
-const clearParents = `-- name: ClearParents :exec
-UPDATE transactions SET parent_id = NULL WHERE parent_id IS NOT NULL
-`
-
-func (q *Queries) ClearParents(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, clearParents)
-	return err
-}
-
-const clearTransfers = `-- name: ClearTransfers :exec
-UPDATE transactions SET counterpart_id = NULL WHERE counterpart_id IS NOT NULL
-`
-
-func (q *Queries) ClearTransfers(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, clearTransfers)
-	return err
-}
-
 const kindTotals = `-- name: KindTotals :many
 SELECT t.kind,
        count(*)::integer AS row_count,
@@ -448,7 +421,12 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 
 const setCounterparts = `-- name: SetCounterparts :exec
 UPDATE transactions t SET counterpart_id = l.counterpart_id
-FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS counterpart_id) l
+FROM (
+    SELECT c.id, n.counterpart_id
+    FROM transactions c
+    LEFT JOIN (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS counterpart_id) n ON n.id = c.id
+    WHERE c.counterpart_id IS DISTINCT FROM n.counterpart_id
+) l
 WHERE t.id = l.id
 `
 
@@ -457,16 +435,23 @@ type SetCounterpartsParams struct {
 	CounterpartIds []int64
 }
 
+// Each line's counterpart as worked out, none for a line not listed; written only where it changes, as
+// SetParents.
 func (q *Queries) SetCounterparts(ctx context.Context, arg SetCounterpartsParams) error {
 	_, err := q.db.Exec(ctx, setCounterparts, arg.Ids, arg.CounterpartIds)
 	return err
 }
 
 const setPaid = `-- name: SetPaid :exec
-UPDATE statements s SET paid_on = p.paid_on, paid_by = NULLIF(p.paid_by, 0)
-FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::date[]) AS paid_on,
-             unnest($3::bigint[]) AS paid_by) p
-WHERE s.id = p.id
+UPDATE statements s SET paid_on = l.paid_on, paid_by = l.paid_by
+FROM (
+    SELECT c.id, n.paid_on, NULLIF(n.paid_by, 0) AS paid_by
+    FROM statements c
+    LEFT JOIN (SELECT unnest($1::bigint[]) AS id, unnest($2::date[]) AS paid_on,
+                      unnest($3::bigint[]) AS paid_by) n ON n.id = c.id
+    WHERE (c.paid_on, c.paid_by) IS DISTINCT FROM (n.paid_on, NULLIF(n.paid_by, 0))
+) l
+WHERE s.id = l.id
 `
 
 type SetPaidParams struct {
@@ -475,7 +460,8 @@ type SetPaidParams struct {
 	PaidBy []int64
 }
 
-// paid_by 0 is none: a bill that owes nothing is paid by no line.
+// Each bill's payment as worked out, none for a bill not listed; written only where it changes, as
+// SetParents. paid_by 0 is none: a bill that owes nothing is paid by no line.
 func (q *Queries) SetPaid(ctx context.Context, arg SetPaidParams) error {
 	_, err := q.db.Exec(ctx, setPaid, arg.Ids, arg.PaidOn, arg.PaidBy)
 	return err
@@ -483,7 +469,12 @@ func (q *Queries) SetPaid(ctx context.Context, arg SetPaidParams) error {
 
 const setParents = `-- name: SetParents :exec
 UPDATE transactions t SET parent_id = l.parent_id
-FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS parent_id) l
+FROM (
+    SELECT c.id, n.parent_id
+    FROM transactions c
+    LEFT JOIN (SELECT unnest($1::bigint[]) AS id, unnest($2::bigint[]) AS parent_id) n ON n.id = c.id
+    WHERE c.parent_id IS DISTINCT FROM n.parent_id
+) l
 WHERE t.id = l.id
 `
 
@@ -492,6 +483,9 @@ type SetParentsParams struct {
 	ParentIds []int64
 }
 
+// Each line's parent as worked out, none for a line not listed. Only a line whose parent changes is
+// written: a relink runs with every parse and at every start, and rewriting every link each time left the
+// table many times its size in dead rows.
 func (q *Queries) SetParents(ctx context.Context, arg SetParentsParams) error {
 	_, err := q.db.Exec(ctx, setParents, arg.Ids, arg.ParentIds)
 	return err

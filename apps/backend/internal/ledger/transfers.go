@@ -57,36 +57,24 @@ func retransfer(ctx context.Context, queries *dbq.Queries) error {
 	if err != nil {
 		return fmt.Errorf("list card bills: %w", err)
 	}
-	if err := queries.ClearTransfers(ctx); err != nil {
-		return fmt.Errorf("clear transfers: %w", err)
+	// Stored even when there are none: a line or bill not listed loses the link it had.
+	transfers := dbq.SetCounterpartsParams{}
+	for id, counterpart := range matchTransfers(lines) {
+		transfers.Ids = append(transfers.Ids, id)
+		transfers.CounterpartIds = append(transfers.CounterpartIds, counterpart)
 	}
-	if err := queries.ClearPaid(ctx); err != nil {
-		return fmt.Errorf("clear payments: %w", err)
-	}
-
-	pairs := matchTransfers(lines)
-	if len(pairs) > 0 {
-		params := dbq.SetCounterpartsParams{}
-		for id, counterpart := range pairs {
-			params.Ids = append(params.Ids, id)
-			params.CounterpartIds = append(params.CounterpartIds, counterpart)
-		}
-		if err := queries.SetCounterparts(ctx, params); err != nil {
-			return fmt.Errorf("store transfers: %w", err)
-		}
+	if err := queries.SetCounterparts(ctx, transfers); err != nil {
+		return fmt.Errorf("store transfers: %w", err)
 	}
 
-	paid := matchPaid(bills, lines)
-	if len(paid) > 0 {
-		params := dbq.SetPaidParams{}
-		for id, payment := range paid {
-			params.Ids = append(params.Ids, id)
-			params.PaidOn = append(params.PaidOn, payment.on)
-			params.PaidBy = append(params.PaidBy, payment.by)
-		}
-		if err := queries.SetPaid(ctx, params); err != nil {
-			return fmt.Errorf("store payments: %w", err)
-		}
+	payments := dbq.SetPaidParams{}
+	for id, payment := range matchPaid(bills, lines) {
+		payments.Ids = append(payments.Ids, id)
+		payments.PaidOn = append(payments.PaidOn, payment.on)
+		payments.PaidBy = append(payments.PaidBy, payment.by)
+	}
+	if err := queries.SetPaid(ctx, payments); err != nil {
+		return fmt.Errorf("store payments: %w", err)
 	}
 	return nil
 }

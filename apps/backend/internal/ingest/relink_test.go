@@ -3,7 +3,9 @@ package ingest
 import (
 	"testing"
 
+	"github.com/hsin19/finchie/apps/backend/internal/db/dbq"
 	parserv2 "github.com/hsin19/finchie/apps/backend/internal/gen/finchie/parser/v2"
+	"github.com/hsin19/finchie/apps/backend/internal/ledger"
 	pt "github.com/hsin19/finchie/apps/backend/internal/parsertest"
 	"github.com/hsin19/finchie/apps/backend/internal/testdb"
 )
@@ -59,6 +61,62 @@ func TestStoringAStatementRelinksTheWholeLedger(t *testing.T) {
 	store(octoberDoc, october)
 	if parent, purchase := refundParent(), purchaseID(); purchase == before || parent != purchase {
 		t.Fatalf("after re-parse: refund parent = %d, want the new purchase %d (was %d)", parent, purchase, before)
+	}
+}
+
+// A relink runs with every parse and at every start; one that finds the links as they are rewrites no row,
+// and a line it no longer lists loses its link.
+func TestARelinkWritesOnlyTheLinksThatChange(t *testing.T) {
+	pool := testdb.Pool(t)
+	ctx := t.Context()
+
+	october := sampleStatement(true)
+	november := sampleStatement(true)
+	november.ClosingDate = pt.Day(11, 21)
+	november.CardBill.DueDate = pt.Day(12, 8)
+	november.Accounts[0].Lines = []*parserv2.Line{pt.CardLine(pt.Day(11, 2), "LEATHER SHOP FIRENZE",
+		parserv2.LineKind_LINE_KIND_REFUND, "-28009", pt.Foreign("EUR", "-780.00"), pt.Country("IT"))}
+	for name, statement := range map[string]*parserv2.Statement{"october.eml": october, "november.eml": november} {
+		if _, err := Store(ctx, pool, addDocument(t, pool, name), "", pt.Response("fake", statement)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A row's xmin changes with every write of it.
+	versions := func() string {
+		t.Helper()
+		var v string
+		if err := pool.QueryRow(ctx, `
+			SELECT (SELECT string_agg(xmin::text, ',' ORDER BY id) FROM transactions) || '|' ||
+			       (SELECT string_agg(xmin::text, ',' ORDER BY id) FROM statements)`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	refundParent := func() *int64 {
+		t.Helper()
+		var parent *int64
+		if err := pool.QueryRow(ctx, `SELECT parent_id FROM transactions WHERE kind = 'refund'`).Scan(&parent); err != nil {
+			t.Fatal(err)
+		}
+		return parent
+	}
+	if refundParent() == nil {
+		t.Fatal("refund not linked to its purchase")
+	}
+
+	before := versions()
+	if _, err := ledger.RelinkAll(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if after := versions(); after != before {
+		t.Fatalf("a relink that changed no link rewrote rows: %s, then %s", before, after)
+	}
+
+	if err := dbq.New(pool).SetParents(ctx, dbq.SetParentsParams{}); err != nil {
+		t.Fatal(err)
+	}
+	if parent := refundParent(); parent != nil {
+		t.Fatalf("refund kept parent %d, which no link lists", *parent)
 	}
 }
 

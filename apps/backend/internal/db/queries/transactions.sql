@@ -209,12 +209,17 @@ JOIN statements s ON s.id = t.statement_id
 WHERE t.kind = ANY (@kinds::text[])
 ORDER BY t.id;
 
--- name: ClearParents :exec
-UPDATE transactions SET parent_id = NULL WHERE parent_id IS NOT NULL;
-
 -- name: SetParents :exec
+-- Each line's parent as worked out, none for a line not listed. Only a line whose parent changes is
+-- written: a relink runs with every parse and at every start, and rewriting every link each time left the
+-- table many times its size in dead rows.
 UPDATE transactions t SET parent_id = l.parent_id
-FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@parent_ids::bigint[]) AS parent_id) l
+FROM (
+    SELECT c.id, n.parent_id
+    FROM transactions c
+    LEFT JOIN (SELECT unnest(@ids::bigint[]) AS id, unnest(@parent_ids::bigint[]) AS parent_id) n ON n.id = c.id
+    WHERE c.parent_id IS DISTINCT FROM n.parent_id
+) l
 WHERE t.id = l.id;
 
 -- name: TransferLines :many
@@ -236,20 +241,27 @@ FROM statements
 WHERE kind = 'credit_card'
 ORDER BY institution, closing_date;
 
--- name: ClearTransfers :exec
-UPDATE transactions SET counterpart_id = NULL WHERE counterpart_id IS NOT NULL;
-
--- name: ClearPaid :exec
-UPDATE statements SET paid_on = NULL, paid_by = NULL WHERE paid_on IS NOT NULL OR paid_by IS NOT NULL;
-
 -- name: SetCounterparts :exec
+-- Each line's counterpart as worked out, none for a line not listed; written only where it changes, as
+-- SetParents.
 UPDATE transactions t SET counterpart_id = l.counterpart_id
-FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@counterpart_ids::bigint[]) AS counterpart_id) l
+FROM (
+    SELECT c.id, n.counterpart_id
+    FROM transactions c
+    LEFT JOIN (SELECT unnest(@ids::bigint[]) AS id, unnest(@counterpart_ids::bigint[]) AS counterpart_id) n ON n.id = c.id
+    WHERE c.counterpart_id IS DISTINCT FROM n.counterpart_id
+) l
 WHERE t.id = l.id;
 
 -- name: SetPaid :exec
--- paid_by 0 is none: a bill that owes nothing is paid by no line.
-UPDATE statements s SET paid_on = p.paid_on, paid_by = NULLIF(p.paid_by, 0)
-FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@paid_on::date[]) AS paid_on,
-             unnest(@paid_by::bigint[]) AS paid_by) p
-WHERE s.id = p.id;
+-- Each bill's payment as worked out, none for a bill not listed; written only where it changes, as
+-- SetParents. paid_by 0 is none: a bill that owes nothing is paid by no line.
+UPDATE statements s SET paid_on = l.paid_on, paid_by = l.paid_by
+FROM (
+    SELECT c.id, n.paid_on, NULLIF(n.paid_by, 0) AS paid_by
+    FROM statements c
+    LEFT JOIN (SELECT unnest(@ids::bigint[]) AS id, unnest(@paid_on::date[]) AS paid_on,
+                      unnest(@paid_by::bigint[]) AS paid_by) n ON n.id = c.id
+    WHERE (c.paid_on, c.paid_by) IS DISTINCT FROM (n.paid_on, NULLIF(n.paid_by, 0))
+) l
+WHERE s.id = l.id;
