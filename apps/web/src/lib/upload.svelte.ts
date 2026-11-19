@@ -57,9 +57,4 @@ export class Uploads {
             await this.#options.done();
         }
     }
-
-    /** The upload that gave this document, if any. */
-    of(documentId: number): Upload | undefined {
-        return this.entries.find(e => e.documentId === documentId);
-    }
 }

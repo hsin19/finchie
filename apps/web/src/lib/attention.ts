@@ -12,17 +12,15 @@ import type {
     Notification,
     NotificationKind,
 } from "#lib/api/client.js";
+import { daysSince } from "#lib/dates.js";
 import { documentsQueryHref } from "#lib/documents.js";
 import {
-    daysSince,
     describe,
     named,
     type NotifiedAccount,
 } from "#lib/notices.js";
 import { resolve } from "$app/paths";
 import type { ResolvedPathname } from "$app/types";
-
-export { describe, describeShortfall, named, type NotifiedAccount } from "#lib/notices.js";
 
 export interface NeedName {
     text: string;
@@ -46,7 +44,7 @@ export interface Need {
 /** The kinds in the order to deal with them, as the backend lists them: money that may not be there in time first. */
 export const notificationKinds: readonly NotificationKind[] = ["shortfall", "document", "gap", "overdue", "lapsing"];
 
-export const accountHref = (a: Pick<NotifiedAccount, "id">) => resolve("/accounts/[id]", { id: String(a.id) });
+const accountHref = (a: Pick<NotifiedAccount, "id">) => resolve("/accounts/[id]", { id: String(a.id) });
 
 /** Whether a notification still needs the owner: open, and not handled. */
 export const pending = (n: Notification) => !n.resolvedAt && !n.handledAt;

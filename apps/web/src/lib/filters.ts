@@ -72,7 +72,7 @@ function readCard(value: string | null): { institution: string; card: string; } 
 }
 
 /** The ?card= value for a bank, or one of its cards. */
-export function cardParam(institution: string, last4?: string | null): string {
+function cardParam(institution: string, last4?: string | null): string {
     return last4 ? `${institution}:${last4}` : institution;
 }
 

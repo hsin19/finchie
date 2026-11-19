@@ -30,7 +30,6 @@ describe("Uploads", () => {
         expect(order).toEqual(["a.eml", "b.eml"]);
         expect(u.entries.map(e => [e.name, e.documentId, e.same, e.sent])).toEqual([["b.eml", 2, true, 1], ["a.eml", 1, false, 1]]);
         expect(reloads()).toBe(2);
-        expect(u.of(1)?.name).toBe("a.eml");
     });
 
     it("keeps why a file was refused", async () => {

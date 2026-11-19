@@ -8,10 +8,8 @@ import {
     expect,
     it,
 } from "vitest";
-import {
-    describe as describeNotification,
-    needs,
-} from "./attention";
+import { needs } from "./attention";
+import { describe as describeNotification } from "./notices";
 
 const today = "2026-11-13";
 const base = "TWD";

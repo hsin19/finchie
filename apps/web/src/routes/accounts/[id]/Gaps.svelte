@@ -4,10 +4,8 @@ import {
     fillGap,
     type GapRef,
 } from "#lib/api/mutations.js";
-import {
-    formatAmount,
-    sign,
-} from "#lib/money.js";
+import { formatAmount } from "#lib/money.js";
+import { signTone } from "#lib/tone.js";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
 // Where the account's balances do not join up. One whose reports are lost can be filled with the gap's
@@ -43,7 +41,7 @@ async function fill(gap: GapRef) {
                     {@const key = gapKey(gap)}
                     <tr class="border-t border-rule">
                         <td class="py-1.5 pr-4 whitespace-nowrap">{gap.from} <ArrowRight /> {gap.to}</td>
-                        <td class="py-1.5 pr-2 text-right {sign(gap.unseen) < 0 ? 'text-neg' : sign(gap.unseen) > 0 ? 'text-pos' : 'text-dim'}">{formatAmount(gap.unseen, { signed: true })}</td>
+                        <td class="py-1.5 pr-2 text-right {signTone(gap.unseen)}">{formatAmount(gap.unseen, { signed: true })}</td>
                         <td class="py-1.5 pr-4 text-mute">{gap.unit} 沒有明細</td>
                         <td class="py-1.5">
                             <button type="button" class="control min-h-8" disabled={busy !== undefined} onclick={() => void fill(gap)}>

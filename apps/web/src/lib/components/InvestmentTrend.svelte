@@ -7,8 +7,8 @@ import {
 import {
     formatAmount,
     roundWhole,
-    sign,
 } from "#lib/money.js";
+import { signTone } from "#lib/tone.js";
 
 /**
  * What securities and exchange accounts are worth against what went into them, by day, as two lines or
@@ -30,7 +30,6 @@ const last = $derived(points.at(-1));
 const views = ["chart", "table"] as const;
 
 const percent = (p: InvestmentPoint) => (p.returnPercent === undefined ? "—" : `${formatAmount(p.returnPercent, { signed: true })}%`);
-const tone = (amount: string) => (sign(amount) < 0 ? "text-neg" : sign(amount) > 0 ? "text-pos" : "text-dim");
 </script>
 
 <section class="panel flex flex-col gap-3 p-3 md:p-3.5">
@@ -67,11 +66,11 @@ const tone = (amount: string) => (sign(amount) < 0 ? "text-neg" : sign(amount) >
             </div>
             <div>
                 <div class="label">GAIN · 損益</div>
-                <div class={tone(last.gain)}>{formatAmount(roundWhole(last.gain), { signed: true })}</div>
+                <div class={signTone(last.gain)}>{formatAmount(roundWhole(last.gain), { signed: true })}</div>
             </div>
             <div>
                 <div class="label">RETURN · 報酬率</div>
-                <div class={tone(last.gain)}>{percent(last)}</div>
+                <div class={signTone(last.gain)}>{percent(last)}</div>
             </div>
         </div>
 
@@ -104,8 +103,8 @@ const tone = (amount: string) => (sign(amount) < 0 ? "text-neg" : sign(amount) >
                         <div class="mb-1 text-ink-bright">{point.on}</div>
                         <div class="flex justify-between gap-4 text-dim"><span>市值</span><span class="tabular-nums">{formatAmount(point.worth)}</span></div>
                         <div class="flex justify-between gap-4 text-dim"><span>淨投入</span><span class="tabular-nums">{formatAmount(point.invested)}</span></div>
-                        <div class="flex justify-between gap-4 {tone(point.gain)}"><span>損益</span><span class="tabular-nums">{formatAmount(point.gain, { signed: true })}</span></div>
-                        <div class="flex justify-between gap-4 {tone(point.gain)}"><span>報酬率</span><span class="tabular-nums">{percent(point)}</span></div>
+                        <div class="flex justify-between gap-4 {signTone(point.gain)}"><span>損益</span><span class="tabular-nums">{formatAmount(point.gain, { signed: true })}</span></div>
+                        <div class="flex justify-between gap-4 {signTone(point.gain)}"><span>報酬率</span><span class="tabular-nums">{percent(point)}</span></div>
                         {#if point.unvalued > 0}<div class="text-mute">{point.unvalued} 個帳戶沒有價格，兩邊都不計</div>{/if}
                         {#if point.unpriced > 0}<div class="text-mute">{point.unpriced} 筆轉入轉出沒有價格，不計</div>{/if}
                         {#if !point.complete}<div class="mt-1 text-accent">估計：還有帳戶沒回報到這天</div>{/if}
@@ -136,7 +135,7 @@ const tone = (amount: string) => (sign(amount) < 0 ? "text-neg" : sign(amount) >
                                 <td class="py-1.5 pr-2">{point.on}{point.complete ? "" : " · 估計"}</td>
                                 <td class="px-2 py-1.5 text-right text-dim">{formatAmount(point.worth)}</td>
                                 <td class="px-2 py-1.5 text-right text-dim">{formatAmount(point.invested)}</td>
-                                <td class="py-1.5 pl-2 text-right {tone(point.gain)}">{formatAmount(point.gain, { signed: true })} · {percent(point)}</td>
+                                <td class="py-1.5 pl-2 text-right {signTone(point.gain)}">{formatAmount(point.gain, { signed: true })} · {percent(point)}</td>
                             </tr>
                         {/each}
                     </tbody>

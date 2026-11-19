@@ -57,6 +57,11 @@ export function addDays(date: string, days: number): string {
     return day.toISOString().slice(0, 10);
 }
 
+/** Whole days from `day` to `today`. */
+export function daysSince(day: string, today: string): number {
+    return Math.round((Date.parse(today) - Date.parse(day)) / 86_400_000);
+}
+
 export function weekday(date: string): string {
     return WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }

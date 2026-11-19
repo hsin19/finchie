@@ -18,7 +18,6 @@ import {
     refundedInFull,
 } from "#lib/family.js";
 import {
-    flowOf,
     isPoints,
     isTrade,
     isTransfer,
@@ -76,7 +75,7 @@ function statementLabel(statementId: number) {
             <span class="text-accent">{#if up}<ArrowUp />{:else}<ArrowDown />{/if}</span>
             <span class={tone[kinds[l.kind].tone]}>{kinds[l.kind].short}</span>
             <span class="grow truncate">{l.description}</span>
-            <span class={l.kind === "purchase" ? "text-ink" : tone[kinds[l.kind].tone]}>{formatAmount(l.amount)}</span>
+            <span class={tone[kinds[l.kind].tone]}>{formatAmount(l.amount)}</span>
         </span>
         <span class="pl-5 text-[12px] text-mute">
             {shortDate(l.transactionDate)}{l.statementId === from.statementId ? "" : ` · ${statementLabel(l.statementId)}`}
@@ -139,7 +138,7 @@ function statementLabel(statementId: number) {
         {/if}
         {#if t.counterpart}
             <dt class="text-mute">{t.accountKind === "deposit" && t.counterpart.accountKind === "credit_card" ? "paid" : "transfer"}</dt>
-            <dd class="m-0"><Counterpart other={t.counterpart} out={sign(flowOf(t)) < 0} /></dd>
+            <dd class="m-0"><Counterpart other={t.counterpart} out={sign(t.flow) < 0} /></dd>
         {/if}
         {#if t.balance}
             <dt class="text-mute">balance</dt>

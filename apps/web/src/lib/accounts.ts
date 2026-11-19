@@ -9,6 +9,7 @@ import type {
 } from "#lib/api/client.js";
 import {
     addDays,
+    daysSince,
     yearlyDate,
 } from "#lib/dates.js";
 import {
@@ -76,10 +77,10 @@ function magnitude(value: string): string {
 }
 
 /** Below this worth in NT$, either way, an account or a balance is small: the accounts page leaves it out unless ?all. */
-export const SMALL_WORTH = "1000";
+const SMALL_WORTH = "1000";
 
 /** How many balances an account lists while small ones are hidden. */
-export const LISTED_BALANCES = 3;
+const LISTED_BALANCES = 3;
 
 function small(worth: string): boolean {
     return sign(subtract(magnitude(worth), SMALL_WORTH)) < 0;
@@ -164,7 +165,7 @@ export function historyByDay(history: Balance[]): { asOf: string; balances: Bala
 }
 
 /** Where a price came from (ADR 0020). */
-export const priceSources: Record<PriceSource, string> = {
+const priceSources: Record<PriceSource, string> = {
     fawaz: "匯率",
     twse: "證交所收盤",
     tpex: "櫃買收盤",
@@ -184,7 +185,7 @@ const taipei = new Intl.DateTimeFormat("sv-SE", {
 });
 
 /** When a price held, in Taipei: its day, and its time unless it is the start of the day (a rate's). */
-export function pricedAt(price: Price): string {
+function pricedAt(price: Price): string {
     return taipei.format(new Date(price.asOf)).replace(/ 00:00$/, "");
 }
 
@@ -251,7 +252,7 @@ export function accountStatus(account: Account, today: string): AccountStatus {
     const asOf = account.balances.map(b => b.asOf).sort().at(-1);
     if (!asOf) return status;
     status.asOf = asOf;
-    status.days = Math.round((Date.parse(today) - Date.parse(asOf)) / 86_400_000);
+    status.days = daysSince(asOf, today);
     if (isOwned(account)) status.note = "手動";
     else if (status.excused) status.note = `確認過沒變 · ${yearlyDate(account.checkAgainOn!, today)} 再提醒`;
     return status;

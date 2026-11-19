@@ -193,7 +193,7 @@ function changeTone(change: number | undefined): string {
     <section class="panel p-3 md:p-3.5">
         <h2 class="label mb-1">STATEMENTS · {data.month} 的帳單</h2>
         {#each statements as statement (statement.id)}
-            <StatementRow {statement} doc={documents.get(statement.documentId)} closing="day" />
+            <StatementRow {statement} doc={documents.get(statement.documentId)} />
         {:else}
             <p class="m-0 border-t border-rule py-2.5 text-mute">這個月沒有結帳的帳單。</p>
         {/each}

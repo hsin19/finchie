@@ -21,14 +21,9 @@ export function isPoints(t: Pick<Transaction, "accountKind">): boolean {
     return t.accountKind === "points";
 }
 
-/** The line's flow as the backend gives it: seen from the owner, net of the children folded into it. */
-export function flowOf(t: Pick<Transaction, "flow">): string {
-    return t.flow;
-}
-
 /** What the lines came to per unit, transfers, trades, and points left out: the base currency first. */
 export function netByUnit(lines: Line[], base: string): { unit: string; amount: string; }[] {
     const counted = lines.filter(t => !isTransfer(t) && !isTrade(t) && !isPoints(t));
     const units = [...new Set(counted.map(t => t.unit))].sort((a, b) => Number(b === base) - Number(a === base) || a.localeCompare(b));
-    return units.map(unit => ({ unit, amount: sum(counted.filter(t => t.unit === unit).map(flowOf)) }));
+    return units.map(unit => ({ unit, amount: sum(counted.filter(t => t.unit === unit).map(t => t.flow)) }));
 }

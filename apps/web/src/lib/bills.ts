@@ -149,7 +149,7 @@ export function reward(rebate: KindTotal | undefined, pointLines: readonly Trans
 }
 
 /** The worth of the points with a price, in NT$. */
-export function pointsWorth(r: Reward): string {
+function pointsWorth(r: Reward): string {
     return sum(r.points.flatMap(p => p.worth ?? []));
 }
 

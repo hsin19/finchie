@@ -4,17 +4,11 @@ import {
     it,
 } from "vitest";
 import {
-    flowOf,
     isTransfer,
     netByUnit,
 } from "./flows";
 
 describe("flows", () => {
-    it("takes the backend's flow, seen from the owner", () => {
-        expect(flowOf({ flow: "-23450.56" })).toBe("-23450.56");
-        expect(flowOf({ flow: "60000" })).toBe("60000");
-    });
-
     it("counts a linked line or a card payment as a transfer", () => {
         expect(isTransfer({ kind: "payment" })).toBe(true);
         expect(isTransfer({ kind: "other", counterpart: { id: 1, statementId: 1, date: "2026-09-25", accountKind: "deposit", institution: "taishin" } })).toBe(true);

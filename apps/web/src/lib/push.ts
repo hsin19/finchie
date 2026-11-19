@@ -10,7 +10,7 @@ import {
 export type PushState = "unsupported" | "denied" | "off" | "on";
 
 /** Whether this browser can take pushes. On an iPhone, only Finchie opened from the home screen can. */
-export function pushSupported(): boolean {
+function pushSupported(): boolean {
     return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 

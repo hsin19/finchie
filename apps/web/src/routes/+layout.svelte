@@ -47,6 +47,7 @@ import type { KeyOf } from "#lib/shortcuts.js";
 import {
     markDrawn,
     Settled,
+    SKELETON_AFTER_MS,
 } from "#lib/stream.svelte.js";
 import { version } from "$app/env";
 import {
@@ -114,7 +115,6 @@ const carried = $derived(carriedLinks(page.route.id, page.url.searchParams));
 
 // The page being opened while its data loads: the tabs show it at once, and should the loading take longer
 // than a glance, its skeleton stands in for the page left (or, on the same page, the page dims).
-const SKELETON_AFTER_MS = 150;
 const shown = $derived(navigating.to?.route.id ?? page.route.id);
 const elsewhere = $derived(navigating.to !== null && navigating.to.route.id !== page.route.id);
 let slow = $state(false);

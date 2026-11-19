@@ -141,7 +141,7 @@ const failureHints: Record<DocumentFailure, string> = {
     other: "按「重新解析」再試一次",
 };
 
-export function failureHint(failure: DocumentFailure | undefined): string {
+function failureHint(failure: DocumentFailure | undefined): string {
     return failureHints[failure ?? "other"];
 }
 

@@ -69,10 +69,6 @@ export function unfillGap(accountId: number, fillId: number) {
 }
 
 /**
- * Deletes a document that holds nothing of the ledger (`deletable`), its original included, and goes to
- * `then`: the document's own page would have nothing to show.
- */
-/**
  * The day to look again whether an account is current (`checkAgainOn`): until then an old balance is no
  * sign of a statement that never came. Empty clears it.
  */
@@ -80,6 +76,10 @@ export function setCheckAgain(id: number, checkAgainOn: string) {
     return change(api().PATCH("/api/accounts/{id}", { params: { path: { id } }, body: { checkAgainOn } }));
 }
 
+/**
+ * Deletes a document that holds nothing of the ledger (`deletable`), its original included, and goes to
+ * `then`: the document's own page would have nothing to show.
+ */
 export function deleteDocument(id: number, then: ResolvedPathname) {
     return change(api().DELETE("/api/documents/{id}", { params: { path: { id } } }), then);
 }

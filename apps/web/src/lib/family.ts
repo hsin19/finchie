@@ -23,7 +23,7 @@ export function net(t: Line): string {
 }
 
 /** The children's amounts by kind, in kind order. */
-export function adjustments(t: Line): { kind: TransactionKind; amount: string; }[] {
+function adjustments(t: Line): { kind: TransactionKind; amount: string; }[] {
     const children = t.children ?? [];
     return kindOrder
         .filter(kind => children.some(c => c.kind === kind))

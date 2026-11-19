@@ -40,6 +40,7 @@ import {
 } from "#lib/statements.js";
 import type { Shown } from "#lib/stream.svelte.js";
 import { tone } from "#lib/tone.js";
+import { original } from "#lib/transactions.js";
 import {
     readLine,
     statementHref,
@@ -296,9 +297,9 @@ onKeys("statement", {
                             </td>
                             <td class="px-2 py-2 {tone[kinds[line.t.kind].tone]}">{kinds[line.t.kind].short}</td>
                             <td class="px-2 py-2 text-right text-dim">
-                                {line.t.originalAmount && line.t.originalCurrency ? `${line.t.originalCurrency} ${formatAmount(line.t.originalAmount)}` : ""}
+                                {original(line.t)}
                             </td>
-                            <td class="py-2 pl-2 text-right {line.t.kind === 'purchase' ? 'text-ink' : tone[kinds[line.t.kind].tone]}">
+                            <td class="py-2 pl-2 text-right {tone[kinds[line.t.kind].tone]}">
                                 {formatAmount(line.t.amount)}{#if isPoints(line.t)}<span class="ml-1 text-mute">{line.t.unit}</span>{/if}
                             </td>
                         </tr>

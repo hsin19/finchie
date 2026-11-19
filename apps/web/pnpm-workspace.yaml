@@ -1,4 +1,3 @@
 engineStrict: true
 allowBuilds:
   dprint: false
-  esbuild: true

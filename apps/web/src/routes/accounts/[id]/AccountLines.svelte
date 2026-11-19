@@ -13,6 +13,7 @@ import {
     negate,
     sign,
 } from "#lib/money.js";
+import { signTone } from "#lib/tone.js";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
 /**
@@ -68,10 +69,6 @@ function onMemoKeydown(event: KeyboardEvent) {
 function tradeMoney(t: Trade): string {
     if (t.prepaid) return `預繳 ${formatAmount(t.prepaid)}`;
     return sign(t.net) < 0 ? `付 ${formatAmount(negate(t.net))}` : `收 ${formatAmount(t.net)}`;
-}
-
-function amountTone(value: string) {
-    return sign(value) < 0 ? "text-neg" : sign(value) > 0 ? "text-pos" : "text-dim";
 }
 </script>
 
@@ -132,7 +129,7 @@ function amountTone(value: string) {
                                     </button>
                                 {/if}
                             </td>
-                            <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
+                            <td class="px-2 py-2 text-right whitespace-nowrap {signTone(line.amount)}">
                                 {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
                             </td>
                             <td class="py-2 pl-2 text-right whitespace-nowrap text-dim">{line.balance ? formatAmount(line.balance) : ""}</td>
@@ -156,7 +153,7 @@ function amountTone(value: string) {
                                 <td class="px-2 py-2 text-dim">{line.memo ?? ""}</td>
                                 <td class="px-2 py-2 text-mute" title={line.counterpartyName ? (line.counterparty ?? "") : ""}>{line.counterpartyName ?? line.counterparty ?? ""}</td>
                             {/if}
-                            <td class="px-2 py-2 text-right whitespace-nowrap {amountTone(line.amount)}">
+                            <td class="px-2 py-2 text-right whitespace-nowrap {signTone(line.amount)}">
                                 {formatAmount(line.amount, { signed: true })} <span class="text-mute">{line.unit}</span>
                             </td>
                             <td class="py-2 pl-2 text-right whitespace-nowrap text-dim">{line.balance ? formatAmount(line.balance) : ""}</td>

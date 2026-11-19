@@ -7,7 +7,10 @@ import type {
     NotificationKind,
     Shortfall,
 } from "#lib/api/types.js";
-import { yearlyDate } from "#lib/dates.js";
+import {
+    daysSince,
+    yearlyDate,
+} from "#lib/dates.js";
 import { institution } from "#lib/institutions.js";
 import { formatAmount } from "#lib/money.js";
 import {
@@ -17,6 +20,10 @@ import {
 
 /** The account a notification is about, as it is named now. */
 export type NotifiedAccount = NonNullable<Notification["account"]>;
+
+// An account gone quiet may be no more than months without lines, which the owner can confirm, and a
+// shortfall is an estimate from an old balance; the others are wrong until dealt with.
+export const noticeTone = (kind: NotificationKind) => (kind === "overdue" || kind === "shortfall" ? "text-accent" : "text-neg");
 
 /** What each kind of notification is about, in a few words. */
 export const noticeLabels: Record<NotificationKind, string> = {
@@ -29,10 +36,8 @@ export const noticeLabels: Record<NotificationKind, string> = {
 
 export const named = (a: Pick<NotifiedAccount, "institution" | "kind" | "label" | "name">) => `${institution(a.institution).name} ${accountName(a)}`.trim();
 
-export const daysSince = (day: string, today: string) => Math.round((Date.parse(today) - Date.parse(day)) / 86_400_000);
-
 /** "差 2,000（10/31 餘額 5,000，要扣 滙豐 11/09 3,000 + 玉山 11/23 4,000）": what one balance is to cover, and lacks. */
-export function describeShortfall(s: Shortfall, base: string, today: string): string {
+function describeShortfall(s: Shortfall, base: string, today: string): string {
     const slashDate = (day: string) => yearlyDate(day, today);
     const amount = (value: string) => `${formatAmount(value)}${s.unit === base ? "" : ` ${s.unit}`}`;
     const bills = s.debits.map(d => `${institution(d.institution).name} ${slashDate(d.dueDate)} ${amount(d.amount)}`).join(" + ");

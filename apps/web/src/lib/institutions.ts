@@ -45,7 +45,7 @@ const others: Record<string, Institution> = {
 };
 
 /** Banks in chart order; a bank without a color comes after them. */
-export const institutionOrder = Object.keys(cardIssuers);
+const institutionOrder = Object.keys(cardIssuers);
 
 export function institution(id: string): Institution {
     return cardIssuers[id] ?? others[id] ?? { name: id, code: id.toUpperCase(), color: "var(--color-mute)" };

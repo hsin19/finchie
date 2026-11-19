@@ -3,15 +3,12 @@ import { handleNotifications } from "#lib/api/mutations.js";
 import type { Need } from "#lib/attention.js";
 import ConfirmCurrent from "#lib/components/ConfirmCurrent.svelte";
 import Dot from "#lib/components/Dot.svelte";
+import { noticeTone } from "#lib/notices.js";
 import { resolve } from "$app/paths";
 import Check from "@lucide/svelte/icons/check";
 
 /** What needs the owner (attention.ts): shown first, and only when there is something. */
 let { needs }: { needs: Need[]; } = $props();
-
-// An account gone quiet may be no more than months without lines, which the owner can confirm, and a
-// shortfall is an estimate from an old balance; the others are wrong until dealt with.
-const tone = (need: Need) => (need.kind === "overdue" || need.kind === "shortfall" ? "text-accent" : "text-neg");
 
 let busy = $state(false);
 let error = $state<string>();
@@ -46,7 +43,7 @@ async function handle(ids: number[]) {
         {#each needs as need (need.kind)}
             <li class="flex flex-col gap-0.5 border-t border-rule py-2 first:border-t-0 md:flex-row md:items-baseline md:gap-3">
                 <span class="shrink-0">
-                    <a href={need.href} class="text-ink hover:text-ink-bright"><Dot class={tone(need)} /> {need.text}</a>
+                    <a href={need.href} class="text-ink hover:text-ink-bright"><Dot class={noticeTone(need.kind)} /> {need.text}</a>
                     {#if need.names.length === 0}{@render handled(need.ids)}{/if}
                 </span>
                 {#if need.names.length > 0}

@@ -4,6 +4,7 @@ import { formatAmount } from "#lib/money.js";
 import {
     checkDelta,
     deltaMeaning,
+    failingChecks,
 } from "#lib/statements.js";
 import Check from "@lucide/svelte/icons/check";
 
@@ -13,7 +14,7 @@ import Check from "@lucide/svelte/icons/check";
  */
 let { statement }: { statement: Pick<Statement, "checks" | "currency">; } = $props();
 
-const failing = $derived(statement.checks.filter(c => !c.balanced));
+const failing = $derived(failingChecks(statement));
 const passing = $derived(statement.checks.filter(c => c.balanced));
 const unit = (u: string) => (u && u !== statement.currency ? u : "");
 </script>

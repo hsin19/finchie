@@ -7,7 +7,6 @@ import type {
 } from "#lib/api/client.js";
 import { refundedInFull } from "#lib/family.js";
 import {
-    flowOf,
     isPoints,
     isTrade,
     isTransfer,
@@ -27,7 +26,7 @@ import type { ResolvedPathname } from "$app/types";
 
 /** The amount as the owner sees it: money out negative, whichever account (ADR 0013). */
 export function amountText(t: Transaction): string {
-    return formatAmount(flowOf(t), { signed: true });
+    return formatAmount(t.flow, { signed: true });
 }
 
 /** Its color: money that only moved between the owner's own lines is muted. */
@@ -35,8 +34,8 @@ export function amountTone(t: Transaction): string {
     if (refundedInFull(t) || isTransfer(t)) return "text-mute";
     // Shares or points, not money (ADR 0017, ADR 0019).
     if (isTrade(t) || isPoints(t)) return "text-ink";
-    if (sign(flowOf(t)) > 0) return "text-pos";
-    return t.kind === "purchase" || t.kind === "other" ? "text-ink" : tone[kinds[t.kind].tone];
+    if (sign(t.flow) > 0) return "text-pos";
+    return tone[kinds[t.kind].tone];
 }
 
 /** The unit after an amount, unless it is the base currency. */

@@ -7,7 +7,6 @@ import {
     weekday,
 } from "#lib/dates.js";
 import { breakdown } from "#lib/family.js";
-import { flowOf } from "#lib/flows.js";
 import { kinds } from "#lib/kinds.js";
 import { sign } from "#lib/money.js";
 import { tone } from "#lib/tone.js";
@@ -67,9 +66,9 @@ let { items, selectedId, byDate, onselect, base, children }: {
                         <td class="max-w-[320px] px-2 py-2">
                             <span class="block truncate">{t.description}{#if t.memo}<span class="text-dim"> · {t.memo}</span>{/if}</span>
                             {#if breakdown(t)}<span class="block truncate text-[11px] text-mute">帳單上 {breakdown(t)}</span>{/if}
-                            {#if t.counterpart}<Counterpart other={t.counterpart} out={sign(flowOf(t)) < 0} class="block truncate text-[11px] text-mute hover:text-ink" />{/if}
+                            {#if t.counterpart}<Counterpart other={t.counterpart} out={sign(t.flow) < 0} class="block truncate text-[11px] text-mute hover:text-ink" />{/if}
                             {#if !t.counterpart && t.counterpartyName}
-                                <span class="block truncate text-[11px] text-mute">{#if sign(flowOf(t)) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {t.counterpartyName}</span>
+                                <span class="block truncate text-[11px] text-mute">{#if sign(t.flow) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {t.counterpartyName}</span>
                             {/if}
                         </td>
                         <td class="px-2 py-2 {tone[kinds[t.kind].tone]}">{kinds[t.kind].short}</td>
@@ -99,9 +98,9 @@ let { items, selectedId, byDate, onselect, base, children }: {
                 {withDate ? `${shortDate(t.transactionDate)} · ` : ""}{lineAccount(t)} · {kinds[t.kind].short}{original(t) ? ` · ${original(t)}` : ""}{breakdown(t) ? ` · 帳單上 ${breakdown(t)}` : ""}
                 <!-- The row is a button, so the account the money went to is named, not linked. -->
                 {#if t.counterpart}
-                    · {#if sign(flowOf(t)) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {counterpartLink(t.counterpart).text}
+                    · {#if sign(t.flow) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {counterpartLink(t.counterpart).text}
                 {:else if t.counterpartyName}
-                    · {#if sign(flowOf(t)) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {t.counterpartyName}
+                    · {#if sign(t.flow) < 0}<ArrowRight />{:else}<ArrowLeft />{/if} {t.counterpartyName}
                 {/if}
             </span>
         </button>

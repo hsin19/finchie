@@ -66,7 +66,7 @@ export interface Result {
 
 export type Data<R extends Result> = NonNullable<R["data"]>;
 
-export function message(result: Result): string {
+function message(result: Result): string {
     const body = result.error as { message?: unknown; } | undefined;
     return typeof body?.message === "string" ? body.message : result.response.statusText || `HTTP ${result.response.status}`;
 }
