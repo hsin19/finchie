@@ -12,7 +12,7 @@ Finchie has one user. Signing in is Cloudflare Access's job, at the edge; the ba
 
 The backend check is configured with `BACKEND_ACCESS_TEAM_DOMAIN` and `BACKEND_ACCESS_AUD`. Both empty turns it off for local development (the backend logs a warning); setting only one is a startup error, since it would look like protection while checking nothing.
 
-A machine can come through Access too, with a service token: its JWT carries no e-mail address, and the backend lets it upload documents and nothing else (the mailbox Worker, ADR 0010).
+A machine can come through Access too, with a service token: its JWT carries no e-mail address, and the backend lets it upload documents and nothing else (the mailbox Worker, ADR 0010). (Later: one more service token, the agents', named by `BACKEND_ACCESS_AGENT_CLIENT_ID`, may also read, every `GET`, for the CLI in `apps/cli`; beyond uploading, it still changes nothing.)
 
 Without the backend check, one mistake in the Cloudflare configuration (a route added without its Access application) would publish the ledger, and nothing would say so.
 

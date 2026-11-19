@@ -48,11 +48,12 @@ func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv2.P
 var _ StrictServerInterface = (*Server)(nil)
 
 // Register mounts the API. Use it instead of the generated RegisterHandlers, which would leave out
-// notMultipartIsBadRequest and notifyAfterChanges.
+// notMultipartIsBadRequest, notifyAfterChanges, and the contract itself.
 func Register(router EchoRouter, server *Server) {
 	RegisterHandlersWithOptions(router, NewStrictHandler(server, []StrictMiddlewareFunc{notifyAfterChanges(server.pool)}), RegisterHandlersOptions{
 		OperationMiddlewares: map[string][]echo.MiddlewareFunc{"uploadDocument": {notMultipartIsBadRequest}},
 	})
+	router.GET("/api/openapi.json", serveContract)
 }
 
 // notMultipartIsBadRequest answers an upload that is not a multipart form with the spec's 400. The

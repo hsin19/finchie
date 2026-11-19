@@ -1699,7 +1699,7 @@ type ServerInterface interface {
 	// DeleteDocument Delete a document that holds nothing of the ledger, its original included
 	// (DELETE /api/documents/{id})
 	DeleteDocument(ctx *echo.Context, id Id) error
-
+	// GetDocument One document, with what parsing it came to
 	// (GET /api/documents/{id})
 	GetDocument(ctx *echo.Context, id Id) error
 	// GetDocumentContent The original file exactly as uploaded
@@ -1759,10 +1759,10 @@ type ServerInterface interface {
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx *echo.Context, params ListStatementsParams) error
-
+	// GetStatement One parsed statement, with its checks
 	// (GET /api/statements/{id})
 	GetStatement(ctx *echo.Context, id Id) error
-
+	// ListStatementTransactions A statement's transactions, in the order it prints them
 	// (GET /api/statements/{id}/transactions)
 	ListStatementTransactions(ctx *echo.Context, id Id) error
 	// SearchTransactions Transactions across every statement, newest first, with totals for the whole match
@@ -4212,7 +4212,7 @@ type StrictServerInterface interface {
 	// DeleteDocument Delete a document that holds nothing of the ledger, its original included
 	// (DELETE /api/documents/{id})
 	DeleteDocument(ctx context.Context, request DeleteDocumentRequestObject) (DeleteDocumentResponseObject, error)
-
+	// GetDocument One document, with what parsing it came to
 	// (GET /api/documents/{id})
 	GetDocument(ctx context.Context, request GetDocumentRequestObject) (GetDocumentResponseObject, error)
 	// GetDocumentContent The original file exactly as uploaded
@@ -4272,10 +4272,10 @@ type StrictServerInterface interface {
 	// ListStatements Parsed statements, newest closing date first
 	// (GET /api/statements)
 	ListStatements(ctx context.Context, request ListStatementsRequestObject) (ListStatementsResponseObject, error)
-
+	// GetStatement One parsed statement, with its checks
 	// (GET /api/statements/{id})
 	GetStatement(ctx context.Context, request GetStatementRequestObject) (GetStatementResponseObject, error)
-
+	// ListStatementTransactions A statement's transactions, in the order it prints them
 	// (GET /api/statements/{id}/transactions)
 	ListStatementTransactions(ctx context.Context, request ListStatementTransactionsRequestObject) (ListStatementTransactionsResponseObject, error)
 	// SearchTransactions Transactions across every statement, newest first, with totals for the whole match

@@ -37,6 +37,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** One document, with what parsing it came to */
         get: operations["getDocument"];
         put?: never;
         post?: never;
@@ -589,6 +590,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** This contract as JSON, for clients that build themselves from it (apps/cli) */
+        get: operations["getOpenAPI"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mail-filters.xml": {
         parameters: {
             query?: never;
@@ -634,6 +652,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** One parsed statement, with its checks */
         get: operations["getStatement"];
         put?: never;
         post?: never;
@@ -667,6 +686,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** A statement's transactions, in the order it prints them */
         get: operations["listStatementTransactions"];
         put?: never;
         post?: never;
@@ -2402,6 +2422,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Settings"];
+                };
+            };
+        };
+    };
+    getOpenAPI: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The OpenAPI document, its keys in the order openapi.yaml gives them */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };

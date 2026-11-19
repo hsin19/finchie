@@ -29,6 +29,9 @@ type Config struct {
 	// leave both empty for local development.
 	AccessTeamDomain string `env:"ACCESS_TEAM_DOMAIN"`
 	AccessAudience   string `env:"ACCESS_AUD"`
+	// The Client ID of the Access service token the owner's agents use (apps/cli): it may read
+	// everything and change nothing. Empty, no service token reads.
+	AccessAgentClientID string `env:"ACCESS_AGENT_CLIENT_ID"`
 	// The address the mailbox Worker receives statements at (ADR 0010). Only the Gmail filter
 	// download uses it (ADR 0014); it is the deployment's, never in the repository.
 	MailboxAddress string `env:"MAILBOX_ADDRESS"`
