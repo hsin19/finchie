@@ -27,30 +27,9 @@ from finchie_parser.model import (
 )
 from finchie_parser.reading import OpenedDocument
 
-_ACCOUNT_KINDS = {
-    AccountKind.CREDIT_CARD: pb.ACCOUNT_KIND_CREDIT_CARD,
-    AccountKind.DEPOSIT: pb.ACCOUNT_KIND_DEPOSIT,
-    AccountKind.SECURITIES: pb.ACCOUNT_KIND_SECURITIES,
-    AccountKind.POINTS: pb.ACCOUNT_KIND_POINTS,
-    AccountKind.LOAN: pb.ACCOUNT_KIND_LOAN,
-}
-
-_LINE_KINDS = {
-    LineKind.PURCHASE: pb.LINE_KIND_PURCHASE,
-    LineKind.FOREIGN_TRANSACTION_FEE: pb.LINE_KIND_FOREIGN_TRANSACTION_FEE,
-    LineKind.ANNUAL_FEE: pb.LINE_KIND_ANNUAL_FEE,
-    LineKind.REFUND: pb.LINE_KIND_REFUND,
-    LineKind.REBATE: pb.LINE_KIND_REBATE,
-    LineKind.PAYMENT: pb.LINE_KIND_PAYMENT,
-    LineKind.INTEREST: pb.LINE_KIND_INTEREST,
-    LineKind.FEE: pb.LINE_KIND_FEE,
-    LineKind.OTHER: pb.LINE_KIND_OTHER,
-    LineKind.BUY: pb.LINE_KIND_BUY,
-    LineKind.SELL: pb.LINE_KIND_SELL,
-    LineKind.EARN: pb.LINE_KIND_EARN,
-    LineKind.ADJUST: pb.LINE_KIND_ADJUST,
-    LineKind.REDEEM: pb.LINE_KIND_REDEEM,
-}
+# The model's kinds are the contract's by name: one the contract lacks fails here, at import.
+_ACCOUNT_KINDS = {k: pb.AccountKind.Value(f"ACCOUNT_KIND_{k.name}") for k in AccountKind}
+_LINE_KINDS = {k: pb.LineKind.Value(f"LINE_KIND_{k.name}") for k in LineKind}
 
 
 def to_response(result: ParseResult) -> pb.ParseDocumentResponse:
