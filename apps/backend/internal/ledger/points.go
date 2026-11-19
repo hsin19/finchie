@@ -54,14 +54,7 @@ func whole(n *int16) int {
 
 // explainLapses takes out of each points gap what lapsed by its program's rule (ADR 0019): points that
 // vanish between two bills with no line are mostly what lapsed, and a gap that is all of it is no gap.
-func explainLapses(ctx context.Context, queries *dbq.Queries, accountID *int64, gaps []domain.Gap) ([]domain.Gap, error) {
-	if len(gaps) == 0 {
-		return gaps, nil
-	}
-	programs, err := PointsLots(ctx, queries, accountID)
-	if err != nil {
-		return nil, err
-	}
+func explainLapses(gaps []domain.Gap, programs []ProgramLots) []domain.Gap {
 	type step struct {
 		account  int64
 		unit     string
@@ -83,5 +76,5 @@ func explainLapses(ctx context.Context, queries *dbq.Queries, accountID *int64, 
 		}
 		kept = append(kept, g)
 	}
-	return kept, nil
+	return kept
 }

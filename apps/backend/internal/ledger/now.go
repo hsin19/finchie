@@ -35,7 +35,7 @@ func ReadAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Accou
 	if err != nil {
 		return nil, fmt.Errorf("latest balances: %w", err)
 	}
-	gaps, err := Gaps(ctx, queries, id)
+	gaps, err := balanceGaps(ctx, queries, id)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +51,7 @@ func ReadAccounts(ctx context.Context, queries *dbq.Queries, id *int64) ([]Accou
 	if err != nil {
 		return nil, err
 	}
+	gaps = explainLapses(gaps, programs)
 	debits, err := debits(ctx, queries, latest)
 	if err != nil {
 		return nil, err

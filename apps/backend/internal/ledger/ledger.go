@@ -145,11 +145,20 @@ func StorePrices(ctx context.Context, queries *dbq.Queries, source domain.PriceS
 // Gaps reads where accounts' balances do not join up (ADR 0013), of one account or, with none, of all; points
 // that lapsed by their program's rule leave none (ADR 0019).
 func Gaps(ctx context.Context, queries *dbq.Queries, accountID *int64) ([]domain.Gap, error) {
-	rows, err := queries.AccountGaps(ctx, dbq.AccountGapsParams{
-		AccountID:       accountID,
-		Itemized:        domain.KindsWhere(domain.AccountKind.Itemized),
-		EveryLineListed: domain.KindsWhere(domain.AccountKind.EveryLineListed),
-	})
+	gaps, err := balanceGaps(ctx, queries, accountID)
+	if err != nil || len(gaps) == 0 {
+		return gaps, err
+	}
+	programs, err := PointsLots(ctx, queries, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return explainLapses(gaps, programs), nil
+}
+
+// balanceGaps reads the gaps between balances before what lapsed is taken out of them (explainLapses).
+func balanceGaps(ctx context.Context, queries *dbq.Queries, accountID *int64) ([]domain.Gap, error) {
+	rows, err := queries.AccountGaps(ctx, gapsOf(accountID))
 	if err != nil {
 		return nil, fmt.Errorf("account gaps: %w", err)
 	}
@@ -157,7 +166,15 @@ func Gaps(ctx context.Context, queries *dbq.Queries, accountID *int64) ([]domain
 	for _, r := range rows {
 		gaps = append(gaps, toGap(r))
 	}
-	return explainLapses(ctx, queries, accountID, gaps)
+	return gaps, nil
+}
+
+func gapsOf(accountID *int64) dbq.AccountGapsParams {
+	return dbq.AccountGapsParams{
+		AccountID:       accountID,
+		Itemized:        domain.KindsWhere(domain.AccountKind.Itemized),
+		EveryLineListed: domain.KindsWhere(domain.AccountKind.EveryLineListed),
+	}
 }
 
 func toGap(r dbq.AccountGapsRow) domain.Gap {
@@ -187,11 +204,7 @@ func FillGap(ctx context.Context, pool *pgxpool.Pool, accountID int64, unit stri
 	var fill Fill
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		queries := dbq.New(tx)
-		rows, err := queries.AccountGaps(ctx, dbq.AccountGapsParams{
-			AccountID:       &accountID,
-			Itemized:        domain.KindsWhere(domain.AccountKind.Itemized),
-			EveryLineListed: domain.KindsWhere(domain.AccountKind.EveryLineListed),
-		})
+		rows, err := queries.AccountGaps(ctx, gapsOf(&accountID))
 		if err != nil {
 			return fmt.Errorf("account gaps: %w", err)
 		}

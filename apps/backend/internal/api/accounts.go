@@ -63,7 +63,7 @@ func (s *Server) GetAccount(ctx context.Context, request GetAccountRequestObject
 		Gaps: account.Gaps, Expiries: account.Expiries, Lots: account.Lots, Lapsed: account.Lapsed, Debits: account.Debits, History: history, Fills: fills,
 	}
 	if domain.AccountKind(account.Kind) == domain.Securities {
-		held, err := readPositions(ctx, queries, request.Id, rows, account.Balances)
+		held, err := readPositions(ctx, queries, request.Id, rows, account.Balances, account.Gaps)
 		if err != nil {
 			return nil, err
 		}
@@ -221,15 +221,12 @@ func dateOf(day string) openapi_types.Date {
 }
 
 // readPositions works out a securities account's positions (domain.Positions) from its balances' history,
-// gaps, and trades.
-func readPositions(ctx context.Context, queries *dbq.Queries, accountID int64, history []dbq.AccountBalancesRow, latest []Balance) ([]Position, error) {
+// gaps, and trades. The gaps are those the account shows: a securities statement lists every line, so every
+// gap is one money moved unseen in (domain.AccountKind.EveryLineListed).
+func readPositions(ctx context.Context, queries *dbq.Queries, accountID int64, history []dbq.AccountBalancesRow, latest []Balance, gaps []BalanceGap) ([]Position, error) {
 	trades, err := queries.AccountTrades(ctx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("account trades: %w", err)
-	}
-	gaps, err := ledger.Gaps(ctx, queries, &accountID)
-	if err != nil {
-		return nil, err
 	}
 
 	holdings := map[string][]domain.Holding{}
@@ -238,7 +235,7 @@ func readPositions(ctx context.Context, queries *dbq.Queries, accountID int64, h
 	}
 	gapsTo := map[string][]time.Time{}
 	for _, g := range gaps {
-		gapsTo[g.Unit] = append(gapsTo[g.Unit], g.To)
+		gapsTo[g.Unit] = append(gapsTo[g.Unit], g.To.Time)
 	}
 	traded := map[string][]domain.Trade{}
 	for _, t := range trades {
