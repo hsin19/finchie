@@ -54,6 +54,7 @@ Node 26 (`.node-version`); the pnpm version is pinned in `package.json`.
 | `src/lib/attention.ts` | What needs the owner, the overview's first section |
 | `src/lib/cashflow.ts` | A year of what came in and went out, and which months every source has reported past |
 | `src/lib/investments.ts` | The investments' query, and their worth and what went in as two lines on one scale |
+| `src/lib/chart.ts` | The column charts' round axis steps and their labels; `ViewSwitch` is their "chart · table" switch |
 | `src/lib/transactions.ts` | A transaction as rows and its detail show it |
 | `src/lib/documents.ts` | Where a document opens, the document list's filters and URL, what parsing a document gave, and an upload's row |
 | `src/lib/filters.ts` | The transactions page's filters, read from the URL and written to it (`transactionsHref`), and its account picker |

@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { NetWorthPoint } from "#lib/api/client.js";
+import ViewSwitch from "#lib/components/ViewSwitch.svelte";
 import { formatAmount } from "#lib/money.js";
 import { trendColumns } from "#lib/networth.js";
 
@@ -12,7 +13,6 @@ let { points }: { points: NetWorthPoint[]; } = $props();
 let view = $state<"chart" | "table">("chart");
 let active = $state<number>();
 const chart = $derived(trendColumns(points));
-const views = ["chart", "table"] as const;
 
 /** "10" for a month end, "11/11" for a day within a month (today). */
 function label(on: string, i: number): string {
@@ -24,19 +24,7 @@ function label(on: string, i: number): string {
 <section class="panel flex flex-col gap-3 p-3 md:p-3.5">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="label">TREND · 淨額</h2>
-        <div role="group" aria-label="檢視方式" class="flex gap-1.5 text-[12px]">
-            {#each views as option, i (option)}
-                {#if i > 0}<span class="text-mute">·</span>{/if}
-                <button
-                    type="button"
-                    aria-pressed={view === option}
-                    class={view === option ? "text-accent underline underline-offset-4" : "text-mute hover:text-ink"}
-                    onclick={() => (view = option)}
-                >
-                    {option}
-                </button>
-            {/each}
-        </div>
+        <ViewSwitch bind:view />
     </div>
 
     {#if points.length === 0}

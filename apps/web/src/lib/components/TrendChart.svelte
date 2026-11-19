@@ -1,5 +1,10 @@
 <script lang="ts">
 import type { MonthBill } from "#lib/bills.js";
+import {
+    compact,
+    niceStep,
+} from "#lib/chart.js";
+import ViewSwitch from "#lib/components/ViewSwitch.svelte";
 import type { Month } from "#lib/dates.js";
 import {
     institution,
@@ -26,17 +31,12 @@ let active = $state<number>();
 const ticks = $derived.by(() => {
     const max = Math.max(0, ...bills.map(b => stack(b).total));
     if (max <= 0) return [0];
-    const power = 10 ** Math.floor(Math.log10(max / 4));
-    const step = [1, 2, 5].map(f => f * power).find(s => s >= max / 4) ?? 10 * power;
+    const step = niceStep(max, 4);
     return Array.from({ length: Math.ceil(max / step) + 1 }, (_, i) => i * step);
 });
 const top = $derived(ticks.at(-1) || 1);
 
 const banks = $derived(sortInstitutions([...new Set(bills.flatMap(b => b.parts.map(p => p.institution)))]));
-
-function compact(n: number): string {
-    return n >= 1000 ? `${n / 1000}K` : String(n);
-}
 
 // A credit balance has nothing to stack; its amount still shows in the tooltip and the table.
 function stack(bill: MonthBill) {
@@ -50,25 +50,12 @@ function describe(bill: MonthBill): string {
 }
 
 const GUTTER = 36;
-const views = ["chart", "table"] as const;
 </script>
 
 <section class="panel flex flex-col gap-3 p-3 md:p-3.5">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="label">TREND · 每月帳單</h2>
-        <div role="group" aria-label="檢視方式" class="flex gap-1.5 text-[12px]">
-            {#each views as option, i (option)}
-                {#if i > 0}<span class="text-mute">·</span>{/if}
-                <button
-                    type="button"
-                    aria-pressed={view === option}
-                    class={view === option ? "text-accent underline underline-offset-4" : "text-mute hover:text-ink"}
-                    onclick={() => (view = option)}
-                >
-                    {option}
-                </button>
-            {/each}
-        </div>
+        <ViewSwitch bind:view />
     </div>
 
     {#if view === "chart"}

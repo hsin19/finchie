@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { InvestmentPoint } from "#lib/api/client.js";
+import ViewSwitch from "#lib/components/ViewSwitch.svelte";
 import {
     investmentLines,
     investmentX,
@@ -27,7 +28,6 @@ let active = $state<number>();
 const lines = $derived(investmentLines(points));
 const first = $derived(points[0]);
 const last = $derived(points.at(-1));
-const views = ["chart", "table"] as const;
 
 const percent = (p: InvestmentPoint) => (p.returnPercent === undefined ? "—" : `${formatAmount(p.returnPercent, { signed: true })}%`);
 </script>
@@ -36,19 +36,7 @@ const percent = (p: InvestmentPoint) => (p.returnPercent === undefined ? "—" :
     <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="label">INVEST · 投資</h2>
         {#if points.length > 0}
-            <div role="group" aria-label="檢視方式" class="flex gap-1.5 text-[12px]">
-                {#each views as option, i (option)}
-                    {#if i > 0}<span class="text-mute">·</span>{/if}
-                    <button
-                        type="button"
-                        aria-pressed={view === option}
-                        class={view === option ? "text-accent underline underline-offset-4" : "text-mute hover:text-ink"}
-                        onclick={() => (view = option)}
-                    >
-                        {option}
-                    </button>
-                {/each}
-            </div>
+            <ViewSwitch bind:view />
         {/if}
     </div>
 

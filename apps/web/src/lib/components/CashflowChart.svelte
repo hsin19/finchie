@@ -1,5 +1,10 @@
 <script lang="ts">
 import type { MonthFlow } from "#lib/cashflow.js";
+import {
+    compact,
+    niceStep,
+} from "#lib/chart.js";
+import ViewSwitch from "#lib/components/ViewSwitch.svelte";
 import { transactionsHref } from "#lib/filters.js";
 import {
     approx,
@@ -26,8 +31,7 @@ const scale = $derived.by(() => {
     const down = Math.max(0, ...flows.map(f => -approx(f.spent)));
     const longest = Math.max(up, down);
     if (longest <= 0) return { ticks: [0], top: 1, bottom: 0 };
-    const power = 10 ** Math.floor(Math.log10(longest / 3));
-    const step = [1, 2, 5].map(f => f * power).find(s => s >= longest / 3) ?? 10 * power;
+    const step = niceStep(longest, 3);
     const top = Math.ceil(up / step) * step;
     const bottom = Math.ceil(down / step) * step;
     const ticks = Array.from({ length: (top + bottom) / step + 1 }, (_, i) => i * step - bottom);
@@ -38,10 +42,6 @@ const span = $derived(scale.top + scale.bottom || 1);
 const at = (value: number) => ((value + scale.bottom) / span) * 100;
 const zero = $derived(at(0));
 
-function compact(n: number): string {
-    return Math.abs(n) >= 1000 ? `${n / 1000}K` : String(n);
-}
-
 function describe(f: MonthFlow): string {
     return `${f.month} 收入 ${formatAmount(f.received)}、支出 ${formatAmount(f.spent)}、結餘 ${formatAmount(f.net, { signed: true })}${f.complete ? "" : "（還沒到齊）"}`;
 }
@@ -49,25 +49,12 @@ function describe(f: MonthFlow): string {
 const tone = (value: string) => (sign(value) < 0 ? "text-neg" : "text-pos");
 
 const GUTTER = 40;
-const views = ["chart", "table"] as const;
 </script>
 
 <section class="panel flex flex-col gap-3 p-3 md:p-3.5">
     <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
         <h2 class="label">CASHFLOW · 一年收支</h2>
-        <div role="group" aria-label="檢視方式" class="flex gap-1.5 text-[12px]">
-            {#each views as option, i (option)}
-                {#if i > 0}<span class="text-mute">·</span>{/if}
-                <button
-                    type="button"
-                    aria-pressed={view === option}
-                    class={view === option ? "text-accent underline underline-offset-4" : "text-mute hover:text-ink"}
-                    onclick={() => (view = option)}
-                >
-                    {option}
-                </button>
-            {/each}
-        </div>
+        <ViewSwitch bind:view />
     </div>
 
     <!-- The year so far: what the owner most wants of it. -->
