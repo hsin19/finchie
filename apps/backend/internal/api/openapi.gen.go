@@ -756,7 +756,7 @@ type DocumentFailure string
 
 // DocumentPage defines model for DocumentPage.
 type DocumentPage struct {
-	// ByState Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out
+	// ByState Every document matching `query`, by state: a facet that ignores `state` and `before`. States with none are left out
 	ByState []StateCount `json:"byState"`
 	Items   []Document   `json:"items"`
 }
@@ -1533,8 +1533,8 @@ type ListDocumentsParams struct {
 	Before *int64            `form:"before,omitempty" json:"before,omitempty"`
 	State  *[]DocumentStatus `form:"state,omitempty" json:"state,omitempty"`
 
-	// Q Case-insensitive substring of the filename
-	Q *string `form:"q,omitempty" json:"q,omitempty"`
+	// Query Case-insensitive substring of the filename
+	Query *string `form:"query,omitempty" json:"query,omitempty"`
 
 	// Id Only these documents, wherever they fall in the list (for refreshing ones already shown)
 	Id *[]int64 `form:"id,omitempty" json:"id,omitempty"`
@@ -1609,8 +1609,8 @@ type SearchTransactionsParams struct {
 	// HideTransfers Leave out transfers between the owner's lines and card payments (ADR 0016)
 	HideTransfers *bool `form:"hideTransfers,omitempty" json:"hideTransfers,omitempty"`
 
-	// Q Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
-	Q *string `form:"q,omitempty" json:"q,omitempty"`
+	// Query Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
+	Query *string `form:"query,omitempty" json:"query,omitempty"`
 
 	// Sort Row order; largest and smallest compare amounts by size, ignoring the sign
 	Sort *TransactionSort `form:"sort,omitempty" json:"sort,omitempty"`
@@ -1976,11 +1976,11 @@ func (w *ServerInterfaceWrapper) ListDocuments(ctx *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter state: %s", err))
 	}
 
-	// ------------- Optional query parameter "q" -------------
+	// ------------- Optional query parameter "query" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", ctx.QueryParams(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", ctx.QueryParams(), &params.Query, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter q: %s", err))
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter query: %s", err))
 	}
 
 	// ------------- Optional query parameter "id" -------------
@@ -2459,11 +2459,11 @@ func (w *ServerInterfaceWrapper) SearchTransactions(ctx *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter hideTransfers: %s", err))
 	}
 
-	// ------------- Optional query parameter "q" -------------
+	// ------------- Optional query parameter "query" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", ctx.QueryParams(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", ctx.QueryParams(), &params.Query, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter q: %s", err))
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter query: %s", err))
 	}
 
 	// ------------- Optional query parameter "sort" -------------

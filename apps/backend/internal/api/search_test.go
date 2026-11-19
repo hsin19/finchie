@@ -124,7 +124,7 @@ func TestSearchTransactionsFiltersAndTotals(t *testing.T) {
 		t.Fatalf("overseas total = %d, want the EUR purchase and the SE refund", overseas.Total)
 	}
 
-	search := decode[TransactionSearch](t, get(t, e, "/api/transactions?q=uber%20&limit=0"))
+	search := decode[TransactionSearch](t, get(t, e, "/api/transactions?query=uber%20&limit=0"))
 	if search.Total != 1 || len(search.Items) != 0 || search.Sum != "289" {
 		t.Fatalf("q=uber limit=0: total=%d items=%d sum=%s", search.Total, len(search.Items), search.Sum)
 	}
@@ -294,7 +294,7 @@ func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	if one.Total != 4 || len(one.ByAccount) != 2 || one.ByAccount[0].AccountId != esun.Id || one.ByAccount[0].Count != 4 || one.ByAccount[1].Count != 1 || len(one.ByCard) == 0 {
 		t.Fatalf("one account: total %d, byAccount %+v, byCard %+v", one.Total, one.ByAccount, one.ByCard)
 	}
-	if memo := decode[TransactionSearch](t, get(t, e, "/api/transactions?q=房租")); memo.Total != 1 {
+	if memo := decode[TransactionSearch](t, get(t, e, "/api/transactions?query=房租")); memo.Total != 1 {
 		t.Fatalf("q matches the memo: total %d", memo.Total)
 	}
 	// The bill pages ask for card lines alone, whose amounts add up as printed.

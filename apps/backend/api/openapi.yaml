@@ -61,7 +61,7 @@ paths:
           schema:
             type: array
             items: { $ref: "#/components/schemas/DocumentStatus" }
-        - name: q
+        - name: query
           in: query
           description: Case-insensitive substring of the filename
           schema: { type: string }
@@ -888,7 +888,7 @@ paths:
           in: query
           description: Leave out transfers between the owner's lines and card payments (ADR 0016)
           schema: { type: boolean }
-        - name: q
+        - name: query
           in: query
           description: Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
           schema: { type: string }
@@ -963,7 +963,7 @@ components:
           items: { $ref: "#/components/schemas/Document" }
         byState:
           type: array
-          description: "Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out"
+          description: "Every document matching `query`, by state: a facet that ignores `state` and `before`. States with none are left out"
           items: { $ref: "#/components/schemas/StateCount" }
 
     StateCount:

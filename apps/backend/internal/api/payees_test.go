@@ -18,7 +18,7 @@ func TestALineIsFoundByItsCounterpartyAndByTheOwnersNameForIt(t *testing.T) {
 	))
 	search := func(q string) TransactionSearch {
 		t.Helper()
-		return decode[TransactionSearch](t, get(t, e, "/api/transactions?q="+url.QueryEscape(q)))
+		return decode[TransactionSearch](t, get(t, e, "/api/transactions?query="+url.QueryEscape(q)))
 	}
 
 	for _, q := range []string{landlord, "037069"} {

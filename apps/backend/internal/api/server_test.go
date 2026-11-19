@@ -242,7 +242,7 @@ func TestDocumentListPagesOnFromTheLastDocumentAndFilters(t *testing.T) {
 		t.Fatalf("failed and needs_review = %v", got)
 	}
 	// The counts follow the search but not the state filter.
-	bills := decode[DocumentPage](t, get(t, e, "/api/documents?q=+bill+&state=parsed"))
+	bills := decode[DocumentPage](t, get(t, e, "/api/documents?query=+bill+&state=parsed"))
 	if got := names(bills); !slices.Equal(got, []string{"a1-bill.eml"}) {
 		t.Fatalf("parsed bills = %v", got)
 	}

@@ -49,7 +49,7 @@ func TestTheAccessLogNamesTheRouteNeverTheQueryOrTheClient(t *testing.T) {
 	e.GET("/api/transactions", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
 	e.GET(HealthPath, func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/transactions?q=PHARMACY", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/transactions?query=PHARMACY", nil)
 	request.Header.Set("User-Agent", "a-browser")
 	e.ServeHTTP(httptest.NewRecorder(), request)
 	e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, HealthPath, nil))

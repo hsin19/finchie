@@ -30,7 +30,7 @@ type searchFilter struct {
 func readSearch(params SearchTransactionsParams) searchFilter {
 	f := searchFilter{
 		from: date(params.From), to: date(params.To), closingFrom: date(params.ClosingFrom), closingTo: date(params.ClosingTo),
-		institution: blankAsNil(params.Institution), card: blankAsNil(params.Card), query: blankAsNil(params.Q),
+		institution: blankAsNil(params.Institution), card: blankAsNil(params.Card), query: blankAsNil(params.Query),
 		account: params.Account, overseas: params.Overseas != nil && *params.Overseas,
 		// A transfer between the owner's lines is neither spent nor received (ADR 0016).
 		hideTransfers: params.HideTransfers != nil && *params.HideTransfers,

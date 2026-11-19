@@ -119,7 +119,7 @@ func (s *Server) UploadDocument(ctx context.Context, request UploadDocumentReque
 
 func (s *Server) ListDocuments(ctx context.Context, request ListDocumentsRequestObject) (ListDocumentsResponseObject, error) {
 	params := request.Params
-	query := blankAsNil(params.Q)
+	query := blankAsNil(params.Query)
 	var states []string // nil, not empty: no state filter
 	if params.State != nil {
 		for _, state := range *params.State {
