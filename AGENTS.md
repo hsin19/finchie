@@ -11,8 +11,10 @@ Self-hosted personal finance platform. V2 is being built on `main` (ADR 0001): a
 | `apps/backend/` | Go. API, document ingestion, River jobs, Postgres schema |
 | `apps/parser/` | Python. gRPC server that turns statements into structured data |
 | `apps/web/` | SvelteKit single-page app; its build is embedded in the backend |
+| `apps/cli/` | Python. The API as commands for AI agents, built at run time from the contract the backend serves: a change to `openapi.yaml` needs no change here |
 | `apps/mailbox/` | Cloudflare Email Worker: uploads statements Gmail forwards; deployed by hand (`task mailbox:deploy`) |
 | `proto/` | gRPC contracts (buf). Edit here, then regenerate |
+| `.agents/skills/finchie/` | The agent skill for the CLI. Keep it to what `--help` cannot say; `task cli:test` fails on a command or option it names that the contract lacks |
 | `docs/adr/` | Design decisions |
 
 V1 lives only at tag `v1.0.0`; look there for its code (for example the IMAP fetcher), not on `main`.
@@ -39,6 +41,8 @@ task parser:lint
 task backend:test       # integration tests start Postgres with testcontainers; skipped without Docker
 task backend:lint
 task web:generate       # regenerate the web app's API types after editing openapi.yaml (commit them)
+task cli:test           # the CLI against a fake API and every operation of openapi.yaml
+task cli:lint
 task web:check          # dprint, ESLint, svelte-check, Vitest, build
 task web:dev            # Vite on :5173, /api proxied to the backend on :8080
 task backend:web        # build apps/web/ into the backend, so `task backend:run` serves the UI
@@ -86,7 +90,7 @@ docker compose up -d    # local Postgres for `task backend:run`
 ## Commits
 
 - Agents do not commit or push unless asked; the owner reviews and commits.
-- Conventional Commits in English: `type(scope): summary`. Scopes: `backend`, `parser`, `mailbox`, `proto`, `web`, `docs`; omit for changes across components.
+- Conventional Commits in English: `type(scope): summary`. Scopes: `backend`, `parser`, `mailbox`, `cli`, `proto`, `web`, `docs`; omit for changes across components.
 
 ## Secrets and local state
 

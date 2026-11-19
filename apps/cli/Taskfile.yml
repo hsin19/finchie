@@ -1,0 +1,36 @@
+version: '3'
+
+tasks:
+  install:
+    desc: Install dependencies into .venv
+    cmds:
+      - uv sync
+
+  lint:
+    desc: Lint, check formatting, and type-check (mypy, strict)
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run mypy
+
+  fmt:
+    desc: Fix lint and format
+    cmds:
+      - uv run ruff check --fix .
+      - uv run ruff format .
+
+  test:
+    desc: Unit tests, against a fake API and the backend's openapi.yaml
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  check:
+    desc: Everything CI runs for the CLI
+    cmds:
+      - task: lint
+      - task: test
+
+  run:
+    desc: Run the CLI from this checkout, e.g. `task cli:run -- get-net-worth` (settings from ~/.config/finchie/config.toml or FINCHIE_*)
+    cmds:
+      - uv run finchie {{.CLI_ARGS}}
