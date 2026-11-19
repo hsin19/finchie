@@ -1,5 +1,8 @@
 import { error } from "@sveltejs/kit";
-import createClient from "openapi-fetch";
+import createClient, {
+    type FetchResponse,
+    type MaybeOptionalInit,
+} from "openapi-fetch";
 import type { paths } from "./schema";
 import {
     reloader,
@@ -19,12 +22,40 @@ export const DOCUMENTS_PAGE_SIZE = 50;
 
 const signIn = reloader();
 
+type Method = "get" | "put" | "post" | "delete" | "patch";
+
+/** The paths that take the method. */
+type PathsWith<M extends Method> = { [P in keyof paths]: paths[P] extends Record<M, object> ? P : never; }[keyof paths];
+
+/** What a request to the path takes: its parameters and body, and fetch's own options (`signal`). */
+type Init<P extends keyof paths, M extends Method> = MaybeOptionalInit<paths[P], M>;
+
+/**
+ * One method of the API, as openapi-fetch's but with the request typed by its path. openapi-fetch infers
+ * the request's type from the argument, and accepts any extra key on it, so a parameter the API does not
+ * know (misspelled, or renamed in openapi.yaml) passes the type check and the backend ignores it. Here the
+ * path alone decides the type, so the argument is checked against it, its query and body included.
+ */
+type Call<M extends Method> = <P extends PathsWith<M>>(
+    url: P,
+    ...init: undefined extends Init<P, M> ? [init?: Init<P, M>] : [init: Init<P, M>]
+) => Promise<FetchResponse<Extract<paths[P][M], object>, Init<P, M>, `${string}/${string}`>>;
+
+export interface Api {
+    GET: Call<"get">;
+    PUT: Call<"put">;
+    POST: Call<"post">;
+    DELETE: Call<"delete">;
+    PATCH: Call<"patch">;
+}
+
 /**
  * In a load function pass its `fetch`, so SvelteKit can track and replay the requests. No redirect is
  * followed: the API has none of its own, so one is Cloudflare Access asking to sign in (session.ts).
  */
-export function api(fetchFn: typeof fetch = fetch) {
-    return createClient<paths>({ fetch: withSession(fetchFn, signIn), redirect: "manual" });
+export function api(fetchFn: typeof fetch = fetch): Api {
+    // The same client: Api only types its requests more strictly than openapi-fetch's methods.
+    return createClient<paths>({ fetch: withSession(fetchFn, signIn), redirect: "manual" }) as unknown as Api;
 }
 
 export interface Result {
