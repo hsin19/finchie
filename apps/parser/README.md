@@ -119,4 +119,4 @@ Code under `src/finchie/` is generated from `proto/` (`task proto`); don't edit 
 
 ## Image
 
-`Dockerfile`: Python 3.14 slim, the version `.python-version` gives the tests: the two move together, by hand (Dependabot leaves Python alone), runs as uid 1654, OCR models baked in at build time. The `VERSION` build argument (`release.yml` passes the tag's version) becomes `PARSER_VERSION`. The container healthcheck runs `python -m finchie_parser.healthcheck`. Expose the port only on the internal network.
+`Dockerfile`: Python 3.14 slim, the version `.python-version` gives the tests: the two move together, by hand (Dependabot leaves Python alone), runs as uid 1654, OCR models baked in at build time, pycountry's translations left out (the parsers only look codes up). The `VERSION` build argument (`release.yml` passes the tag's version) becomes `PARSER_VERSION`. The container healthcheck runs `python -m finchie_parser.healthcheck`. Expose the port only on the internal network.

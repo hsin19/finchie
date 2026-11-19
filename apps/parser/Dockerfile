@@ -8,6 +8,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-editable
+# pycountry's translations are 20 of its 21 MB, and the parsers only look codes up.
+RUN find .venv -path '*/site-packages/pycountry/locales' -type d -prune -exec rm -rf {} +
 
 # Load the OCR models now so a running container never downloads anything.
 RUN .venv/bin/python -c "from rapidocr import RapidOCR; RapidOCR()"
