@@ -83,6 +83,7 @@ paths:
   /api/documents/{id}:
     get:
       operationId: getDocument
+      summary: One document, with what parsing it came to
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -730,6 +731,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Settings" }
 
+  /api/openapi.json:
+    get:
+      operationId: getOpenAPI
+      summary: This contract as JSON, for clients that build themselves from it (apps/cli)
+      responses:
+        "200":
+          description: The OpenAPI document, its keys in the order openapi.yaml gives them
+          content:
+            application/json:
+              schema: { type: object }
+
   /api/mail-filters.xml:
     get:
       operationId: getMailFilters
@@ -769,6 +781,7 @@ paths:
   /api/statements/{id}:
     get:
       operationId: getStatement
+      summary: One parsed statement, with its checks
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
@@ -798,6 +811,7 @@ paths:
   /api/statements/{id}/transactions:
     get:
       operationId: listStatementTransactions
+      summary: A statement's transactions, in the order it prints them
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:

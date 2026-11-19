@@ -6,3 +6,6 @@ generate:
   strict-server: true
 output-options:
   skip-prune: true
+  # Served by internal/api's Register as the bytes converted once: a generated handler would encode a
+  # map, which sorts the keys.
+  exclude-operation-ids: [getOpenAPI]

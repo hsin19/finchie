@@ -167,7 +167,7 @@ func run() error {
 	e.Logger = logger
 	e.Use(telemetry.Route(), middleware.Recover(), telemetry.AccessLog(), middleware.BodyLimit(cfg.MaxUploadBytes()+1<<20))
 	if cfg.AccessEnabled() {
-		e.Use(access.New(ctx, cfg.AccessTeamDomain, cfg.AccessAudience).Middleware(telemetry.HealthPath))
+		e.Use(access.New(ctx, cfg.AccessTeamDomain, cfg.AccessAudience, cfg.AccessAgentClientID).Middleware(telemetry.HealthPath))
 		slog.Info("requests must come through Cloudflare Access", "team", cfg.AccessTeamDomain)
 	} else {
 		slog.Warn("Cloudflare Access verification is off: anyone who reaches the backend can use it " +

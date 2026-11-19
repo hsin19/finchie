@@ -81,7 +81,7 @@ func TestOnlyRequestsWithAValidAccessTokenGetThrough(t *testing.T) {
 	}
 
 	e := echo.New()
-	e.Use(New(t.Context(), tm.server.URL+"/", audience).Middleware("/healthz"))
+	e.Use(New(t.Context(), tm.server.URL+"/", audience, "").Middleware("/healthz"))
 	ok := func(c *echo.Context) error { return c.String(http.StatusOK, "ok") }
 	e.GET("/api/statements", ok)
 	e.GET("/healthz", ok)
@@ -120,7 +120,7 @@ func TestOnlyRequestsWithAValidAccessTokenGetThrough(t *testing.T) {
 func TestServiceTokensMayOnlyUpload(t *testing.T) {
 	tm := newTeam(t)
 	e := echo.New()
-	e.Use(New(t.Context(), tm.server.URL, audience).Middleware("/healthz"))
+	e.Use(New(t.Context(), tm.server.URL, audience, "").Middleware("/healthz"))
 	ok := func(c *echo.Context) error { return c.String(http.StatusOK, "ok") }
 	e.GET("/api/statements", ok)
 	e.GET("/api/documents", ok)
@@ -142,6 +142,55 @@ func TestServiceTokensMayOnlyUpload(t *testing.T) {
 		{"service token re-parses", http.MethodPost, "/api/documents/1/reparse", machine, http.StatusForbidden},
 		{"person reads statements", http.MethodGet, "/api/statements", person, http.StatusOK},
 		{"person uploads", http.MethodPost, "/api/documents", person, http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
+			request.Header.Set(Header, tc.token)
+			recorder := httptest.NewRecorder()
+			e.ServeHTTP(recorder, request)
+			if recorder.Code != tc.status {
+				t.Fatalf("status = %d, want %d (%s)", recorder.Code, tc.status, recorder.Body)
+			}
+		})
+	}
+}
+
+// The agents' service token (apps/cli) may read everything and change nothing; any other service token
+// still only uploads.
+func TestTheAgentsServiceTokenMayOnlyRead(t *testing.T) {
+	tm := newTeam(t)
+	e := echo.New()
+	e.Use(New(t.Context(), tm.server.URL, audience, "agent-id.access").Middleware("/healthz"))
+	ok := func(c *echo.Context) error { return c.String(http.StatusOK, "ok") }
+	e.GET("/api/statements", ok)
+	e.GET("/api/documents/:id/preview/pdf", ok)
+	e.POST("/api/documents", ok)
+	e.POST("/api/documents/:id/reparse", ok)
+	e.PATCH("/api/accounts/:id", ok)
+	e.DELETE("/api/documents/:id", ok)
+
+	serviceToken := func(clientID string) string {
+		return tm.sign(t, tm.key, tm.claims(func(c map[string]any) {
+			delete(c, "email")
+			c["common_name"] = clientID
+			c["sub"] = ""
+		}))
+	}
+	agent := serviceToken("agent-id.access")
+	mailbox := serviceToken("mailbox-id.access")
+	cases := []struct {
+		name, method, path, token string
+		status                    int
+	}{
+		{"agent reads statements", http.MethodGet, "/api/statements", agent, http.StatusOK},
+		{"agent reads a statement's PDF", http.MethodGet, "/api/documents/1/preview/pdf", agent, http.StatusOK},
+		{"agent re-parses", http.MethodPost, "/api/documents/1/reparse", agent, http.StatusForbidden},
+		{"agent renames an account", http.MethodPatch, "/api/accounts/1", agent, http.StatusForbidden},
+		{"agent deletes a document", http.MethodDelete, "/api/documents/1", agent, http.StatusForbidden},
+		{"agent uploads, as any service token may", http.MethodPost, "/api/documents", agent, http.StatusOK},
+		{"another service token reads statements", http.MethodGet, "/api/statements", mailbox, http.StatusForbidden},
+		{"another service token uploads", http.MethodPost, "/api/documents", mailbox, http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
