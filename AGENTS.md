@@ -14,7 +14,7 @@ Self-hosted personal finance platform. V2 is being built on `main` (ADR 0001): a
 | `apps/cli/` | Python. The API as commands for AI agents, built at run time from the contract the backend serves: a change to `openapi.yaml` needs no change here |
 | `apps/mailbox/` | Cloudflare Email Worker: uploads statements Gmail forwards; deployed by hand (`task mailbox:deploy`) |
 | `proto/` | gRPC contracts (buf). Edit here, then regenerate |
-| `.agents/skills/finchie/` | The agent skill for the CLI. Keep it to what `--help` cannot say; `task cli:test` fails on a command or option it names that the contract lacks |
+| `.agents/skills/finchie/` | The agent skill for the CLI (`.claude/skills` links to `.agents/skills`, for Claude Code). Keep it to what `--help` cannot say; `task cli:test` fails on a command or option it names that the contract lacks |
 | `docs/adr/` | Design decisions |
 
 V1 lives only at tag `v1.0.0`; look there for its code (for example the IMAP fetcher), not on `main`.

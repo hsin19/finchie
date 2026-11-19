@@ -59,7 +59,7 @@ finchie get-document-preview-pdf 42 > statement.pdf
 
 ## For agents
 
-[`.agents/skills/finchie/SKILL.md`](../../.agents/skills/finchie/SKILL.md) is what an agent needs to know: how to run the CLI, how to find a command, and the ledger's pitfalls for analysis (decimals, `flow` against `amount`, transfers). `.agents/skills/` is where agents such as Codex read a project's skills from (Claude Code reads only `.claude/skills/`), and one of the places the [skills CLI](https://github.com/vercel-labs/skills) looks, so a machine that wants it installs it from GitHub, for every project with `-g`:
+[`.agents/skills/finchie/SKILL.md`](../../.agents/skills/finchie/SKILL.md) is what an agent needs to know: how to run the CLI, how to find a command, and the ledger's pitfalls for analysis (decimals, `flow` against `amount`, transfers). `.agents/skills/` is where agents such as Codex read a project's skills from, and `.claude/skills` is a link to it, since Claude Code reads only its own directory: an agent working in this repository finds the skill by itself. It is also one of the places the [skills CLI](https://github.com/vercel-labs/skills) looks, so a machine that wants the skill everywhere installs it from GitHub, for every project with `-g`:
 
 ```sh
 npx skills add hsin19/finchie --skill finchie -g
