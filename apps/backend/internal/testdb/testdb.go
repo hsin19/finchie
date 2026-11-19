@@ -64,9 +64,9 @@ func start() (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connection string: %w", err)
 	}
-	p, err := pgxpool.New(ctx, dsn)
+	p, err := db.Connect(ctx, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
+		return nil, err
 	}
 	if err := waitForPing(ctx, p); err != nil {
 		return nil, err

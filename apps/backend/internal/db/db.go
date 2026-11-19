@@ -21,6 +21,22 @@ var migrations embed.FS
 // ErrSchemaNewer means the database was migrated by a newer backend than this one.
 var ErrSchemaNewer = errors.New("database schema is newer than this backend")
 
+// Connect opens the pool every query runs on. JIT is off: Postgres compiles a query it estimates costly,
+// and the searches' and totals' estimates run high enough that compiling took longer than running them,
+// tens of milliseconds a query on a ledger of a few thousand lines.
+func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
+	config, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("database URL: %w", err)
+	}
+	config.ConnConfig.RuntimeParams["jit"] = "off"
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("connect database: %w", err)
+	}
+	return pool, nil
+}
+
 // Migrate brings the schema up to date. It runs at startup, so a new image never meets an old schema.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := MigrateTo(ctx, pool, goose.MaxVersion); err != nil {

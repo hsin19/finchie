@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/riverqueue/river"
@@ -88,9 +87,9 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
-		return fmt.Errorf("connect database: %w", err)
+		return err
 	}
 	defer pool.Close()
 	if err := db.Migrate(ctx, pool); err != nil {
