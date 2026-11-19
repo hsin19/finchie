@@ -79,12 +79,13 @@ func (s *Server) HandleNotifications(ctx context.Context, request HandleNotifica
 }
 
 // notifyAfterChanges works out notifications again once a request that may have changed the ledger is
-// answered (notify), so that what the overview shows next is current. Uploads leave it to their parse
-// job, and marking notifications changes nothing they are worked out from.
+// answered (notify), so that what the overview shows next is current. Uploads and re-parses leave it to
+// their parse job; marking notifications, or writing a fill's memo, changes nothing they are worked out
+// from.
 func notifyAfterChanges(pool *pgxpool.Pool) StrictMiddlewareFunc {
 	skip := map[string]bool{
-		"UploadDocument": true, "ReadNotifications": true, "HandleNotifications": true,
-		"SubscribePush": true, "UnsubscribePush": true, "TestPush": true, "NamePayee": true,
+		"UploadDocument": true, "ReparseDocument": true, "ReadNotifications": true, "HandleNotifications": true,
+		"SubscribePush": true, "UnsubscribePush": true, "TestPush": true, "NamePayee": true, "UpdateGapFill": true,
 	}
 	return func(next StrictHandlerFunc, operationID string) StrictHandlerFunc {
 		return func(c *echo.Context, request any) (any, error) {
