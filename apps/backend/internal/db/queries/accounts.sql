@@ -234,13 +234,24 @@ LIMIT @row_limit OFFSET @row_offset;
 -- listed, or of every one when none is.
 WITH days AS (
     SELECT d::date AS day FROM unnest(@days::date[]) d
-), held AS (
-    SELECT DISTINCT ON (d.day, b.account_id, b.unit_id) d.day, b.account_id, b.unit_id, b.as_of, b.amount, b.statement_id
-    FROM days d
-    JOIN balances b ON b.as_of <= d.day
+), pairs AS (
+    SELECT DISTINCT b.account_id, b.unit_id
+    FROM balances b
     WHERE cardinality(@accounts::bigint[]) = 0 OR b.account_id = ANY (@accounts::bigint[])
-    ORDER BY d.day, b.account_id, b.unit_id, b.as_of DESC, b.id DESC
-), moved AS (
+), held AS (
+    -- Each day's balance looked up in the index, not every earlier balance joined to every day and sorted:
+    -- an exchange adds a snapshot of each unit every day.
+    SELECT d.day, pr.account_id, pr.unit_id, b.as_of, b.amount, b.statement_id
+    FROM days d
+    CROSS JOIN pairs pr
+    JOIN LATERAL (
+        SELECT b.as_of, b.amount, b.statement_id
+        FROM balances b
+        WHERE b.account_id = pr.account_id AND b.unit_id = pr.unit_id AND b.as_of <= d.day
+        ORDER BY b.as_of DESC, b.id DESC
+        LIMIT 1
+    ) b ON true
+), moved AS MATERIALIZED ( -- its amount is read twice below: summed once
     SELECT h.day, h.account_id, h.unit_id, h.as_of, h.statement_id,
            (h.amount + CASE WHEN a.kind = ANY (@itemized::text[]) THEN coalesce((
                SELECT sum(t.amount) FROM counted_lines t
@@ -265,12 +276,22 @@ ORDER BY m.day, m.account_id, u.symbol;
 -- accounts listed, or of every one when none is.
 WITH days AS (
     SELECT d::date AS day FROM unnest(@days::date[]) d
-), valued AS (
-    SELECT DISTINCT ON (d.day, v.account_id) d.day, v.account_id, v.unit_id, v.as_of, v.amount
-    FROM days d
-    JOIN valuations v ON v.as_of <= d.day
+), valued_accounts AS (
+    SELECT DISTINCT v.account_id
+    FROM valuations v
     WHERE cardinality(@accounts::bigint[]) = 0 OR v.account_id = ANY (@accounts::bigint[])
-    ORDER BY d.day, v.account_id, v.as_of DESC
+), valued AS (
+    -- Looked up in the index for each day, as BalancesOn does.
+    SELECT d.day, va.account_id, v.unit_id, v.as_of, v.amount
+    FROM days d
+    CROSS JOIN valued_accounts va
+    JOIN LATERAL (
+        SELECT v.unit_id, v.as_of, v.amount
+        FROM valuations v
+        WHERE v.account_id = va.account_id AND v.as_of <= d.day
+        ORDER BY v.as_of DESC
+        LIMIT 1
+    ) v ON true
 )
 SELECT v.day::date AS day, v.account_id, v.as_of,
        round(v.amount * p.twd_amount / p.unit_amount, 2)::numeric AS worth
