@@ -4,7 +4,7 @@ A command's help is everything an agent needs to call it and read what comes bac
 the fields of its answer with what the contract says of each.
 """
 
-from finchie_cli.contract import JSON, Contract, Operation, Parameter, kebab, ref_name
+from finchie_cli.contract import JSON, Contract, Operation, Parameter, kebab, ref_name, scalar
 
 
 def overview(contract: Contract, url: str) -> str:
@@ -105,7 +105,7 @@ def _parameter(contract: Contract, p: Parameter) -> str:
     if p.required and p.location != "path":
         notes.append("Required")
     if "default" in schema:
-        notes.append(f"Default {_scalar(schema['default'])}")
+        notes.append(f"Default {scalar(schema['default'])}")
     if "maximum" in schema:
         notes.append(f"At most {schema['maximum']}")
     return ". ".join(n.rstrip(".") for n in notes if n)
@@ -185,9 +185,3 @@ def _line(text: str) -> str:
 
 def _about(text: str) -> str:
     return f" — {text}" if text else ""
-
-
-def _scalar(value: object) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)

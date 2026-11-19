@@ -9,6 +9,7 @@ from email.message import Message
 from typing import IO
 
 from finchie_cli.config import Settings
+from finchie_cli.contract import json_media
 
 TIMEOUT_SECONDS = 60
 
@@ -25,8 +26,7 @@ class Reply:
 
     @property
     def is_json(self) -> bool:
-        media = self.content_type.split(";", 1)[0].strip().lower()
-        return media == "application/json" or media.endswith("+json")
+        return json_media(self.content_type)
 
 
 class ApiError(Exception):

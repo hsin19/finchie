@@ -11,7 +11,7 @@ from typing import IO, Any, NoReturn
 
 from finchie_cli import config, help
 from finchie_cli.client import ApiError, CallError, Client, Reply
-from finchie_cli.contract import Contract, Operation, Parameter
+from finchie_cli.contract import Contract, Operation, Parameter, scalar
 
 CONTRACT_PATH = "/api/openapi.json"
 
@@ -122,7 +122,7 @@ def _call(
         if p.location == "path":
             path = path.replace("{" + p.name + "}", urllib.parse.quote(str(value), safe=""))
         else:
-            query[p.name] = [_query_value(v) for v in (value if isinstance(value, list) else [value])]
+            query[p.name] = [scalar(v) for v in (value if isinstance(value, list) else [value])]
     body = _body(args.body, stdin) if op.body is not None and args.body is not None else None
 
     if op.paging is not None and args.all:
@@ -159,12 +159,6 @@ def _kind(contract: Contract, p: Parameter) -> dict[str, Any]:
 
 def _converter(contract: Contract, schema: dict[str, Any]) -> type[int] | type[str]:
     return int if contract.resolve(schema).get("type") == "integer" else str
-
-
-def _query_value(value: object) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
 
 
 def _body(text: str, stdin: IO[bytes]) -> bytes:

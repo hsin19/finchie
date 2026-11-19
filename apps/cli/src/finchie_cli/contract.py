@@ -16,6 +16,19 @@ METHODS = ("get", "post", "put", "patch", "delete")
 _WORD_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
+def json_media(media_type: str) -> bool:
+    """application/json or a +json type, whatever its parameters (charset)."""
+    media = media_type.split(";", 1)[0].strip().lower()
+    return media == "application/json" or media.endswith("+json")
+
+
+def scalar(value: object) -> str:
+    """A value as the API writes it in a query or a default: a boolean is true or false."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def kebab(name: str) -> str:
     return _WORD_BOUNDARY.sub("-", name).lower()
 
@@ -52,9 +65,7 @@ class Content:
 
     @property
     def is_json(self) -> bool:
-        return self.media_type is not None and (
-            self.media_type == "application/json" or self.media_type.endswith("+json")
-        )
+        return self.media_type is not None and json_media(self.media_type)
 
 
 @dataclass(frozen=True)
