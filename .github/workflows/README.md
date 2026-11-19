@@ -51,6 +51,6 @@ Groups whose names end in `-manual` are left for a human (see [`../dependabot.ym
 | Group | Why it can't merge itself |
 |---|---|
 | `codegen-manual` (openapi-typescript) | Its output `apps/web/src/lib/api/schema.d.ts` is committed, so the web job's API-types check fails until `task web:generate` is run and committed |
-| `images-manual` (Dockerfile base images), `compose-manual` | `check.yml` builds no images; the first real test of a new base image is a release |
+| `images-manual` (Dockerfile base images), `compose-manual` | `check.yml` builds no images; the first real test of a new base image is a release. A new Python is not proposed at all: it moves the parser's image and `.python-version` together, by hand |
 
 Tool versions pinned in Taskfiles (`buf`, `golangci-lint`, `sqlc`, `oapi-codegen`) and the buf plugin versions in `buf.gen.yaml` are not tracked by Dependabot; bump them by hand. Keep buf plugin versions at or below the runtime libraries each service pins.

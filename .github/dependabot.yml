@@ -131,6 +131,12 @@ updates:
       images-manual:
         patterns:
           - "*"
+    ignore:
+      # A new Python moves the parser's image and its .python-version, which the tests run on, together
+      # and by hand. Dependabot would bump the image alone, before the wheels exist: onnxruntime had none
+      # for Python 3.15 when it proposed it.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "docker-compose"
     directory: "/"
