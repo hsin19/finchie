@@ -34,12 +34,13 @@ The file holds a secret that reads the whole ledger: `chmod 600` it. The CLI war
 
 The deployment sits behind Cloudflare Access (ADR 0008). Agents get a service token of their own, not the mailbox Worker's, and the backend lets that one read everything (`GET`) and change nothing; like any service token, it may also upload a document. Set up once:
 
-1. Cloudflare Zero Trust, Access, Service credentials: create a service token (say `finchie-agents`) that does not expire, and keep its Client ID and Client Secret.
-2. The Finchie Access application's Service Auth policy, the one the mailbox's token is in: add the new token to it.
-3. The backend: set `BACKEND_ACCESS_AGENT_CLIENT_ID` to the Client ID.
-4. The machine the agent runs on: put `url`, `client_id`, and `client_secret` in the config file.
+1. A service token (say `finchie-agents`) that does not expire, let through the Finchie Access application by a Service Auth policy: the mailbox's, or one of its own. Either way works:
+   - **By hand**, in Cloudflare Zero Trust: Access, Service credentials, create the token and keep its Client ID and Client Secret; then add it to a Service Auth policy of the Finchie application.
+   - **As code**, where the deployment keeps its Cloudflare setup in Terraform or OpenTofu: a `cloudflare_zero_trust_access_service_token` resource, a `non_identity` policy on the application that includes it, and its `client_id` and `client_secret` (sensitive) as outputs to read the values from.
+2. The backend: set `BACKEND_ACCESS_AGENT_CLIENT_ID` to the Client ID, which is not a secret.
+3. The machine the agent runs on: put `url`, `client_id`, and `client_secret` in the config file. The secret goes nowhere else.
 
-Leaked, the token reads the ledger until it is revoked in Cloudflare; it cannot change or delete anything.
+Leaked, the token reads the ledger until it is revoked or its secret rotated; it cannot change or delete anything.
 
 ## Commands
 
