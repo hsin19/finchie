@@ -73,8 +73,8 @@ class HsbcParser(StatementParser):
         return [identity.require_national_id().upper()]
 
     def parse(self, document: Document, ocr: Ocr | None) -> Parsed:
-        texts = document.page_texts()
-        page1_dates = [match.group(1) for line in texts[0].splitlines() if (match := _P1_DATE.match(line))]
+        page1 = document.page_texts(1)[0]
+        page1_dates = [match.group(1) for line in page1.splitlines() if (match := _P1_DATE.match(line))]
         if len(page1_dates) < 2:
             raise LayoutError("due and closing dates not found on page 1")
         due, closing = iso_date(page1_dates[0]), iso_date(page1_dates[1])

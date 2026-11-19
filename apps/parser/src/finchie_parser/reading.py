@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
 
-from finchie_parser.documents import PDF, Mail, find_body, is_attachment, pdf_data, read_mail, text_of
+from finchie_parser.documents import PDF, Attachment, Mail, find_body, is_attachment, pdf_data, read_mail, text_of
 from finchie_parser.errors import InvalidDocumentError, PasswordRequiredError
 from finchie_parser.parsers import PARSERS, StatementParser
 from finchie_parser.passwords import Passwords
@@ -99,9 +99,7 @@ def _open_pdfs(mail: Mail, files: list[File], passwords: Passwords, parsers: Seq
     none is."""
     indexes = [i for i, f in enumerate(files) if f.content_type == PDF]
     opened = list(files)
-    with PdfSet(mail.pdfs(), passwords) as pdfs:
-        if len(pdfs) != len(indexes):
-            raise AssertionError("the files' PDFs are not the e-mail's")
+    with PdfSet([Attachment(files[i].filename, files[i].data) for i in indexes], passwords) as pdfs:
         match select_statement(mail, pdfs, parsers):
             case Found(primary, parser) | Locked(primary, parser):
                 pass

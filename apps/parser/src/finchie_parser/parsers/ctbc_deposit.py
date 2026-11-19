@@ -59,12 +59,11 @@ class CtbcDepositParser(StatementParser):
             raise ConfigurationError(
                 "CTBC's statements need OCR (PARSER_OCR): their Chinese text cannot be read otherwise"
             )
-        texts = document.page_texts()
-        period = _PERIOD.search(texts[0])
+        period = _PERIOD.search(document.page_texts(1)[0])
         if period is None:
             raise LayoutError("statement period not found")
         reader = _Reader()
-        for page in range(1, len(texts)):
+        for page in range(1, document.page_count()):
             reader.read_page(document.page_words(page), ocr.read_column(document, page, 0, 10_000))
         start, end = iso_date(period.group(1)), iso_date(period.group(2))
         return Parsed(reader.accounts.statement(self.institution, start, end, "本期結餘"))
