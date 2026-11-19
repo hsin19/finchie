@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,11 +17,7 @@ import (
 
 func postJSON(t *testing.T, e *echo.Echo, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewBufferString(body))
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	e.ServeHTTP(recorder, request)
-	return recorder
+	return send(t, e, http.MethodPost, path, body)
 }
 
 // netOn is what the owner was worth at the end of a day.
@@ -146,15 +141,6 @@ func TestOnlyAGapAnAccountHasCanBeFilled(t *testing.T) {
 	}
 }
 
-func patchJSON(t *testing.T, e *echo.Echo, path, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, path, bytes.NewBufferString(body))
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	e.ServeHTTP(recorder, request)
-	return recorder
-}
-
 func TestAFillCarriesTheOwnersMemo(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	storeJuly(t, pool)
@@ -168,7 +154,7 @@ func TestAFillCarriesTheOwnersMemo(t *testing.T) {
 		t.Fatalf("memo of a fill made in one click = %q", *fill.Memo)
 	}
 	fillPath := fmt.Sprintf("%s/fills/%d", path, fill.Id)
-	if recorder := patchJSON(t, e, fillPath, `{"memo": "  八月的信被刪了  "}`); recorder.Code != http.StatusNoContent {
+	if recorder := patch(t, e, fillPath, `{"memo": "  八月的信被刪了  "}`); recorder.Code != http.StatusNoContent {
 		t.Fatalf("set memo: %d %s", recorder.Code, recorder.Body)
 	}
 	if fills := decode[AccountDetail](t, get(t, e, path)).Fills; len(fills) != 1 || fills[0].Memo == nil || *fills[0].Memo != "八月的信被刪了" {
@@ -190,13 +176,13 @@ func TestAFillCarriesTheOwnersMemo(t *testing.T) {
 	}
 
 	// An empty one clears it.
-	if recorder := patchJSON(t, e, fillPath, `{"memo": " "}`); recorder.Code != http.StatusNoContent {
+	if recorder := patch(t, e, fillPath, `{"memo": " "}`); recorder.Code != http.StatusNoContent {
 		t.Fatalf("clear memo: %d %s", recorder.Code, recorder.Body)
 	}
 	if fills := decode[AccountDetail](t, get(t, e, path)).Fills; len(fills) != 1 || fills[0].Memo != nil {
 		t.Fatalf("fills after clearing = %+v", fills)
 	}
-	if recorder := patchJSON(t, e, path+"/fills/999", `{"memo": "x"}`); recorder.Code != http.StatusNotFound {
+	if recorder := patch(t, e, path+"/fills/999", `{"memo": "x"}`); recorder.Code != http.StatusNotFound {
 		t.Fatalf("memo on no fill: %d", recorder.Code)
 	}
 }

@@ -4,6 +4,7 @@
 package exchanges
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -247,7 +248,7 @@ func get(client *http.Client, request *http.Request, into any) error {
 		return fmt.Errorf("%s %s: %s: %s", request.Method, request.URL.Path, response.Status, detail(body))
 	}
 	// Amounts stay strings until read exactly (ADR 0004).
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(into); err != nil {
 		return fmt.Errorf("%s %s: decode: %w", request.Method, request.URL.Path, err)

@@ -32,9 +32,6 @@ func TestALapseRuleGivesTheDayABillsPointsLapseBy(t *testing.T) {
 			t.Errorf("%+v, closing %s: %s, want %s", c.rule, c.closing, got, c.want)
 		}
 	}
-	if (LapseRule{}).Known() || !cathay.Known() || !taishin.Known() || (LapseRule{PurgeLastMonth: 12}).Known() {
-		t.Fatal("Known")
-	}
 }
 
 func bill(closing string, added, used, balance int64) PointsBill {

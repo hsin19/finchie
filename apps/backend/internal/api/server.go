@@ -437,13 +437,7 @@ const (
 	contentTypeOther = "application/octet-stream"
 )
 
-func limit(requested *Limit) int32 {
-	if requested == nil {
-		return defaultLimit
-	}
-	// The spec allows 1-500, but the generated handlers do not enforce it.
-	return int32(min(max(*requested, 1), 500)) //nolint:gosec // clamped above
-}
+func limit(requested *Limit) int32 { return clamp(requested, defaultLimit, 1, 500) }
 
 // clamp applies a query parameter's default and range, which the generated handlers do not enforce.
 func clamp(requested *int, fallback, lo, hi int) int32 {

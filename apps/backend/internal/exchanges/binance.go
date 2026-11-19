@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -187,11 +188,11 @@ func (b *Binance) coinMovements(ctx context.Context, from, to time.Time) ([]Move
 		"limit":     {"1000"},
 	}
 	var deposits []binanceDeposit
-	if err := b.signed(ctx, "/sapi/v1/capital/deposit/hisrec", cloneQuery(span), &deposits); err != nil {
+	if err := b.signed(ctx, "/sapi/v1/capital/deposit/hisrec", maps.Clone(span), &deposits); err != nil {
 		return nil, err
 	}
 	var withdrawals []binanceWithdrawal
-	if err := b.signed(ctx, "/sapi/v1/capital/withdraw/history", cloneQuery(span), &withdrawals); err != nil {
+	if err := b.signed(ctx, "/sapi/v1/capital/withdraw/history", maps.Clone(span), &withdrawals); err != nil {
 		return nil, err
 	}
 	var moves []Movement
@@ -230,14 +231,6 @@ func (b *Binance) coinMovements(ctx context.Context, from, to time.Time) ([]Move
 		})
 	}
 	return moves, nil
-}
-
-func cloneQuery(q url.Values) url.Values {
-	c := url.Values{}
-	for k, v := range q {
-		c[k] = append([]string(nil), v...)
-	}
-	return c
 }
 
 // markets are every spot market's last price, from the public ticker.

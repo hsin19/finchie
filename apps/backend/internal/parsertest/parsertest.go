@@ -110,10 +110,6 @@ func Counterparty(counterparty string) DepositOption {
 	return func(_ *parserv2.Line, d *parserv2.DepositLine) { d.Counterparty = counterparty }
 }
 
-func Kind(kind parserv2.LineKind) DepositOption {
-	return func(l *parserv2.Line, _ *parserv2.DepositLine) { l.Kind = kind }
-}
-
 // DepositLine is a line of a deposit account, money in positive, with the running balance after it when
 // one is given.
 func DepositLine(on *date.Date, description, unit, amount, balance string, options ...DepositOption) *parserv2.Line {

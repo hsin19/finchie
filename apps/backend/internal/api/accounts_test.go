@@ -230,11 +230,7 @@ func TestBalancesAreWorthTheirAmountAtTheNewestRateAndAccountsAddThemUp(t *testi
 
 func patch(t *testing.T, e *echo.Echo, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, path, strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	e.ServeHTTP(recorder, request)
-	return recorder
+	return send(t, e, http.MethodPatch, path, body)
 }
 
 // store stores a parsed document the way the ingest worker would, and returns the document's ID.

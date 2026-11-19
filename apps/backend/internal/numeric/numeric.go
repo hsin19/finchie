@@ -51,18 +51,6 @@ func ToRat(n pgtype.Numeric) *big.Rat {
 	return r.Quo(r, new(big.Rat).SetInt(factor))
 }
 
-// MustFromRat is FromRat for a value known to be a decimal, such as 0 or a sum of decimals.
-func MustFromRat(r *big.Rat) pgtype.Numeric {
-	n, err := FromRat(r)
-	if err != nil {
-		panic(err)
-	}
-	return n
-}
-
-// One is the NUMERIC 1.
-func One() pgtype.Numeric { return pgtype.Numeric{Int: big.NewInt(1), Valid: true} }
-
 // String renders a NUMERIC exactly as Postgres stores it ("780.00", "-6553"); empty for NULL.
 func String(n pgtype.Numeric) string {
 	value, err := n.Value()
@@ -101,16 +89,6 @@ func FromText(text string) (pgtype.Numeric, error) {
 		return pgtype.Numeric{}, fmt.Errorf("%q is no decimal", text)
 	}
 	return FromRat(r)
-}
-
-// Parse reads an amount a person typed, exactly; thousands separators are allowed.
-func Parse(text string) (pgtype.Numeric, bool) {
-	r, ok := new(big.Rat).SetString(strings.ReplaceAll(strings.TrimSpace(text), ",", ""))
-	if !ok {
-		return pgtype.Numeric{}, false
-	}
-	n, err := FromRat(r)
-	return n, err == nil
 }
 
 // Exact renders a decimal with the places it needs and no more ("100", "-0.5").

@@ -17,9 +17,7 @@ import (
 
 func del(t *testing.T, e *echo.Echo, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	recorder := httptest.NewRecorder()
-	e.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodDelete, path, nil))
-	return recorder
+	return send(t, e, http.MethodDelete, path, "")
 }
 
 func documentAt(t *testing.T, e *echo.Echo, id int64) Document {

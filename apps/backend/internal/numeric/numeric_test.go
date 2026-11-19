@@ -45,10 +45,10 @@ func TestANumericReadsBackExactlyWhateverItsScale(t *testing.T) {
 }
 
 func TestAddingKeepsTheFinerScale(t *testing.T) {
-	a, _ := Parse("1.5")
-	b, _ := Parse("2,000.25")
+	a, _ := FromText("1.5")
+	b, _ := FromText("2000.25")
 	if got := String(Add(a, b)); got != "2001.75" {
-		t.Fatalf("1.5 + 2,000.25 = %s", got)
+		t.Fatalf("1.5 + 2000.25 = %s", got)
 	}
 	if got := String(Add(a, pgtype.Numeric{})); got != "1.5" {
 		t.Fatalf("1.5 + NULL = %s", got)

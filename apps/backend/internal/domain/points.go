@@ -20,11 +20,6 @@ type LapseRule struct {
 	PurgeLastMonth, PurgeYears int
 }
 
-// Known reports whether the rule says anything.
-func (r LapseRule) Known() bool {
-	return r.MonthsAfterClosing > 0 || (r.PurgeLastMonth > 0 && r.PurgeYears > 0)
-}
-
 // LapsesBy is the day the points a bill closing on `closing` adds lapse by.
 func (r LapseRule) LapsesBy(closing time.Time) time.Time {
 	if r.MonthsAfterClosing > 0 {
