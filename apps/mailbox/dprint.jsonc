@@ -32,8 +32,7 @@
   "excludes": [
     "**/node_modules",
     "pnpm-lock.yaml",
-    ".wrangler/**",
-    "worker-configuration.d.ts"
+    ".wrangler/**"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.96.1.wasm",

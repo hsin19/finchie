@@ -9,8 +9,7 @@
     "format:check": "dprint check",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "deploy": "wrangler deploy"
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261112.1",
