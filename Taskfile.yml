@@ -16,6 +16,9 @@ includes:
   mailbox:
     taskfile: apps/mailbox/Taskfile.yml
     dir: apps/mailbox
+  cli:
+    taskfile: apps/cli/Taskfile.yml
+    dir: apps/cli
 
 tasks:
   proto:
@@ -65,4 +68,5 @@ tasks:
       - task: backend:check
       - task: web:check
       - task: mailbox:check
+      - task: cli:check
       - task: shellcheck

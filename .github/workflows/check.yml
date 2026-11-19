@@ -131,6 +131,38 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: task parser:test
 
+  cli:
+    name: CLI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/cli/uv.lock
+
+      - name: Setup Task
+        uses: go-task/setup-task@v2
+
+      - name: Install
+        id: install
+        run: task cli:install
+
+      # One step per check, gated on `!cancelled()`, so a single run reports every failure.
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: task cli:lint
+
+      # The tests read apps/backend/api/openapi.yaml, whose every operation has to make a command, and
+      # .agents/skills/finchie/SKILL.md, whose every command and option has to be one.
+      - name: Tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: task cli:test
+
   backend:
     name: Backend
     runs-on: ubuntu-24.04

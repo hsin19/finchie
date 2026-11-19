@@ -4,7 +4,7 @@
 
 ```
 check.yml    push to main · workflow_call · workflow_dispatch
-             → proto (format, lint, breaking) · generated code · parser · backend · web · mailbox · shellcheck
+             → proto (format, lint, breaking) · generated code · parser · CLI · backend · web · mailbox · shellcheck
 pr.yml       pull_request → check.yml · dependency review → auto-merge (Dependabot)
 release.yml  v* tag       → check.yml → build each image on x64 + arm64 runners, smoke-check → push to GHCR
 ```
@@ -16,6 +16,7 @@ release.yml  v* tag       → check.yml → build each image on x64 + arm64 runn
 | Proto contracts | `buf format`, `buf lint`, and `buf breaking`: against `main` on a PR, against the commit before the push on `main`. Not on release tags (their commit was compared when it reached `main`), nor while the baseline has no contracts. Locally `task proto:breaking` compares against `main`, or `AGAINST=<ref>` |
 | Generated code is committed | Regenerates proto, sqlc, and oapi-codegen output and the Gmail filter; fails if anything differs from the commit |
 | Parser | ruff, mypy (strict), then pytest on synthetic fixtures. Real statements are never in CI (ADR 0006) |
+| CLI | ruff, mypy (strict), then pytest: against a fake API; every operation of `apps/backend/api/openapi.yaml` has to make a command, and every command and option `.agents/skills/finchie/SKILL.md` names has to exist |
 | Backend | build, golangci-lint, then tests. Integration tests start Postgres with testcontainers on the runner's Docker |
 | Web | API types match `openapi.yaml`, dprint, ESLint, svelte-check, Vitest, then the production build |
 | Mailbox | dprint, tsc, Vitest, then a bundle with `wrangler deploy --dry-run`. Deploys stay by hand (ADR 0010) |
