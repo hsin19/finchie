@@ -2,7 +2,9 @@
 // (?m=2026-10&kind=purchase&card=hsbc:4417&q=uber&overseas=1&hide=transfers&sort=largest&page=2), so a
 // filtered view can be bookmarked and the back button undoes a filter. ?card= picks a bank or one of its
 // cards, ?account= a deposit account. ?closing=2026-10 keeps the rows of the
-// statements that closed that month; it replaces the default period instead of adding to it.
+// statements that closed that month; it replaces the default period instead of adding to it. ?m= and ?q=
+// are the short names of the period and the query (command.ts shows them as --period and --query); the
+// API's parameter is `query`.
 
 import { lineAccount } from "#lib/accounts.js";
 import {

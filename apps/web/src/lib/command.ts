@@ -1,8 +1,9 @@
 // The header reads like the command that shows the page: "finchie transactions --period 2026-10".
-// URL parameters are its flags, all spelled out in full.
+// URL parameters are its flags, all spelled out in full: the URL keeps a flag's short name where it has
+// one (?q=, ?m=), the header its long one (--query, --period), as -q and --query on a command line.
 
-/** URL parameters whose flag has another name. */
-const FLAG_NAMES: Record<string, string> = { m: "period" };
+/** URL parameters whose flag has another name: short name to long. */
+const FLAG_NAMES: Record<string, string> = { m: "period", q: "query" };
 
 /** URL parameters that are switches: the flag alone, no value. */
 const SWITCHES = new Set(["all", "overseas"]);

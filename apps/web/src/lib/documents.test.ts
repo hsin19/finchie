@@ -74,8 +74,9 @@ describe("the document list", () => {
 
     it("asks for the states a filter shows, continuing after a document", () => {
         const todo = readDocumentFilters(new URLSearchParams("show=todo"));
-        expect(documentQuery(todo, 42)).toEqual({ limit: 50, state: ["failed", "needs_review"], q: undefined, before: 42 });
-        expect(documentQuery({ q: "" })).toEqual({ limit: 50, state: undefined, q: undefined, before: undefined });
+        expect(documentQuery(todo, 42)).toEqual({ limit: 50, state: ["failed", "needs_review"], query: undefined, before: 42 });
+        expect(documentQuery({ q: "" })).toEqual({ limit: 50, state: undefined, query: undefined, before: undefined });
+        expect(documentQuery({ q: "台新" }).query).toBe("台新");
     });
 
     it("counts what a filter shows: to do is the failed and those that need review", () => {

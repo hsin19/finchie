@@ -754,7 +754,7 @@ export interface components {
         DocumentFailure: "unsupported" | "locked" | "unreadable" | "layout" | "unavailable" | "invalid_response" | "other";
         DocumentPage: {
             items: components["schemas"]["Document"][];
-            /** @description Every document matching `q`, by state: a facet that ignores `state` and `before`. States with none are left out */
+            /** @description Every document matching `query`, by state: a facet that ignores `state` and `before`. States with none are left out */
             byState: components["schemas"]["StateCount"][];
         };
         StateCount: {
@@ -1619,7 +1619,7 @@ export interface operations {
                 before?: number;
                 state?: components["schemas"]["DocumentStatus"][];
                 /** @description Case-insensitive substring of the filename */
-                q?: string;
+                query?: string;
                 /** @description Only these documents, wherever they fall in the list (for refreshing ones already shown) */
                 id?: number[];
             };
@@ -2583,7 +2583,7 @@ export interface operations {
                 /** @description Leave out transfers between the owner's lines and card payments (ADR 0016) */
                 hideTransfers?: boolean;
                 /** @description Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it */
-                q?: string;
+                query?: string;
                 /** @description Row order; largest and smallest compare amounts by size, ignoring the sign */
                 sort?: components["schemas"]["TransactionSort"];
                 /** @description Page size; 0 returns only the totals */

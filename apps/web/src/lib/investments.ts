@@ -1,7 +1,10 @@
 // The securities and exchange accounts' worth against what went into them: worked out by the backend
 // (`/api/investments/history`); this is how the accounts page draws it.
 
-import type { InvestmentPoint } from "#lib/api/client.js";
+import type {
+    InvestmentHistoryQuery,
+    InvestmentPoint,
+} from "#lib/api/client.js";
 import { addDays } from "#lib/dates.js";
 import { approx } from "#lib/money.js";
 
@@ -11,7 +14,7 @@ import { approx } from "#lib/money.js";
  * counts its worth that day as put in: a shorter span would move that day along with it. By month ends it
  * would be a point or two for months.
  */
-export function investmentQuery(today: string, days = 1000): { from: string; to: string; step: "day"; } {
+export function investmentQuery(today: string, days = 1000): Required<Pick<InvestmentHistoryQuery, "from" | "to" | "step">> {
     return { from: addDays(today, -(days - 1)), to: today, step: "day" };
 }
 

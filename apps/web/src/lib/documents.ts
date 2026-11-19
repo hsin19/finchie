@@ -2,6 +2,7 @@ import {
     type Document,
     documentContentUrl,
     type DocumentFailure,
+    type DocumentQuery,
     DOCUMENTS_PAGE_SIZE,
     type DocumentStatus,
     previewPdfUrl,
@@ -96,11 +97,11 @@ export function documentsQueryHref(query: string): ResolvedPathname {
 }
 
 /** The query for one page of the list; the next page continues after the last document, `before`. */
-export function documentQuery(filters: DocumentFilters, before?: number) {
+export function documentQuery(filters: DocumentFilters, before?: number): DocumentQuery {
     return {
         limit: DOCUMENTS_PAGE_SIZE,
         state: filters.show ? [...filters.show.states] : undefined,
-        q: filters.q || undefined,
+        query: filters.q || undefined,
         before,
     };
 }

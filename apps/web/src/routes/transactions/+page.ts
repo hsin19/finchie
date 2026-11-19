@@ -30,14 +30,16 @@ export const load = (async ({ fetch, url, parent, depends }) => {
         const period = searchPeriod(filters, latestMonth);
         const { kinds, institution, card, account, q, overseas, hideTransfers, sort, closing } = filters;
 
+        const range = period === "all" ? undefined : monthRange(period);
         const query: TransactionQuery = {
-            ...(period === "all" ? {} : monthRange(period)),
+            from: range?.from,
+            to: range?.to,
             ...(closing ? closingRange(closing) : {}),
             kind: kinds.length > 0 ? kinds : undefined,
             institution: institution || undefined,
             card: card || undefined,
             account: account ? Number(account) : undefined,
-            q: q || undefined,
+            query: q || undefined,
             overseas: overseas || undefined,
             hideTransfers: hideTransfers || undefined,
             sort: sort === "newest" ? undefined : sort,

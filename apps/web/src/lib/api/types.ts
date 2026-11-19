@@ -48,3 +48,6 @@ export type TransactionSearch = Schemas["TransactionSearch"];
 export type TransactionSort = Schemas["TransactionSort"];
 export type UnitFlow = Schemas["UnitFlow"];
 export type TransactionQuery = NonNullable<paths["/api/transactions"]["get"]["parameters"]["query"]>;
+export type DocumentQuery = NonNullable<paths["/api/documents"]["get"]["parameters"]["query"]>;
+export type NetWorthHistoryQuery = NonNullable<paths["/api/net-worth/history"]["get"]["parameters"]["query"]>;
+export type InvestmentHistoryQuery = NonNullable<paths["/api/investments/history"]["get"]["parameters"]["query"]>;

@@ -6,6 +6,7 @@ import type {
     KindTotal,
     Statement,
     Transaction,
+    TransactionQuery,
     TransactionSearch,
 } from "#lib/api/client.js";
 import {
@@ -45,7 +46,7 @@ export function totalDue(statements: readonly Statement[]): string {
 }
 
 /** Transaction search filter for the statements that closed in `month`. */
-export function closingRange(month: Month): { closingFrom: string; closingTo: string; } {
+export function closingRange(month: Month): Required<Pick<TransactionQuery, "closingFrom" | "closingTo">> {
     const { from, to } = monthRange(month);
     return { closingFrom: from, closingTo: to };
 }

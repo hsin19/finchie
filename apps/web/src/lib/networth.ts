@@ -5,6 +5,7 @@ import { accountStatus } from "#lib/accounts.js";
 import type {
     Account,
     NetWorth,
+    NetWorthHistoryQuery,
     NetWorthPoint,
 } from "#lib/api/client.js";
 import {
@@ -28,7 +29,7 @@ export function overdueBehind(netWorth: Pick<NetWorth, "behind">, accounts: read
 }
 
 /** The trend's query: each month end of the last year, and `today`. */
-export function trendQuery(today: string, months = 12): { from: string; to: string; step: "month"; } {
+export function trendQuery(today: string, months = 12): Required<Pick<NetWorthHistoryQuery, "from" | "to" | "step">> {
     const first: Month = shiftMonth(monthOf(today), -(months - 1));
     return { from: `${first}-01`, to: today, step: "month" };
 }
