@@ -58,31 +58,59 @@ func Evaluate(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
 		}
 
 		notices := domain.Notices(watched, documents, today)
+		// One key is one situation; should two notices share one, the later stands, as it would one at a
+		// time, and a statement may not upsert one row twice.
+		last := make(map[string]int, len(notices))
+		for i, n := range notices {
+			last[n.Key] = i
+		}
 		// Never nil: an empty list resolves everything open, where NULL would resolve nothing.
 		keys := make([]string, 0, len(notices))
-		for _, n := range notices {
-			facts := factsOf(n, today)
-			stored, err := json.Marshal(facts)
+		kept := make([]domain.Notice, 0, len(notices))
+		facts := make([]Facts, 0, len(notices))
+		stored := make([]storedNotice, 0, len(notices))
+		for i, n := range notices {
+			if last[n.Key] != i {
+				continue
+			}
+			f := factsOf(n, today)
+			encoded, err := json.Marshal(f)
 			if err != nil {
 				return fmt.Errorf("notice facts: %w", err)
 			}
-			params := dbq.RaiseNotificationParams{Kind: n.Kind, Key: n.Key, Facts: stored}
+			s := storedNotice{Kind: n.Kind, Key: n.Key, Facts: encoded}
 			if n.AccountID != 0 {
-				params.AccountID = &n.AccountID
+				s.AccountID = &n.AccountID
 			}
 			if n.Document != nil {
-				params.DocumentID = &n.Document.ID
-			}
-			rows, err := queries.RaiseNotification(ctx, params)
-			if err != nil {
-				return fmt.Errorf("raise %s: %w", n.Key, err)
-			}
-			if len(rows) == 1 && rows[0].Raised {
-				raised = append(raised, Message{Base: domain.BaseCurrency, Notification: &Pushed{
-					ID: rows[0].ID, Kind: n.Kind, RaisedAt: rows[0].RaisedAt.Time, Account: named[n.AccountID], Facts: facts,
-				}})
+				s.DocumentID = &n.Document.ID
 			}
 			keys = append(keys, n.Key)
+			kept = append(kept, n)
+			facts = append(facts, f)
+			stored = append(stored, s)
+		}
+		batch, err := json.Marshal(stored)
+		if err != nil {
+			return fmt.Errorf("notices: %w", err)
+		}
+		changed, err := queries.RaiseNotifications(ctx, batch)
+		if err != nil {
+			return fmt.Errorf("raise notifications: %w", err)
+		}
+		news := make(map[string]dbq.RaiseNotificationsRow, len(changed))
+		for _, row := range changed {
+			if row.Raised {
+				news[row.Key] = row
+			}
+		}
+		// In the notices' order, as when they were raised one at a time.
+		for i, n := range kept {
+			if row, ok := news[n.Key]; ok {
+				raised = append(raised, Message{Base: domain.BaseCurrency, Notification: &Pushed{
+					ID: row.ID, Kind: n.Kind, RaisedAt: row.RaisedAt.Time, Account: named[n.AccountID], Facts: facts[i],
+				}})
+			}
 		}
 		if err := queries.ResolveNotifications(ctx, keys); err != nil {
 			return fmt.Errorf("resolve notifications: %w", err)
@@ -132,6 +160,15 @@ type Message struct {
 }
 
 // Pushed is a notification as the API shows it (api.Notification).
+// storedNotice is a notice as RaiseNotifications reads it, one element of its JSON array.
+type storedNotice struct {
+	Kind       domain.NoticeKind `json:"kind"`
+	Key        string            `json:"key"`
+	AccountID  *int64            `json:"account_id"`
+	DocumentID *int64            `json:"document_id"`
+	Facts      json.RawMessage   `json:"facts"`
+}
+
 type Pushed struct {
 	ID       int64             `json:"id"`
 	Kind     domain.NoticeKind `json:"kind"`

@@ -133,9 +133,10 @@ func (q *Queries) LockNotifications(ctx context.Context) error {
 	return err
 }
 
-const raiseNotification = `-- name: RaiseNotification :many
+const raiseNotifications = `-- name: RaiseNotifications :many
 INSERT INTO notifications (kind, key, account_id, document_id, facts)
-VALUES ($1, $2, $3, $4, $5)
+SELECT n.kind, n.key, n.account_id, n.document_id, n.facts
+FROM jsonb_to_recordset($1::jsonb) AS n(kind text, key text, account_id bigint, document_id bigint, facts jsonb)
 ON CONFLICT (key) DO UPDATE SET
     facts       = EXCLUDED.facts,
     raised_at   = CASE WHEN notifications.resolved_at IS NULL THEN notifications.raised_at ELSE now() END,
@@ -143,42 +144,35 @@ ON CONFLICT (key) DO UPDATE SET
     handled_at  = CASE WHEN notifications.resolved_at IS NULL THEN notifications.handled_at END,
     resolved_at = NULL
 WHERE notifications.resolved_at IS NOT NULL OR notifications.facts IS DISTINCT FROM EXCLUDED.facts
-RETURNING id, raised_at, (raised_at = now())::boolean AS raised
+RETURNING key, id, raised_at, (raised_at = now())::boolean AS raised
 `
 
-type RaiseNotificationParams struct {
-	Kind       domain.NoticeKind
-	Key        string
-	AccountID  *int64
-	DocumentID *int64
-	Facts      []byte
-}
-
-type RaiseNotificationRow struct {
+type RaiseNotificationsRow struct {
+	Key      string
 	ID       int64
 	RaisedAt pgtype.Timestamptz
 	Raised   bool
 }
 
-// Raises a situation once. One still open keeps what the owner did with it and takes the newest facts;
-// one that was resolved and is so again is raised again, as news. A row comes back when anything changed,
-// `raised` when it is news: new, or so again.
-func (q *Queries) RaiseNotification(ctx context.Context, arg RaiseNotificationParams) ([]RaiseNotificationRow, error) {
-	rows, err := q.db.Query(ctx, raiseNotification,
-		arg.Kind,
-		arg.Key,
-		arg.AccountID,
-		arg.DocumentID,
-		arg.Facts,
-	)
+// Raises each situation once, all in one statement: `notices` is a JSON array of them, keys distinct. One
+// still open keeps what the owner did with it and takes the newest facts; one that was resolved and is so
+// again is raised again, as news. A row comes back for each that changed, `raised` when it is news: new,
+// or so again.
+func (q *Queries) RaiseNotifications(ctx context.Context, notices []byte) ([]RaiseNotificationsRow, error) {
+	rows, err := q.db.Query(ctx, raiseNotifications, notices)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RaiseNotificationRow
+	var items []RaiseNotificationsRow
 	for rows.Next() {
-		var i RaiseNotificationRow
-		if err := rows.Scan(&i.ID, &i.RaisedAt, &i.Raised); err != nil {
+		var i RaiseNotificationsRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.ID,
+			&i.RaisedAt,
+			&i.Raised,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -10,12 +10,14 @@ FROM documents
 WHERE status IN ('needs_review', 'failed')
 ORDER BY id;
 
--- name: RaiseNotification :many
--- Raises a situation once. One still open keeps what the owner did with it and takes the newest facts;
--- one that was resolved and is so again is raised again, as news. A row comes back when anything changed,
--- `raised` when it is news: new, or so again.
+-- name: RaiseNotifications :many
+-- Raises each situation once, all in one statement: `notices` is a JSON array of them, keys distinct. One
+-- still open keeps what the owner did with it and takes the newest facts; one that was resolved and is so
+-- again is raised again, as news. A row comes back for each that changed, `raised` when it is news: new,
+-- or so again.
 INSERT INTO notifications (kind, key, account_id, document_id, facts)
-VALUES (@kind, @key, @account_id, @document_id, @facts)
+SELECT n.kind, n.key, n.account_id, n.document_id, n.facts
+FROM jsonb_to_recordset(@notices::jsonb) AS n(kind text, key text, account_id bigint, document_id bigint, facts jsonb)
 ON CONFLICT (key) DO UPDATE SET
     facts       = EXCLUDED.facts,
     raised_at   = CASE WHEN notifications.resolved_at IS NULL THEN notifications.raised_at ELSE now() END,
@@ -23,7 +25,7 @@ ON CONFLICT (key) DO UPDATE SET
     handled_at  = CASE WHEN notifications.resolved_at IS NULL THEN notifications.handled_at END,
     resolved_at = NULL
 WHERE notifications.resolved_at IS NOT NULL OR notifications.facts IS DISTINCT FROM EXCLUDED.facts
-RETURNING id, raised_at, (raised_at = now())::boolean AS raised;
+RETURNING key, id, raised_at, (raised_at = now())::boolean AS raised;
 
 -- name: ResolveNotifications :exec
 -- Resolves the open situations that are no longer so: every one not among `keys`, except a document's
