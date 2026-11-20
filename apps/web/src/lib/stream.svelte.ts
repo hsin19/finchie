@@ -3,6 +3,7 @@
 // their data again, as SvelteKit expects: a navigation keeps its scroll restoration and the layout's skeleton
 // covers the wait, and a reload keeps the page as it is until the new data is in.
 
+import { reportError } from "#lib/telemetry.js";
 import { untrack } from "svelte";
 
 /** How long a wait goes unshown: past it, a skeleton, so a quick load does not flash one. */
@@ -84,7 +85,10 @@ export class Settled<T> {
                     this.error = undefined;
                 },
                 (error: unknown) => {
-                    if (fresh) this.error = error;
+                    if (!fresh) return;
+                    this.error = error;
+                    // Shown in place, it is caught here and never reaches window.onerror.
+                    reportError(error);
                 },
             );
             return () => {

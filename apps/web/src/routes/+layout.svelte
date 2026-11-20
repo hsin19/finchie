@@ -49,6 +49,7 @@ import {
     Settled,
     SKELETON_AFTER_MS,
 } from "#lib/stream.svelte.js";
+import { setRoute } from "#lib/telemetry.js";
 import { version } from "$app/env";
 import {
     afterNavigate,
@@ -75,6 +76,8 @@ let { data, children }: LayoutProps = $props();
 const ledger = new Settled(() => data.ledger);
 // From the first page on, loads wait for their data (stream.svelte.ts).
 afterNavigate(markDrawn);
+// Telemetry tells pages apart by route, not by each statement's address (telemetry.ts).
+afterNavigate(({ to }) => setRoute(to?.route.id ?? null));
 
 // The backend drops a subscription its push service says is gone, and a browser may renew one: telling it
 // again whenever the app opens keeps this device's pushes coming. A failure waits for the next opening.
