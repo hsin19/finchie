@@ -1808,6 +1808,7 @@ components:
         maxUploadBytes: { type: integer, format: int64, description: The largest file an upload may be (BACKEND_MAX_UPLOAD_MB) }
         sourceIntervalHours: { type: integer, description: "How often rates, closes, and exchanges are read" }
         baseCurrency: { type: string, description: "What every worth is in, e.g. TWD" }
+        faroUrl: { type: string, description: "Where the web app sends its own telemetry, a Grafana Faro collector (BACKEND_FARO_URL, ADR 0024); absent, it sends none" }
 
     Problem:
       type: object

@@ -125,6 +125,7 @@ On `SIGTERM` the backend stops taking jobs and gives a parse in progress 30 seco
 | `BACKEND_MAX_ACCESS_KEY`, `BACKEND_MAX_SECRET_KEY` | — | MAX's read-only API key (ADR 0018). Each exchange is fetched once all of its keys are set; some but not all stops the backend at start |
 | `BACKEND_BINANCE_API_KEY`, `BACKEND_BINANCE_API_SECRET` | — | Binance's read-only API key, without IP restriction |
 | `BACKEND_BITGET_API_KEY`, `BACKEND_BITGET_API_SECRET`, `BACKEND_BITGET_PASSPHRASE` | — | Bitget's read-only API key |
+| `BACKEND_FARO_URL` | — | Where the web app sends its own telemetry: a Grafana Faro collector, such as a Grafana Cloud Frontend Observability app's collector URL or the deployment's own receiver. Handed to the web app through `/api/settings`; unset, the web app loads no telemetry (ADR 0024) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Where traces, metrics, and logs go over OTLP gRPC, e.g. `http://collector:4317`. Unset: nothing leaves the process, logs go to stdout only (ADR 0011) |
 | `OTEL_SERVICE_NAME` | `finchie-backend` | |
 | `OTEL_RESOURCE_ATTRIBUTES` | — | E.g. `service.namespace=finchie,deployment.environment.name=production`; the other standard `OTEL_*` variables apply too |

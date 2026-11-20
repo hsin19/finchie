@@ -171,7 +171,7 @@ func run() error {
 		}
 		return c.String(http.StatusOK, "ok")
 	})
-	api.Register(e, api.NewServer(pool, queue, parser, cfg.MaxUploadBytes(), cfg.MailboxAddress))
+	api.Register(e, api.NewServer(pool, queue, parser, cfg.MaxUploadBytes(), cfg.MailboxAddress, cfg.FaroURL))
 	web.Register(e)
 
 	slog.Info("listening", "addr", cfg.HTTPAddr, "parser", cfg.ParserAddr)

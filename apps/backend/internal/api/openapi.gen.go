@@ -1240,6 +1240,9 @@ type Settings struct {
 	// BaseCurrency What every worth is in, e.g. TWD
 	BaseCurrency string `json:"baseCurrency"`
 
+	// FaroUrl Where the web app sends its own telemetry, a Grafana Faro collector (BACKEND_FARO_URL, ADR 0024); absent, it sends none
+	FaroUrl *string `json:"faroUrl,omitempty"`
+
 	// LapseSoonDays How near points to lapse are soon enough to stand out
 	LapseSoonDays int `json:"lapseSoonDays"`
 

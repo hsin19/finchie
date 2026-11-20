@@ -39,10 +39,12 @@ type Server struct {
 	maxUploadBytes int64
 	// Where the Gmail filter forwards statements; empty when the deployment has not set it.
 	mailboxAddress string
+	// Where the web app sends its telemetry (ADR 0024); empty, it sends none.
+	faroURL string
 }
 
-func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv2.ParserServiceClient, maxUploadBytes int64, mailboxAddress string) *Server {
-	return &Server{pool: pool, jobs: jobs, parser: parser, maxUploadBytes: maxUploadBytes, mailboxAddress: mailboxAddress}
+func NewServer(pool *pgxpool.Pool, jobs *river.Client[pgx.Tx], parser parserv2.ParserServiceClient, maxUploadBytes int64, mailboxAddress, faroURL string) *Server {
+	return &Server{pool: pool, jobs: jobs, parser: parser, maxUploadBytes: maxUploadBytes, mailboxAddress: mailboxAddress, faroURL: faroURL}
 }
 
 var _ StrictServerInterface = (*Server)(nil)
