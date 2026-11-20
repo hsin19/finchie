@@ -648,11 +648,12 @@ WITH lines AS (
     SELECT t.kind, a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
            coalesce(a.full_number, a.number) AS account_number, s.institution, t.card_last4, u.symbol AS unit,
            t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow,
-           ($1::text[] IS NULL OR t.kind = ANY ($1::text[])) AS kind_match,
-           (($2::text IS NULL OR s.institution = $2::text)
+           CASE WHEN $1::boolean THEN date_trunc('month'::text, t.transaction_date::timestamp)::date END AS month,
+           ($2::text[] IS NULL OR t.kind = ANY ($2::text[])) AS kind_match,
+           (($3::text IS NULL OR s.institution = $3::text)
                -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
-               AND ($3::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $3::text)
-               AND ($4::bigint IS NULL OR t.account_id = $4::bigint)) AS pick_match,
+               AND ($4::text IS NULL OR t.card_last4 IS NOT DISTINCT FROM $4::text)
+               AND ($5::bigint IS NULL OR t.account_id = $5::bigint)) AS pick_match,
            t.amount + coalesce(kids.amount, 0) AS amount,
            owner_flow(a.kind, t.amount + coalesce(kids.amount, 0)) AS flow,
            (t.counterpart_id IS NOT NULL OR t.kind = 'payment') AS transfer,
@@ -665,23 +666,23 @@ WITH lines AS (
     LEFT JOIN payees py ON py.counterparty = t.counterparty
     LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
                        FROM transactions c
-                       WHERE $5::boolean AND c.parent_id = t.id) kids ON true
-    WHERE NOT ($5::boolean AND t.parent_id IS NOT NULL)
+                       WHERE $6::boolean AND c.parent_id = t.id) kids ON true
+    WHERE NOT ($6::boolean AND t.parent_id IS NOT NULL)
       AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
                        t.description, t.memo, t.counterparty, py.name,
-                       from_date => $6::date, to_date => $7::date,
-                       closing_from => $8::date, closing_to => $9::date,
-                       overseas => $10::boolean, of_account_kind => $11::text,
-                       hide_transfers => $12::boolean, query => $13::text)
+                       from_date => $7::date, to_date => $8::date,
+                       closing_from => $9::date, closing_to => $10::date,
+                       overseas => $11::boolean, of_account_kind => $12::text,
+                       hide_transfers => $13::boolean, query => $14::text)
 ),
 marked AS (
     SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
-           l.kind_match, l.pick_match, l.amount, l.flow, l.transfer, l.shares,
+           l.month, l.kind_match, l.pick_match, l.amount, l.flow, l.transfer, l.shares,
            (l.counterpart_id IS NOT NULL AND NOT l.outflow
                AND EXISTS (SELECT 1 FROM lines o WHERE o.id = l.counterpart_id AND o.kind_match AND o.pick_match)) AS folded
     FROM lines l
 )
-SELECT kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit,
+SELECT kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, month::date AS month,
        kind_match::boolean AS kind_match, pick_match::boolean AS pick_match, folded::boolean AS folded,
        count(*)::integer AS row_count,
        sum(amount)::numeric AS amount,
@@ -690,11 +691,12 @@ SELECT kind, account_kind, account_id, account_name, account_number, institution
        count(*) FILTER (WHERE transfer AND NOT shares)::integer AS moved_count,
        coalesce(sum(abs(flow)) FILTER (WHERE transfer AND NOT shares), 0)::numeric AS moved
 FROM marked
-GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, kind_match, pick_match, folded
-ORDER BY kind, institution, card_last4, account_id, unit
+GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, month, kind_match, pick_match, folded
+ORDER BY kind, institution, card_last4, account_id, unit, month
 `
 
 type TransactionTotalsParams struct {
+	ByMonth       bool
 	Kinds         []string
 	Institution   *string
 	CardLast4     *string
@@ -719,6 +721,7 @@ type TransactionTotalsRow struct {
 	Institution   string
 	CardLast4     *string
 	Unit          string
+	Month         pgtype.Date
 	KindMatch     bool
 	PickMatch     bool
 	Folded        bool
@@ -734,9 +737,12 @@ type TransactionTotalsRow struct {
 // the group passes the kind filter and the account picker's (bank, card, account), and whether its
 // lines are folded under the outflows they came from; so the caller can build the totals and the
 // account facets from a single scan. Amounts are net of children; spent and received are seen from the
-// owner and leave out transfers and card payments, whose money only moved (ADR 0016).
+// owner and leave out transfers and card payments, whose money only moved (ADR 0016). With by_month, the
+// groups are split by the month of the lines' transaction date too; without, month is NULL and splits
+// nothing.
 func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsParams) ([]TransactionTotalsRow, error) {
 	rows, err := q.db.Query(ctx, transactionTotals,
+		arg.ByMonth,
 		arg.Kinds,
 		arg.Institution,
 		arg.CardLast4,
@@ -767,6 +773,7 @@ func (q *Queries) TransactionTotals(ctx context.Context, arg TransactionTotalsPa
 			&i.Institution,
 			&i.CardLast4,
 			&i.Unit,
+			&i.Month,
 			&i.KindMatch,
 			&i.PickMatch,
 			&i.Folded,

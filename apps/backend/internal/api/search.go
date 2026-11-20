@@ -21,7 +21,7 @@ type searchFilter struct {
 	institution, card, query         *string
 	account                          *int64
 	accountKind                      *string
-	overseas, hideTransfers          bool
+	overseas, hideTransfers, byMonth bool
 	kinds                            []string
 	// Fees fold into their purchases when purchases are listed; asked for fees alone, they are rows.
 	fold bool
@@ -34,6 +34,7 @@ func readSearch(params SearchTransactionsParams) searchFilter {
 		account: params.Account, overseas: params.Overseas != nil && *params.Overseas,
 		// A transfer between the owner's lines is neither spent nor received (ADR 0016).
 		hideTransfers: params.HideTransfers != nil && *params.HideTransfers,
+		byMonth:       params.ByMonth != nil && *params.ByMonth,
 	}
 	if params.AccountKind != nil && params.AccountKind.Valid() {
 		f.accountKind = ptr(string(*params.AccountKind))
@@ -59,7 +60,7 @@ func (f searchFilter) search(sort string, limit, offset int32) dbq.SearchTransac
 
 func (f searchFilter) totals() dbq.TransactionTotalsParams {
 	return dbq.TransactionTotalsParams{
-		Fold: f.fold, Kinds: f.kinds, Institution: f.institution, CardLast4: f.card, AccountID: f.account,
+		Fold: f.fold, ByMonth: f.byMonth, Kinds: f.kinds, Institution: f.institution, CardLast4: f.card, AccountID: f.account,
 		FromDate: f.from, ToDate: f.to, ClosingFrom: f.closingFrom, ClosingTo: f.closingTo,
 		Overseas: f.overseas, AccountKind: f.accountKind, HideTransfers: f.hideTransfers, Query: f.query,
 	}
@@ -108,6 +109,9 @@ func (s *Server) SearchTransactions(ctx context.Context, request SearchTransacti
 	}
 	summary := summarize(groups)
 	result.Total, result.Sum, result.Flows = summary.total.count, numeric.String(summary.total.amount), summary.flows
+	if filter.byMonth {
+		result.Months = &summary.months
+	}
 	result.ByKind, result.ByCard, result.ByAccount = kindTotals(kinds), summary.byCard, summary.byAccount
 	return SearchTransactions200JSONResponse(result), nil
 }

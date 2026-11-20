@@ -219,6 +219,42 @@ func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
+// The overview's year of cashflow is one search split by month, which must give each month what a search
+// of that month alone does.
+func TestASearchByMonthGivesEachMonthsFlowsAsASearchOfThatMonth(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	line := func(month, day int32, amount, description string) *parserv2.Line {
+		return pt.DepositLine(pt.Day(month, day), description, "TWD", amount, "")
+	}
+	store(t, pool, "esun.eml", pt.Response("esun.deposit", pt.Deposit("esun", pt.Day(8, 1), pt.Day(9, 30),
+		pt.DepositAccount(savings, "活存", []*parserv2.Balance{pt.Balance("TWD", pt.Day(9, 30), "118635")},
+			line(8, 5, "60000", "薪資"), line(8, 20, "-15", "跨行手續費"), line(9, 5, "61000", "薪資"), line(9, 10, "-2000", "提款")))))
+	store(t, pool, "bill.eml", septemberBill("6350", cardLine(1, parserv2.LineKind_LINE_KIND_PURCHASE, "6350", "SHOP", "3381")))
+
+	split := decode[TransactionSearch](t, get(t, e, "/api/transactions?from=2026-08-01&to=2026-09-30&limit=0&byMonth=true"))
+	if split.Months == nil || len(*split.Months) != 2 {
+		t.Fatalf("months = %+v", split.Months)
+	}
+	for _, m := range *split.Months {
+		from := m.Month + "-01"
+		to := map[string]string{"2026-08": "2026-08-31", "2026-09": "2026-09-30"}[m.Month]
+		alone := decode[TransactionSearch](t, get(t, e, "/api/transactions?limit=0&from="+from+"&to="+to))
+		if fmt.Sprint(m.Flows) != fmt.Sprint(alone.Flows) {
+			t.Errorf("%s: by month %+v, alone %+v", m.Month, m.Flows, alone.Flows)
+		}
+	}
+	if months := *split.Months; months[0].Flows[0].Received != "60000" || months[0].Flows[0].Spent != "-15" ||
+		months[1].Flows[0].Received != "61000" || months[1].Flows[0].Spent != "-8350" {
+		t.Fatalf("months = %+v", months)
+	}
+	if f := split.Flows[0]; f.Received != "121000" || f.Spent != "-8365" {
+		t.Fatalf("the months together = %+v", f)
+	}
+	if unsplit := decode[TransactionSearch](t, get(t, e, "/api/transactions?limit=0")); unsplit.Months != nil {
+		t.Fatalf("months without byMonth = %+v", unsplit.Months)
+	}
+}
+
 func TestSearchListsEveryAccountsLinesAsTheOwnerSeesThem(t *testing.T) {
 	e, pool := newAPI(t, 1<<20)
 	fee := septemberLine(26, "-15", "跨行手續費", "")

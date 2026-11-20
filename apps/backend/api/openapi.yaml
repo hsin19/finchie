@@ -892,6 +892,10 @@ paths:
           in: query
           description: Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
           schema: { type: string }
+        - name: byMonth
+          in: query
+          description: Also split `flows` by the month of each line's transaction date (`months`)
+          schema: { type: boolean }
         - name: sort
           in: query
           description: Row order; largest and smallest compare amounts by size, ignoring the sign
@@ -1568,6 +1572,13 @@ components:
           type: array
           description: "Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016)"
           items: { $ref: "#/components/schemas/UnitFlow" }
+        months:
+          type: array
+          description: |
+            With `byMonth`: `flows` by month, oldest first, only months with a line. Together they are
+            `flows`: a transfer is counted once in the whole search, so its two lines in two months count
+            once, in the outflow's month.
+          items: { $ref: "#/components/schemas/MonthFlows" }
         byKind:
           type: array
           items: { $ref: "#/components/schemas/KindTotal" }
@@ -1590,6 +1601,15 @@ components:
           allOf: [{ $ref: "#/components/schemas/Decimal" }]
           description: "What moved between the owner's own lines (transfers, card payments), each link once: neither spent nor received"
         movedCount: { type: integer, description: "Rows listed for it" }
+
+    MonthFlows:
+      type: object
+      required: [month, flows]
+      properties:
+        month: { type: string, description: "YYYY-MM", example: "2026-10" }
+        flows:
+          type: array
+          items: { $ref: "#/components/schemas/UnitFlow" }
 
     AccountTotal:
       type: object

@@ -76,11 +76,14 @@ LIMIT @row_limit OFFSET @row_offset;
 -- the group passes the kind filter and the account picker's (bank, card, account), and whether its
 -- lines are folded under the outflows they came from; so the caller can build the totals and the
 -- account facets from a single scan. Amounts are net of children; spent and received are seen from the
--- owner and leave out transfers and card payments, whose money only moved (ADR 0016).
+-- owner and leave out transfers and card payments, whose money only moved (ADR 0016). With by_month, the
+-- groups are split by the month of the lines' transaction date too; without, month is NULL and splits
+-- nothing.
 WITH lines AS (
     SELECT t.kind, a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
            coalesce(a.full_number, a.number) AS account_number, s.institution, t.card_last4, u.symbol AS unit,
            t.id, t.counterpart_id, (a.kind = 'deposit' AND t.amount < 0) AS outflow,
+           CASE WHEN @by_month::boolean THEN date_trunc('month'::text, t.transaction_date::timestamp)::date END AS month,
            (sqlc.narg(kinds)::text[] IS NULL OR t.kind = ANY (sqlc.narg(kinds)::text[])) AS kind_match,
            ((sqlc.narg(institution)::text IS NULL OR s.institution = sqlc.narg(institution)::text)
                -- IS NOT DISTINCT FROM: rows without a card (payments) must give false, not NULL.
@@ -109,12 +112,12 @@ WITH lines AS (
 ),
 marked AS (
     SELECT l.kind, l.account_kind, l.account_id, l.account_name, l.account_number, l.institution, l.card_last4, l.unit,
-           l.kind_match, l.pick_match, l.amount, l.flow, l.transfer, l.shares,
+           l.month, l.kind_match, l.pick_match, l.amount, l.flow, l.transfer, l.shares,
            (l.counterpart_id IS NOT NULL AND NOT l.outflow
                AND EXISTS (SELECT 1 FROM lines o WHERE o.id = l.counterpart_id AND o.kind_match AND o.pick_match)) AS folded
     FROM lines l
 )
-SELECT kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit,
+SELECT kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, month::date AS month,
        kind_match::boolean AS kind_match, pick_match::boolean AS pick_match, folded::boolean AS folded,
        count(*)::integer AS row_count,
        sum(amount)::numeric AS amount,
@@ -123,8 +126,8 @@ SELECT kind, account_kind, account_id, account_name, account_number, institution
        count(*) FILTER (WHERE transfer AND NOT shares)::integer AS moved_count,
        coalesce(sum(abs(flow)) FILTER (WHERE transfer AND NOT shares), 0)::numeric AS moved
 FROM marked
-GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, kind_match, pick_match, folded
-ORDER BY kind, institution, card_last4, account_id, unit;
+GROUP BY kind, account_kind, account_id, account_name, account_number, institution, card_last4, unit, month, kind_match, pick_match, folded
+ORDER BY kind, institution, card_last4, account_id, unit, month;
 
 -- name: KindTotals :many
 -- The kind facet: lines as printed, whether or not they have a parent; every filter but the kind one

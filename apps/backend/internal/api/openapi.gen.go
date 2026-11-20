@@ -954,6 +954,16 @@ type LineFill struct {
 	To openapi_types.Date `json:"to"`
 }
 
+// MonthFlows defines model for MonthFlows.
+type MonthFlows struct {
+	Flows []UnitFlow `json:"flows"`
+
+	// Month YYYY-MM
+	//
+	// Example: 2026-10
+	Month string `json:"month"`
+}
+
 // NetWorth defines model for NetWorth.
 type NetWorth struct {
 	// Assets Decimal number as a string, e.g. "-6552.97"
@@ -1442,6 +1452,11 @@ type TransactionSearch struct {
 	Flows []UnitFlow    `json:"flows"`
 	Items []Transaction `json:"items"`
 
+	// Months With `byMonth`: `flows` by month, oldest first, only months with a line. Together they are
+	// `flows`: a transfer is counted once in the whole search, so its two lines in two months count
+	// once, in the outflow's month.
+	Months *[]MonthFlows `json:"months,omitempty"`
+
 	// Sum Amounts as printed, which only adds up within one kind of account: use with accountKind
 	Sum Decimal `json:"sum"`
 
@@ -1611,6 +1626,9 @@ type SearchTransactionsParams struct {
 
 	// Query Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it
 	Query *string `form:"query,omitempty" json:"query,omitempty"`
+
+	// ByMonth Also split `flows` by the month of each line's transaction date (`months`)
+	ByMonth *bool `form:"byMonth,omitempty" json:"byMonth,omitempty"`
 
 	// Sort Row order; largest and smallest compare amounts by size, ignoring the sign
 	Sort *TransactionSort `form:"sort,omitempty" json:"sort,omitempty"`
@@ -2464,6 +2482,13 @@ func (w *ServerInterfaceWrapper) SearchTransactions(ctx *echo.Context) error {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", ctx.QueryParams(), &params.Query, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter query: %s", err))
+	}
+
+	// ------------- Optional query parameter "byMonth" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "byMonth", ctx.QueryParams(), &params.ByMonth, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Invalid format for parameter byMonth: %s", err))
 	}
 
 	// ------------- Optional query parameter "sort" -------------
