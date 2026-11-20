@@ -8,7 +8,8 @@ import {
 } from "#lib/accounts.js";
 import type {
     Account,
-    TransactionSearch,
+    MonthFlows,
+    UnitFlow,
 } from "#lib/api/client.js";
 import {
     type Month,
@@ -50,26 +51,21 @@ export interface MonthFlow {
     complete: boolean;
 }
 
-/** Each month's figures in the base currency, from its search (`limit=0`), in the same order. */
-export function monthFlows(months: readonly Month[], searches: readonly Pick<TransactionSearch, "flows">[], base: string, through?: string): MonthFlow[] {
-    return months.map((month, i) => {
-        const flow = searches[i]?.flows.find(f => f.unit === base);
+/** Each month's figures in the base currency, from a search split by month (`byMonth`); a month it has no line in is 0. */
+export function monthFlows(months: readonly Month[], byMonth: readonly MonthFlows[], base: string, through?: string): MonthFlow[] {
+    return months.map(month => {
+        const flow = byMonth.find(m => m.month === month)?.flows.find(f => f.unit === base);
         const received = flow?.received ?? "0";
         const spent = flow?.spent ?? "0";
         return { month, received, spent, net: sum([received, spent]), complete: through !== undefined && monthRange(month).to <= through };
     });
 }
 
-/** What the other units came to over all the months, each that moved at all: "USD". */
-export function otherUnits(searches: readonly Pick<TransactionSearch, "flows">[], base: string): { unit: string; received: string; spent: string; }[] {
-    const flows = searches.flatMap(s => s.flows).filter(f => f.unit !== base);
-    const units = [...new Set(flows.map(f => f.unit))].sort();
-    return units
-        .map(unit => {
-            const of = flows.filter(f => f.unit === unit);
-            return { unit, received: sum(of.map(f => f.received)), spent: sum(of.map(f => f.spent)) };
-        })
-        .filter(u => sign(u.received) !== 0 || sign(u.spent) !== 0);
+/** What the other units came to over the whole search, each that moved at all: "USD". */
+export function otherUnits(flows: readonly UnitFlow[], base: string): { unit: string; received: string; spent: string; }[] {
+    return flows
+        .filter(f => f.unit !== base && (sign(f.received) !== 0 || sign(f.spent) !== 0))
+        .map(({ unit, received, spent }) => ({ unit, received, spent }));
 }
 
 /** A year's months so far, added up. */

@@ -19,13 +19,15 @@ export const load = (async ({ fetch, depends }) => {
     const client = api(fetch);
     const months = cashflowMonths(thisMonth());
     const content = (async () => {
-        const [accounts, netWorth, history, ...searches] = await Promise.all([
+        const [accounts, netWorth, history, cashflow] = await Promise.all([
             client.GET("/api/accounts"),
             client.GET("/api/net-worth"),
             // Last month's end and today: how net worth moved this month.
             client.GET("/api/net-worth/history", { params: { query: trendQuery(today(), 2) } }),
-            // A month's totals only (limit 0), as the backend adds them up.
-            ...months.map(m => client.GET("/api/transactions", { params: { query: { ...monthRange(m), limit: 0 } } })),
+            // The year's totals only (limit 0), as the backend adds them up, split by month.
+            client.GET("/api/transactions", {
+                params: { query: { from: monthRange(months[0]).from, to: monthRange(months.at(-1)!).to, limit: 0, byMonth: true } },
+            }),
         ]);
         return {
             accounts: need(accounts),
@@ -33,7 +35,7 @@ export const load = (async ({ fetch, depends }) => {
             // The page is of use without it.
             history: attempt(history).data,
             months,
-            searches: searches.map(need),
+            cashflow: need(cashflow),
         };
     })();
     return { content: await defer(content) };

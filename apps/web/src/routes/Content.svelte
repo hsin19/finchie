@@ -60,9 +60,9 @@ const moved = $derived(netWorthChange(data.history ?? []));
 
 // A year of what came in and went out, across every account.
 const base = $derived(data.settings.baseCurrency);
-const flows = $derived(monthFlows(data.months, data.searches, base, reportedThrough(data.accounts, day)));
+const flows = $derived(monthFlows(data.months, data.cashflow.months ?? [], base, reportedThrough(data.accounts, day)));
 const year = $derived({ name: now.slice(0, 4), ...yearFlow(flows, now.slice(0, 4)) });
-const others = $derived(otherUnits(data.searches, base));
+const others = $derived(otherUnits(data.cashflow.flows, base));
 </script>
 
 {#if found.length > 0}<Needs needs={found} />{/if}

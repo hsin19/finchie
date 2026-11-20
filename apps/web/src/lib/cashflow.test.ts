@@ -67,7 +67,8 @@ describe("reportedThrough", () => {
 
 describe("monthFlows", () => {
     it("takes each month's base currency, complete once every source reported past its end", () => {
-        const flows = monthFlows(["2026-09", "2026-10"], [{ flows: [flow("TWD", "80766", "-95707"), flow("USD", "3.89", "0")] }, { flows: [] }], "TWD", "2026-09-30");
+        // October has no line: no month of its own.
+        const flows = monthFlows(["2026-09", "2026-10"], [{ month: "2026-09", flows: [flow("TWD", "80766", "-95707"), flow("USD", "3.89", "0")] }], "TWD", "2026-09-30");
         expect(flows).toEqual([
             { month: "2026-09", received: "80766", spent: "-95707", net: "-14941", complete: true },
             { month: "2026-10", received: "0", spent: "0", net: "0", complete: false },
@@ -76,18 +77,18 @@ describe("monthFlows", () => {
 });
 
 describe("otherUnits", () => {
-    it("adds up every unit but the base one that moved at all", () => {
-        const searches = [{ flows: [flow("TWD", "1", "-1"), flow("USD", "5.80", "-9.00"), flow("JPY", "0.00", "0.00")] }, { flows: [flow("USD", "3.89", "0")] }];
-        expect(otherUnits(searches, "TWD")).toEqual([{ unit: "USD", received: "9.69", spent: "-9.00" }]);
+    it("names every unit but the base one that moved at all", () => {
+        const flows = [flow("JPY", "0.00", "0.00"), flow("TWD", "1", "-1"), flow("USD", "9.69", "-9.00")];
+        expect(otherUnits(flows, "TWD")).toEqual([{ unit: "USD", received: "9.69", spent: "-9.00" }]);
     });
 });
 
 describe("yearFlow", () => {
     it("adds up the year's months only", () => {
         const months = monthFlows(["2025-12", "2026-01", "2026-02"], [
-            { flows: [flow("TWD", "92071", "-76753")] },
-            { flows: [flow("TWD", "81399", "-36170")] },
-            { flows: [flow("TWD", "336902", "-60829")] },
+            { month: "2025-12", flows: [flow("TWD", "92071", "-76753")] },
+            { month: "2026-01", flows: [flow("TWD", "81399", "-36170")] },
+            { month: "2026-02", flows: [flow("TWD", "336902", "-60829")] },
         ], "TWD");
         expect(yearFlow(months, "2026")).toEqual({ received: "418301", spent: "-96999", net: "321302", months: 2 });
     });

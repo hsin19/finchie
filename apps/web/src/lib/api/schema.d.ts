@@ -1379,6 +1379,12 @@ export interface components {
             sum: components["schemas"]["Decimal"];
             /** @description Per unit, what went out and came in, seen from the owner; transfers and card payments are neither (ADR 0016) */
             flows: components["schemas"]["UnitFlow"][];
+            /**
+             * @description With `byMonth`: `flows` by month, oldest first, only months with a line. Together they are
+             *     `flows`: a transfer is counted once in the whole search, so its two lines in two months count
+             *     once, in the outflow's month.
+             */
+            months?: components["schemas"]["MonthFlows"][];
             byKind: components["schemas"]["KindTotal"][];
             byCard: components["schemas"]["CardTotal"][];
             /** @description Deposit accounts, a facet like byCard */
@@ -1393,6 +1399,14 @@ export interface components {
             moved: components["schemas"]["Decimal"];
             /** @description Rows listed for it */
             movedCount: number;
+        };
+        MonthFlows: {
+            /**
+             * @description YYYY-MM
+             * @example 2026-10
+             */
+            month: string;
+            flows: components["schemas"]["UnitFlow"][];
         };
         AccountTotal: {
             /** Format: int64 */
@@ -2584,6 +2598,8 @@ export interface operations {
                 hideTransfers?: boolean;
                 /** @description Case-insensitive substring of the description, the memo, the counterparty, or the owner's name for it */
                 query?: string;
+                /** @description Also split `flows` by the month of each line's transaction date (`months`) */
+                byMonth?: boolean;
                 /** @description Row order; largest and smallest compare amounts by size, ignoring the sign */
                 sort?: components["schemas"]["TransactionSort"];
                 /** @description Page size; 0 returns only the totals */
