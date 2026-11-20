@@ -12,6 +12,11 @@ import {
     thisMonth,
 } from "#lib/dates.js";
 import { defer } from "#lib/stream.svelte.js";
+import { startTelemetry } from "#lib/telemetry.js";
+import {
+    dev,
+    version,
+} from "$app/env";
 import type { LayoutLoad } from "./$types";
 
 // A single-page app: nothing renders on a server, the backend serves the shell for every route
@@ -27,7 +32,11 @@ let settings: Promise<Settings> | undefined;
 export const load = (async ({ fetch, depends }) => {
     depends(LEDGER);
     const client = api(fetch);
-    settings ??= client.GET("/api/settings").then(need);
+    if (!settings) {
+        settings = client.GET("/api/settings").then(need);
+        // Telemetry starts once the deployment says where it goes; failing, it leaves the app as it is.
+        void settings.then(({ faroUrl }) => startTelemetry(faroUrl, { version, dev })).catch(() => undefined);
+    }
     // Every page shows this beside its own data; on the app's first page it comes while the layout draws.
     return { ledger: await defer(ledger(client, settings)) };
 }) satisfies LayoutLoad;

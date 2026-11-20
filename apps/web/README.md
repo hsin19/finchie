@@ -43,6 +43,7 @@ Node 26 (`.node-version`); the pnpm version is pinned in `package.json`.
 | `src/lib/api/` | Generated types (`schema.d.ts`) and the `openapi-fetch` client |
 | `src/lib/api/session.ts` | What an API request does once the Cloudflare Access session has ended: a read reloads the page to sign in, once; a change reports it |
 | `src/lib/resume.ts` | When the app is back after long enough out of sight for the ledger to be reloaded |
+| `src/lib/telemetry.ts` | Grafana Faro, loaded only when `/api/settings` names a collector (`BACKEND_FARO_URL`, ADR 0024): errors, Web Vitals, sessions, and request spans the backend's traces continue. `scrub` keeps every URL's query and fragment, and the browser's user agent string, in the browser. `src/hooks.client.ts` and `Settled` report the errors SvelteKit and deferred loads catch themselves |
 | `icons.ts` | The home screen icons: which there are, and the Vite plugin that serves them while developing and writes them into the build. `src/lib/install.test.ts` checks that the manifest, `src/app.html`, and the background colour agree with it |
 | `src/lib/money.ts` | Exact decimal arithmetic (an average included: `divide`) and formatting for amounts (ADR 0004) |
 | `src/lib/api/mutations.ts` | Every change the owner makes goes through `change()`: one way to report a failure, then the ledger reloads |
