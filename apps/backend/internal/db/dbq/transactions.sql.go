@@ -212,16 +212,33 @@ WITH matched AS (
     JOIN accounts a ON a.id = t.account_id
     LEFT JOIN payees py ON py.counterparty = t.counterparty
     WHERE NOT ($1::boolean AND t.parent_id IS NOT NULL)
-      AND ($5::text[] IS NULL OR t.kind = ANY ($5::text[]))
-      AND ($6::text IS NULL OR s.institution = $6::text)
-      AND ($7::text IS NULL OR t.card_last4 = $7::text)
-      AND ($8::bigint IS NULL OR t.account_id = $8::bigint)
+      AND ($3::text[] IS NULL OR t.kind = ANY ($3::text[]))
+      AND ($4::text IS NULL OR s.institution = $4::text)
+      AND ($5::text IS NULL OR t.card_last4 = $5::text)
+      AND ($6::bigint IS NULL OR t.account_id = $6::bigint)
       AND line_matches(t.transaction_date, s.closing_date, t.original_currency, t.country, a.kind, t.counterpart_id, t.kind,
                        t.description, t.memo, t.counterparty, py.name,
-                       from_date => $9::date, to_date => $10::date,
-                       closing_from => $11::date, closing_to => $12::date,
-                       overseas => $13::boolean, of_account_kind => $14::text,
-                       hide_transfers => $15::boolean, query => $16::text)
+                       from_date => $7::date, to_date => $8::date,
+                       closing_from => $9::date, closing_to => $10::date,
+                       overseas => $11::boolean, of_account_kind => $12::text,
+                       hide_transfers => $13::boolean, query => $14::text)
+), page AS (
+    -- The page's lines first, ordered by what costs little; only they are then given their parent and
+    -- children as JSON, not every line that matches.
+    SELECT t.id, net.amount AS kids_amount
+    FROM matched m
+    JOIN transactions t ON t.id = m.id
+    LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
+                       FROM transactions c
+                       WHERE $1::boolean AND c.parent_id = t.id) net ON true
+    WHERE NOT (m.counterpart_id IS NOT NULL AND NOT m.outflow AND m.counterpart_id IN (SELECT id FROM matched))
+    -- Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
+    -- big payment counts as large. Ties go newest first, then in statement line order.
+    ORDER BY CASE WHEN $2::text = 'largest' THEN abs(t.amount + coalesce(net.amount, 0)) END DESC NULLS LAST,
+             CASE WHEN $2::text = 'smallest' THEN abs(t.amount + coalesce(net.amount, 0)) END ASC NULLS LAST,
+             CASE WHEN $2::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
+             t.transaction_date DESC, t.statement_id DESC, t.line_no
+    LIMIT $16 OFFSET $15
 )
 SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
@@ -229,7 +246,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
-       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(pg.kids_amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -238,8 +255,8 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
        coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
        ca.full_number AS counterpart_full_number
-FROM matched m
-JOIN transactions t ON t.id = m.id
+FROM page pg
+JOIN transactions t ON t.id = pg.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
@@ -252,26 +269,21 @@ LEFT JOIN LATERAL (SELECT jsonb_build_object('id'::text, p.id, 'statementId'::te
                                              'originalAmount'::text, p.original_amount::text, 'originalCurrency'::text, p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
-                          jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
+LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
                                                        'transactionDate'::text, c.transaction_date, 'amount'::text, c.amount::text,
                                              'originalAmount'::text, c.original_amount::text, 'originalCurrency'::text, c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE $1::boolean AND c.parent_id = t.id) kids ON true
-WHERE NOT (m.counterpart_id IS NOT NULL AND NOT m.outflow AND m.counterpart_id IN (SELECT id FROM matched))
-ORDER BY CASE WHEN $2::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
-         CASE WHEN $2::text = 'smallest' THEN abs(t.amount + coalesce(kids.amount, 0)) END ASC NULLS LAST,
+ORDER BY CASE WHEN $2::text = 'largest' THEN abs(t.amount + coalesce(pg.kids_amount, 0)) END DESC NULLS LAST,
+         CASE WHEN $2::text = 'smallest' THEN abs(t.amount + coalesce(pg.kids_amount, 0)) END ASC NULLS LAST,
          CASE WHEN $2::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
          t.transaction_date DESC, t.statement_id DESC, t.line_no
-LIMIT $4 OFFSET $3
 `
 
 type SearchTransactionsParams struct {
 	Fold          bool
 	Sort          string
-	RowOffset     int32
-	RowLimit      int32
 	Kinds         []string
 	Institution   *string
 	CardLast4     *string
@@ -284,6 +296,8 @@ type SearchTransactionsParams struct {
 	AccountKind   *string
 	HideTransfers bool
 	Query         *string
+	RowOffset     int32
+	RowLimit      int32
 }
 
 type SearchTransactionsRow struct {
@@ -338,14 +352,11 @@ type SearchTransactionsRow struct {
 // without the outflow, such as another account or the month before, lists the line itself.
 // Keys are typed: Database Observability (Grafana Alloy) prepares this query with its constants as
 // parameters, and jsonb_build_object takes any type, so an untyped key leaves it unplannable.
-// Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
-// big payment counts as large. Ties go newest first, then in statement line order.
+// The page's order again: a CTE's order does not carry through the joins.
 func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactionsParams) ([]SearchTransactionsRow, error) {
 	rows, err := q.db.Query(ctx, searchTransactions,
 		arg.Fold,
 		arg.Sort,
-		arg.RowOffset,
-		arg.RowLimit,
 		arg.Kinds,
 		arg.Institution,
 		arg.CardLast4,
@@ -358,6 +369,8 @@ func (q *Queries) SearchTransactions(ctx context.Context, arg SearchTransactions
 		arg.AccountKind,
 		arg.HideTransfers,
 		arg.Query,
+		arg.RowOffset,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

@@ -23,6 +23,23 @@ WITH matched AS (
                        closing_from => sqlc.narg(closing_from)::date, closing_to => sqlc.narg(closing_to)::date,
                        overseas => @overseas::boolean, of_account_kind => sqlc.narg(account_kind)::text,
                        hide_transfers => @hide_transfers::boolean, query => sqlc.narg(query)::text)
+), page AS (
+    -- The page's lines first, ordered by what costs little; only they are then given their parent and
+    -- children as JSON, not every line that matches.
+    SELECT t.id, net.amount AS kids_amount
+    FROM matched m
+    JOIN transactions t ON t.id = m.id
+    LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount
+                       FROM transactions c
+                       WHERE @fold::boolean AND c.parent_id = t.id) net ON true
+    WHERE NOT (m.counterpart_id IS NOT NULL AND NOT m.outflow AND m.counterpart_id IN (SELECT id FROM matched))
+    -- Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
+    -- big payment counts as large. Ties go newest first, then in statement line order.
+    ORDER BY CASE WHEN @sort::text = 'largest' THEN abs(t.amount + coalesce(net.amount, 0)) END DESC NULLS LAST,
+             CASE WHEN @sort::text = 'smallest' THEN abs(t.amount + coalesce(net.amount, 0)) END ASC NULLS LAST,
+             CASE WHEN @sort::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
+             t.transaction_date DESC, t.statement_id DESC, t.line_no
+    LIMIT @row_limit OFFSET @row_offset
 )
 SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_date, t.description, t.kind, t.amount,
        t.original_amount, t.original_currency, t.country, t.card_last4, t.parent_id, par.ref::jsonb AS parent, kids.list::jsonb AS children,
@@ -30,7 +47,7 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        -- sign turned, net of the children folded into it.
        a.kind AS account_kind, t.account_id, coalesce(a.name, a.label) AS account_name,
        coalesce(a.full_number, a.number) AS account_number, u.symbol AS unit, t.memo, t.counterparty, pn.name AS counterparty_name, t.balance,
-       owner_flow(a.kind, t.amount + coalesce(kids.amount, 0))::numeric AS flow,
+       owner_flow(a.kind, t.amount + coalesce(pg.kids_amount, 0))::numeric AS flow,
        -- A trade's money (ADR 0017).
        tr.category AS trade_category, tr.price AS trade_price, tr.amount AS trade_amount, tr.fee AS trade_fee,
        tr.tax AS trade_tax, tr.net AS trade_net, tr.prepaid AS trade_prepaid,
@@ -39,8 +56,8 @@ SELECT t.id, s.id AS statement_id, s.institution, t.transaction_date, t.posting_
        ca.id AS counterpart_account_id, ca.kind AS counterpart_account_kind, ca.institution AS counterpart_institution,
        coalesce(ca.name, ca.label) AS counterpart_account_name, ca.number AS counterpart_account_number,
        ca.full_number AS counterpart_full_number
-FROM matched m
-JOIN transactions t ON t.id = m.id
+FROM page pg
+JOIN transactions t ON t.id = pg.id
 JOIN statements s ON s.id = t.statement_id
 JOIN accounts a ON a.id = t.account_id
 JOIN units u ON u.id = t.unit_id
@@ -55,21 +72,17 @@ LEFT JOIN LATERAL (SELECT jsonb_build_object('id'::text, p.id, 'statementId'::te
                                              'originalAmount'::text, p.original_amount::text, 'originalCurrency'::text, p.original_currency) AS ref
                    FROM transactions p
                    WHERE p.id = t.parent_id) par ON true
-LEFT JOIN LATERAL (SELECT sum(c.amount) AS amount,
-                          jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
+LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('id'::text, c.id, 'statementId'::text, c.statement_id, 'kind'::text, c.kind,
                                                        'transactionDate'::text, c.transaction_date, 'amount'::text, c.amount::text,
                                              'originalAmount'::text, c.original_amount::text, 'originalCurrency'::text, c.original_currency)
                                     ORDER BY c.transaction_date, c.id) AS list
                    FROM transactions c
                    WHERE @fold::boolean AND c.parent_id = t.id) kids ON true
-WHERE NOT (m.counterpart_id IS NOT NULL AND NOT m.outflow AND m.counterpart_id IN (SELECT id FROM matched))
--- Sort: newest (the default), oldest, largest, or smallest; amounts net of children and by size, so a
--- big payment counts as large. Ties go newest first, then in statement line order.
-ORDER BY CASE WHEN @sort::text = 'largest' THEN abs(t.amount + coalesce(kids.amount, 0)) END DESC NULLS LAST,
-         CASE WHEN @sort::text = 'smallest' THEN abs(t.amount + coalesce(kids.amount, 0)) END ASC NULLS LAST,
+-- The page's order again: a CTE's order does not carry through the joins.
+ORDER BY CASE WHEN @sort::text = 'largest' THEN abs(t.amount + coalesce(pg.kids_amount, 0)) END DESC NULLS LAST,
+         CASE WHEN @sort::text = 'smallest' THEN abs(t.amount + coalesce(pg.kids_amount, 0)) END ASC NULLS LAST,
          CASE WHEN @sort::text = 'oldest' THEN t.transaction_date END ASC NULLS LAST,
-         t.transaction_date DESC, t.statement_id DESC, t.line_no
-LIMIT @row_limit OFFSET @row_offset;
+         t.transaction_date DESC, t.statement_id DESC, t.line_no;
 
 -- name: TransactionTotals :many
 -- The rows SearchTransactions lists, one group per kind, account, card, and unit, with flags for whether
