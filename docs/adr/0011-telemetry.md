@@ -2,7 +2,7 @@
 
 ## Decision
 
-The backend sends traces, metrics, and logs with OpenTelemetry over OTLP (gRPC), to whatever collector the deployment points it at. With mail ingestion (ADR 0010), statements arrive while nobody is looking; when one goes wrong, its traces show the whole path: the upload, and linked to it the parse job with its call to the parser.
+The backend sends traces, metrics, and logs with OpenTelemetry over OTLP (gRPC), to whatever collector the deployment points it at (the web app reports on itself as well, through Grafana Faro, and its requests start the backend's traces: ADR 0024). With mail ingestion (ADR 0010), statements arrive while nobody is looking; when one goes wrong, its traces show the whole path: the upload, and linked to it the parse job with its call to the parser.
 
 | | |
 |---|---|
