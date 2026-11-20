@@ -78,17 +78,6 @@ func ReadGaps(gaps []Gap) map[int64]Gaps {
 	return byAccount
 }
 
-// GappedAccounts counts the accounts with money that moved unseen: what the owner is told about.
-func GappedAccounts(gaps []Gap) int {
-	n := 0
-	for _, read := range ReadGaps(gaps) {
-		if len(read.Unseen) > 0 {
-			n++
-		}
-	}
-	return n
-}
-
 // Continuity is whether an account's balances can be checked against its lines.
 type Continuity string
 

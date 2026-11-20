@@ -18,7 +18,6 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	"github.com/riverqueue/rivercontrib/otelriver"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -100,12 +99,6 @@ func run() error {
 		return err
 	}
 	slog.Info("linked transactions to their parents", "children", linked)
-	if err := telemetry.ObserveDocuments(pool, otel.Meter(telemetry.Scope)); err != nil {
-		return err
-	}
-	if err := telemetry.ObserveAccountGaps(pool, otel.Meter(telemetry.Scope)); err != nil {
-		return err
-	}
 
 	// The parser is internal and stateless (ADR 0002): plaintext on the private network, with its token
 	// where the deployment sets one. A request carries a whole document; an opened one comes back no

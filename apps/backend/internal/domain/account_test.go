@@ -79,9 +79,6 @@ func TestOnlyMoneyThatMovedInAUnitAStatementItemizesIsAGap(t *testing.T) {
 	if len(read[1].Unseen) != 1 || read[1].Unshowable || len(read[2].Unseen) != 0 || !read[2].Unshowable || !read[3].Unshowable {
 		t.Fatalf("read = %+v", read)
 	}
-	if n := GappedAccounts(gaps); n != 2 {
-		t.Fatalf("gapped accounts = %d, want 2", n)
-	}
 }
 
 func TestAFillCountsOnTheLastDayNoReportCovers(t *testing.T) {

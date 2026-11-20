@@ -16,7 +16,7 @@ Dependencies point inward, toward `domain`; nothing in it knows the database, HT
 | `internal/exchanges`, `internal/rates`, `internal/quotes` | Sources that keep arriving by themselves: each reads its API and hands the ledger what it read |
 | `internal/api` | HTTP: reads requests, calls the ledger or reads the database, and shows what the domain says. No rules of its own |
 | `internal/jobs` | Queues and the schedule sources are read on |
-| `internal/telemetry` | Telemetry, and gauges that report what the domain says (documents by status, gapped accounts) |
+| `internal/telemetry` | Traces, metrics, and logs over OTLP (ADR 0011) |
 | `internal/parsertest` | Builders of parser responses for tests in any package |
 | `internal/numeric`, `internal/taipei` | Exact decimals to and from NUMERIC (ADR 0004); Taipei's dates |
 | `internal/db` | Migrations, and sqlc's queries in `dbq`, whose kind columns carry the domain's types |
