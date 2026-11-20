@@ -16,11 +16,15 @@ func (s *Server) GetSettings(ctx context.Context, _ GetSettingsRequestObject) (G
 	if err != nil {
 		return nil, err
 	}
-	return GetSettings200JSONResponse{
+	settings := GetSettings200JSONResponse{
 		MaxUploadBytes:      s.maxUploadBytes,
 		SourceIntervalHours: int(jobs.SourceInterval / time.Hour),
 		BaseCurrency:        domain.BaseCurrency,
 		LapseSoonDays:       domain.LapseSoonDays,
 		PushPublicKey:       keys.PublicKey,
-	}, nil
+	}
+	if s.faroURL != "" {
+		settings.FaroUrl = ptr(s.faroURL)
+	}
+	return settings, nil
 }

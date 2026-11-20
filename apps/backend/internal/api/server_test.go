@@ -30,6 +30,11 @@ const testMailbox = "finchie@mailbox.example"
 
 func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv2.ParserServiceClient) (*echo.Echo, *pgxpool.Pool) {
 	t.Helper()
+	return newAPIWithFaro(t, maxUploadBytes, parser, "")
+}
+
+func newAPIWithFaro(t *testing.T, maxUploadBytes int64, parser parserv2.ParserServiceClient, faroURL string) (*echo.Echo, *pgxpool.Pool) {
+	t.Helper()
 	pool := testdb.Pool(t)
 	// Insert-only client: jobs are queued but nothing works them in these tests.
 	jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
@@ -37,7 +42,7 @@ func newAPIWithParser(t *testing.T, maxUploadBytes int64, parser parserv2.Parser
 		t.Fatal(err)
 	}
 	e := echo.New()
-	Register(e, NewServer(pool, jobs, parser, maxUploadBytes, testMailbox))
+	Register(e, NewServer(pool, jobs, parser, maxUploadBytes, testMailbox, faroURL))
 	return e, pool
 }
 
@@ -299,7 +304,7 @@ func TestTheMailFilterForwardsToTheDeploymentsMailbox(t *testing.T) {
 
 func TestTheMailFilterIsMissingWithoutAMailboxAddress(t *testing.T) {
 	e := echo.New()
-	Register(e, NewServer(nil, nil, nil, 1<<20, ""))
+	Register(e, NewServer(nil, nil, nil, 1<<20, "", ""))
 	recorder := get(t, e, "/api/mail-filters.xml")
 	if recorder.Code != http.StatusNotFound || !strings.Contains(decode[Problem](t, recorder).Message, "BACKEND_MAILBOX_ADDRESS") {
 		t.Fatalf("mail filter: %d %s", recorder.Code, recorder.Body)
@@ -311,5 +316,17 @@ func TestTheWebAppReadsTheDeploymentsSettingsRatherThanKeepingItsOwn(t *testing.
 	settings := decode[Settings](t, get(t, e, "/api/settings"))
 	if settings.MaxUploadBytes != 32<<20 || settings.SourceIntervalHours != 6 || settings.BaseCurrency != "TWD" {
 		t.Fatalf("settings = %+v", settings)
+	}
+}
+
+func TestTheWebAppSendsTelemetryOnlyWhereTheDeploymentSays(t *testing.T) {
+	e, _ := newAPI(t, 32<<20)
+	if url := decode[Settings](t, get(t, e, "/api/settings")).FaroUrl; url != nil {
+		t.Fatalf("faroUrl without BACKEND_FARO_URL = %q", *url)
+	}
+	const collector = "https://faro-collector.example/collect/key"
+	e, _ = newAPIWithFaro(t, 32<<20, nil, collector)
+	if url := decode[Settings](t, get(t, e, "/api/settings")).FaroUrl; url == nil || *url != collector {
+		t.Fatalf("faroUrl = %v, want %q", url, collector)
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 func TestTheContractIsServedAsJSON(t *testing.T) {
 	e := echo.New()
-	Register(e, NewServer(nil, nil, nil, 0, ""))
+	Register(e, NewServer(nil, nil, nil, 0, "", ""))
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/openapi.json", nil)
 	recorder := httptest.NewRecorder()

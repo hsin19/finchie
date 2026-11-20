@@ -1599,6 +1599,8 @@ export interface components {
             sourceIntervalHours: number;
             /** @description What every worth is in, e.g. TWD */
             baseCurrency: string;
+            /** @description Where the web app sends its own telemetry, a Grafana Faro collector (BACKEND_FARO_URL, ADR 0024); absent, it sends none */
+            faroUrl?: string;
         };
         Problem: {
             message: string;

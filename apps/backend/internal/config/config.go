@@ -35,6 +35,9 @@ type Config struct {
 	// The address the mailbox Worker receives statements at (ADR 0010). Only the Gmail filter
 	// download uses it (ADR 0014); it is the deployment's, never in the repository.
 	MailboxAddress string `env:"MAILBOX_ADDRESS"`
+	// Where the web app sends its own telemetry, a Grafana Faro collector (ADR 0024). Empty, the web
+	// app loads no telemetry at all.
+	FaroURL string `env:"FARO_URL"`
 	// Crypto exchanges' read-only API keys (ADR 0018). An exchange is fetched once all of its are set.
 	MaxAccessKey     string `env:"MAX_ACCESS_KEY"`
 	MaxSecretKey     string `env:"MAX_SECRET_KEY"`
