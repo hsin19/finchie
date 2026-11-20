@@ -64,5 +64,8 @@ class RapidOcr:
         if self._engine is None:
             from rapidocr import RapidOCR  # loads ONNX models; keep it off the import path
 
-            self._engine = RapidOCR()
+            # Statements print upright text: the angle classifier only ever turned some of it upside down
+            # (seen on synthetic strips), and on the real statements reading without it scored higher, a
+            # little faster, with the same parse.
+            self._engine = RapidOCR(params={"Global.use_cls": False})
         return self._engine
