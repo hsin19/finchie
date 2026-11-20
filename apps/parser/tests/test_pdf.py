@@ -1,3 +1,4 @@
+import io
 import threading
 import time
 
@@ -98,8 +99,17 @@ def test_pdfium_is_never_called_from_two_threads_at_once(monkeypatch: pytest.Mon
             calls.enter()
 
     class FakePdfium:
-        def __init__(self, data: bytes) -> None:
+        def __init__(self, data: bytes, password: str | None = None) -> None:
             calls.enter()
+            self._data = data
+
+        def __len__(self) -> int:
+            calls.enter()
+            return 1
+
+        def save(self, dest: io.BytesIO, flags: int = 0) -> None:
+            calls.enter()
+            dest.write(self._data)
 
         def __getitem__(self, index: int) -> FakePage:
             calls.enter()
@@ -109,12 +119,14 @@ def test_pdfium_is_never_called_from_two_threads_at_once(monkeypatch: pytest.Mon
             calls.enter()
 
     monkeypatch.setattr(pypdfium2, "PdfDocument", FakePdfium)
-    start = threading.Barrier(4)
+    # Cyclic: the threads decrypt together, then render together.
+    together = threading.Barrier(4)
 
     def parse_one() -> None:
+        together.wait()
         with one_pdf(blank_pdf()) as pdfs:
             document = pdfs.open(0, None)
-            start.wait()
+            together.wait()
             document.render(0, 1.0)
 
     threads = [threading.Thread(target=parse_one) for _ in range(4)]

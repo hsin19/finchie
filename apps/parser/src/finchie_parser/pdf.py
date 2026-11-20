@@ -13,8 +13,8 @@ from types import TracebackType
 from typing import Any, Protocol, Self
 
 import pdfplumber
-import pikepdf
 import pypdfium2
+import pypdfium2.raw as pdfium_c
 from pdfplumber.utils.exceptions import MalformedPDFException, PdfminerException
 from PIL.Image import Image
 
@@ -138,15 +138,21 @@ def decrypt(attachment: Attachment, passwords: Iterable[str]) -> bytes | None:
     lazily, and whatever it raises (MissingDetailError) passes through.
     """
     for password in passwords:
-        try:
-            with pikepdf.open(io.BytesIO(attachment.data), password=password) as pdf:
-                if len(pdf.pages) > MAX_PAGES:
+        with _PDFIUM:
+            try:
+                pdf = pypdfium2.PdfDocument(attachment.data, password=password)
+            except pypdfium2.PdfiumError as error:
+                if error.err_code == pdfium_c.FPDF_ERR_PASSWORD:
+                    continue
+                raise InvalidDocumentError(f"{attachment.filename}: unreadable PDF ({error})") from error
+            try:
+                if len(pdf) > MAX_PAGES:
                     raise InvalidDocumentError(f"{attachment.filename}: more than {MAX_PAGES} pages")
                 decrypted = io.BytesIO()
-                pdf.save(decrypted)
-        except pikepdf.PasswordError:
-            continue
-        except pikepdf.PdfError as error:
-            raise InvalidDocumentError(f"{attachment.filename}: unreadable PDF ({error})") from error
+                pdf.save(decrypted, flags=pdfium_c.FPDF_REMOVE_SECURITY)
+            except pypdfium2.PdfiumError as error:
+                raise InvalidDocumentError(f"{attachment.filename}: unreadable PDF ({error})") from error
+            finally:
+                pdf.close()
         return decrypted.getvalue()
     return None

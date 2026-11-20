@@ -13,7 +13,6 @@ dependencies = [
     "protobuf>=7.36.2",
     "googleapis-common-protos>=1.76.0",
     "pdfplumber>=0.11.10",
-    "pikepdf>=10.17.0",
     "pycountry>=24.6.1",
     "pydantic-settings>=2.16.2",
     "pypdfium2>=5.14.0",
@@ -30,6 +29,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "mypy==2.4.1",
+    # Builds the tests' encrypted PDFs; PDFium, which decrypts, cannot encrypt.
+    "pikepdf>=10.17.0",
     "pytest>=8.4.2",
     "ruff>=0.14.0",
 ]
@@ -82,5 +83,6 @@ module = [
     "google.protobuf.*",
     "pycountry",
     "pypdfium2",
+    "pypdfium2.*",
 ]
 ignore_missing_imports = true

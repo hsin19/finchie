@@ -378,7 +378,6 @@ dependencies = [
     { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "opentelemetry-sdk" },
     { name = "pdfplumber" },
-    { name = "pikepdf" },
     { name = "protobuf" },
     { name = "pycountry" },
     { name = "pydantic-settings" },
@@ -389,6 +388,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "pikepdf" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -407,7 +407,6 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-system-metrics", specifier = ">=0.66b2" },
     { name = "opentelemetry-sdk", specifier = ">=1.45.2" },
     { name = "pdfplumber", specifier = ">=0.11.10" },
-    { name = "pikepdf", specifier = ">=10.17.0" },
     { name = "protobuf", specifier = ">=7.36.2" },
     { name = "pycountry", specifier = ">=24.6.1" },
     { name = "pydantic-settings", specifier = ">=2.16.2" },
@@ -418,6 +417,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = "==2.4.1" },
+    { name = "pikepdf", specifier = ">=10.17.0" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "ruff", specifier = ">=0.14.0" },
 ]

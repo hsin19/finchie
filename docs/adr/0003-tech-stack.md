@@ -13,7 +13,7 @@ Finchie is a side project. Trying interesting technology and practising it is an
 | Background jobs | River | Durable jobs, retries, and periodic jobs stored in the same Postgres; no Redis or message broker |
 | RPC | gRPC (`grpc-go`, `grpcio`) with buf | One contract, code for both languages, breaking-change checks |
 | Parser language | Python 3.13 (3.14 since November 2026; the image and the tests' `.python-version` move together, by hand) | The best PDF and OCR tooling |
-| PDF | pikepdf (decrypt), pdfplumber (text and positions), pypdfium2 (render pages for OCR) | All pip-installable |
+| PDF | pikepdf (decrypt), pdfplumber (text and positions), pypdfium2 (render pages for OCR) (since November 2026 pypdfium2 decrypts too, and pikepdf only builds the tests' encrypted PDFs: it and lxml, which only it used, were about 30 MB of the image) | All pip-installable |
 | OCR | RapidOCR (ONNX runtime) | HSBC prints transaction descriptions as images. Reads Chinese and Latin text, needs no system packages; the image loads its models at build time |
 | Integration tests | testcontainers-go with the homelab's Postgres version | Tests run against real Postgres, not mocks |
 | Parser settings | pydantic-settings | Typed settings from environment variables |
