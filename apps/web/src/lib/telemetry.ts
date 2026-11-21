@@ -6,16 +6,30 @@ import type {
     Faro,
     TransportItem,
 } from "@grafana/faro-web-sdk";
-import { isHttpError } from "@sveltejs/kit";
+import {
+    isHttpError,
+    isRedirect,
+} from "@sveltejs/kit";
 
 let faro: Faro | undefined;
 let starting: Promise<void> | undefined;
 let route: string | null = null;
+// What fails while the SDK is still downloading, kept for it: the first page's loads race that download, and
+// the first page is where deferred loads fail. A few only; dropped once telemetry turns out to be off.
+let waiting: Error[] | undefined = [];
+const WAITING_LIMIT = 20;
+// One failure reaches several handlers: the layout's ledger and a page's own Settled share it.
+const reported = new WeakSet<object>();
 
 /** Starts telemetry once, if the deployment names a collector; only then is the SDK downloaded. */
 export function startTelemetry(url: string | undefined, app: { version: string; dev: boolean; }): Promise<void> {
-    if (!url) return Promise.resolve();
-    starting ??= start(url, app);
+    if (!url) {
+        waiting = undefined;
+        return Promise.resolve();
+    }
+    starting ??= start(url, app).catch(() => {
+        waiting = undefined;
+    });
     return starting;
 }
 
@@ -37,17 +51,33 @@ async function start(url: string, app: { version: string; dev: boolean; }) {
         beforeSend: scrub,
     });
     showRoute();
+    for (const error of waiting ?? []) faro.api.pushError(error);
+    waiting = undefined;
 }
 
-/** Errors the app catches itself and so never reach window.onerror: SvelteKit's, and deferred loads'. */
+/**
+ * Errors the app catches itself and so never reach window.onerror: SvelteKit's, and deferred loads'. Not a
+ * load's redirect, which Loaded follows, nor the API's 4xx (not there, the session ended), which is the API
+ * answering as it should; a 5xx is a fault.
+ */
 export function reportError(error: unknown): void {
-    faro?.api.pushError(asError(error));
+    if (isRedirect(error) || (isHttpError(error) && error.status < 500)) return;
+    if (typeof error === "object" && error !== null) {
+        if (reported.has(error)) return;
+        reported.add(error);
+    }
+    const sent = asError(error);
+    if (faro) faro.api.pushError(sent);
+    else if (waiting && waiting.length < WAITING_LIMIT) waiting.push(sent);
 }
 
 // A failed load's error(), from need(), is SvelteKit's HttpError: no Error, and no message of its own.
 function asError(error: unknown): Error {
     if (error instanceof Error) return error;
     if (isHttpError(error)) return new Error(`HTTP ${error.status}: ${error.body.message}`);
+    if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+        return new Error(error.message);
+    }
     return new Error(String(error));
 }
 
@@ -75,9 +105,16 @@ export function withoutQuery(text: string): string {
 }
 
 // The browser is known by name, version and system, which tell a phone from a desktop; the full user agent
-// string adds nothing to that but a fingerprint. A span's own query attribute goes with the URLs' queries.
+// string adds nothing to that but a fingerprint. A span's own query and fragment attributes go with the URLs'
+// (withoutQuery finds a fragment only after a path).
 const DROPPED_META = ["userAgent", "brands"];
-const DROPPED_ATTRIBUTES = new Set(["url.query", "user_agent.original", "http.user_agent", "browser.brands"]);
+const DROPPED_ATTRIBUTES = new Set([
+    "url.query",
+    "url.fragment",
+    "user_agent.original",
+    "http.user_agent",
+    "browser.brands",
+]);
 
 /** Faro's beforeSend: what an item may carry out of the browser. */
 export function scrub(item: TransportItem): TransportItem {

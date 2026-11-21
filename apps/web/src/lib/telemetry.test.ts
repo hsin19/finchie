@@ -63,11 +63,12 @@ describe("scrub", () => {
         expect(scrub(item({})).meta.browser).toEqual({ name: "Safari", version: "26.1", os: "iOS 26.1", mobile: true });
     });
 
-    it("strips a span's URL and drops its query and user agent attributes", () => {
+    it("strips a span's URL and drops its query, fragment and user agent attributes", () => {
         const payload = scrub(item(span([
             { key: "http.url", value: { stringValue: "https://finchie.test/api/transactions?query=rent" } },
             { key: "url.full", value: { stringValue: "https://finchie.test/api/transactions?query=rent" } },
             { key: "url.query", value: { stringValue: "query=rent" } },
+            { key: "url.fragment", value: { stringValue: "line-3" } },
             { key: "http.user_agent", value: { stringValue: "Mozilla/5.0" } },
             { key: "http.method", value: { stringValue: "GET" } },
         ]))).payload;
