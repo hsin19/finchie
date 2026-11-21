@@ -11,12 +11,12 @@ The web app reports on itself with Grafana Faro, to whatever Faro collector the 
 | SDK | `@grafana/faro-web-sdk` with its default instrumentations (errors and unhandled rejections, console warnings and errors, Web Vitals, sessions, fetch and XHR timings), and `@grafana/faro-web-tracing`. No session replay |
 | Version | `app.version` is the release (`$app/env`), as the backend's `service.version` is |
 | Traces | Requests to the app's own origin carry `traceparent`, so the backend's span, when its telemetry is on (ADR 0011), is a child of the browser's. Only the app's origin: the collector gets none |
-| Errors | Besides what reaches `window.onerror`: what SvelteKit catches (`handleError` in `hooks.client.ts`; not a framework error, which is an address with no route) and what a deferred load catches to show in place (`Settled`) |
+| Errors | Besides what reaches `window.onerror`: what SvelteKit catches (`handleError` in `hooks.client.ts`; not a framework error, which is an address with no route) and what a deferred load catches to show in place (`Settled`). Not a load's redirect, nor the API's 4xx (not there, the session ended): those are the app and the API working. Each failure once, however many places catch it; what fails while the SDK is still downloading, as the first page's loads can, waits for it (twenty at most) |
 | Pages | Named by route (`/statements/[id]`), as the backend names its spans, not by each statement's address |
 
 **What stays in the browser.** `scrub`, Faro's `beforeSend`, runs on everything before it leaves:
 
-- Every URL it finds, the page's, a span's URL attributes, resource timings, words in a message, loses its query and fragment, and a span's `url.query` attribute is dropped: they hold what the owner searched for and filtered by (every filter is in the URL).
+- Every URL it finds, the page's, a span's URL attributes, resource timings, words in a message, loses its query and fragment, and a span's `url.query` and `url.fragment` attributes are dropped: they hold what the owner searched for and filtered by (every filter is in the URL).
 - The browser goes as its name, version, system, and whether it is a phone. ADR 0011 keeps the browser out of the backend's logs, where it tells nothing about a request; here, telling the phone from the desktop is much of the point. The full user agent string and its brands stay in the browser.
 
 Where it all goes is the deployment's choice of collector. Grafana Cloud's Frontend Observability, the one in use, also sees the browser's address. A deployment that wants no third party, as ADR 0007 wanted for fonts, names a receiver of its own instead.
