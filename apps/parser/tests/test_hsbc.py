@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
-import pytest
 from fakes import FakeDocument, account, baseline, card, card_detail, card_lines, check
 
 from finchie_parser.model import AccountKind, Balance, CardBill, Expiry, LapseRule, LineKind, Statement
@@ -177,9 +176,15 @@ def test_hsbc_classifies_plain_rows_by_the_words_in_their_description() -> None:
     assert check(statement, NEW_CHARGES).computed == Decimal(2232)
 
 
-@pytest.mark.parametrize("ocr", [None, LineOcr({1: dict.fromkeys(CHARGES_OCR[1], "#?!")})], ids=["no OCR", "noisy"])
-def test_hsbc_without_readable_words_keeps_payments_and_foreign_transaction_fees(ocr: LineOcr | None) -> None:
-    statement = parse_charges(ocr)
+def test_hsbc_counts_a_new_charge_without_country_or_fee_words_as_a_purchase_at_home() -> None:
+    # A purchase in Taiwan prints no country or currency, like a foreign transaction fee; only the fee says so.
+    ocr = LineOcr({1: CHARGES_OCR[1] | {10: "綠界-全鋒機場接送TAIPEITWN"}})
+    home = card_lines(parse_charges(ocr))[-1]
+    assert (home.description, home.kind, home.amount) == ("綠界-全鋒機場接送TAIPEITWN", LineKind.PURCHASE, Decimal(32))
+
+
+def test_hsbc_without_ocr_keeps_payments_and_foreign_transaction_fees() -> None:
+    statement = parse_charges(None)
     assert [line.kind for line in card_lines(statement)] == [LineKind.PAYMENT] * 2 + [
         LineKind.FOREIGN_TRANSACTION_FEE
     ] * 5

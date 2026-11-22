@@ -26,7 +26,7 @@ _FX_ROW = re.compile(
     rf" ?(?P<orig>{AMOUNT}) \d\d/\d\d (?P<amt>{INTEGER})$",
     re.ASCII,
 )
-# Fees, payments, and the annual fee: no country or currency.
+# Fees, payments, the annual fee, and purchases in Taiwan: no country or currency.
 _PLAIN_ROW = re.compile(rf"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<amt>{INTEGER})$", re.ASCII)
 # An amount alone on a line or in a box: the statement's unlabelled figures.
 _FIGURE = token(INTEGER)
@@ -146,7 +146,10 @@ def _plain_kind(description: str, value: Decimal, new_charge: bool) -> LineKind:
         return kind
     if is_charge(description):
         return by_sign(value)
-    # No such word (OCR off or too noisy): what nearly every plain row is, a payment or a foreign transaction fee.
+    # A fee says 國外交易手續費, so a new charge described otherwise is a purchase in Taiwan.
+    if new_charge and description:
+        return by_sign(value)
+    # No description (OCR off or it missed the row): what nearly every plain row is, a payment or a fee.
     if not new_charge and value < 0:
         return LineKind.PAYMENT
     return LineKind.FOREIGN_TRANSACTION_FEE
