@@ -104,6 +104,16 @@ def test_hsbc_maps_countries_and_foreign_amounts() -> None:
     assert by_description["RefundTaxFreeShop"].country == "DE"
 
 
+def test_hsbc_reads_a_row_whose_currency_runs_into_its_amount() -> None:
+    # A wide foreign amount leaves no gap after the currency in the text layer: KRW15,718.00.
+    page = PAGE_2.replace("JPN JPY 10,000.00", "JPN JPY10,000.00")
+    statement = card(HsbcParser().parse(FakeDocument([PAGE_1, page]), ocr=LineOcr(OCR)))
+    ramen = {line.description: line for line in card_lines(statement)}["RAMENSHOPTOKYO"]
+    assert ramen.amount == Decimal(2100)
+    assert (card_detail(ramen).original_currency, card_detail(ramen).original_amount) == ("JPY", Decimal("10000.00"))
+    assert check(statement, NEW_CHARGES).balanced
+
+
 def test_hsbc_without_ocr_still_reconciles_and_warns() -> None:
     parsed = parse(None)
     assert card(parsed).balanced

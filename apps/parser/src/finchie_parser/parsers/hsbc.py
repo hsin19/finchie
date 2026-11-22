@@ -19,9 +19,11 @@ from finchie_parser.text import AMOUNT, CURRENCY, INTEGER, ISO_DATE, amount, iso
 # HSBC renders every label and every transaction description as an image; the text layer only
 # carries dates and numbers. Page 1 lists the due date first, then the closing date.
 _P1_DATE = re.compile(rf"^({ISO_DATE}) ", re.ASCII)
+# A wide foreign amount leaves no gap after the currency (KRW15,718.00), and a row that matches neither
+# pattern is lost, showing only as an unbalanced check.
 _FX_ROW = re.compile(
     rf"^(?P<date>\d\d/\d\d) (?P<posted>\d\d/\d\d) (?P<country>{CURRENCY}) (?P<cur>{CURRENCY})"
-    rf" (?P<orig>{AMOUNT}) \d\d/\d\d (?P<amt>{INTEGER})$",
+    rf" ?(?P<orig>{AMOUNT}) \d\d/\d\d (?P<amt>{INTEGER})$",
     re.ASCII,
 )
 # Fees, payments, and the annual fee: no country or currency.
@@ -60,7 +62,7 @@ class _Row:
 
 class HsbcParser(StatementParser):
     name = "hsbc.credit_card"
-    version = "6"
+    version = "7"
     institution = "hsbc"
     # 115年10月滙豐旅人無限卡信用卡帳單: the card's name is in the subject.
     sender_domains = ("hsbc.com.tw",)
