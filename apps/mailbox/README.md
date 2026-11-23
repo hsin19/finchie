@@ -40,7 +40,7 @@ until then Gmail's confirmation bounces instead of reaching the owner.
 
 ```bash
 task mailbox:install
-task mailbox:check     # dprint, tsc, tests, and a bundle (wrangler deploy --dry-run)
+task mailbox:check     # dprint, ESLint, tsc, tests, and a bundle (wrangler deploy --dry-run)
 task mailbox:deploy    # by hand; `pnpm exec wrangler login` once first
 ```
 

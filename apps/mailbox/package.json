@@ -7,14 +7,19 @@
   "scripts": {
     "format": "dprint fmt",
     "format:check": "dprint check",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261112.1",
+    "@eslint/js": "^10.0.1",
     "dprint": "^0.64.3",
-    "typescript": "^7.0.2",
+    "eslint": "^10.15.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.0",
     "wrangler": "^4.161.0"
   }
