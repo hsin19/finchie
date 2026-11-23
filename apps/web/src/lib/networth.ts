@@ -1,7 +1,10 @@
 // What the owner has less what they owe (ADR 0022), on a day and over time (ADR 0023): worked out by the
 // backend; this is how the accounts page shows it.
 
-import { accountStatus } from "#lib/accounts.js";
+import {
+    accountName,
+    accountStatus,
+} from "#lib/accounts.js";
 import type {
     Account,
     NetWorth,
@@ -13,6 +16,7 @@ import {
     monthOf,
     shiftMonth,
 } from "#lib/dates.js";
+import { institution } from "#lib/institutions.js";
 import {
     approx,
     subtract,
@@ -26,6 +30,24 @@ import {
  */
 export function overdueBehind(netWorth: Pick<NetWorth, "behind">, accounts: readonly Account[], today: string): Account[] {
     return accounts.filter(a => netWorth.behind.includes(a.id) && accountStatus(a, today).stale);
+}
+
+const MAX_NAMED_BEHIND = 3;
+
+/**
+ * Why a point on a trend is an estimate: names the accounts still to report when there are at most
+ * three, or says how many there are.
+ */
+export function behindNote(behindIds: readonly number[], accounts: readonly Account[]): string {
+    if (behindIds.length === 0) return "估計：還有帳戶沒回報到這天";
+    if (behindIds.length > MAX_NAMED_BEHIND) return `估計：還有 ${behindIds.length} 個帳戶沒回報到這天`;
+    const byId = new Map(accounts.map(a => [a.id, a]));
+    const names = behindIds
+        .map(id => byId.get(id))
+        .filter((a): a is Account => a !== undefined)
+        .map(a => `${institution(a.institution).name} ${accountName(a)}`);
+    if (names.length === 0) return `估計：還有 ${behindIds.length} 個帳戶沒回報到這天`;
+    return `估計：${names.join("、")} 還沒回報到這天`;
 }
 
 /** The trend's query: each month end of the last year, and `today`. */

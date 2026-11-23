@@ -17,6 +17,7 @@ const point = (on: string, worth: string, invested: string): InvestmentPoint => 
     unvalued: 0,
     unpriced: 0,
     complete: true,
+    behind: [],
 });
 
 describe("investmentQuery", () => {

@@ -44,6 +44,8 @@ type Invested struct {
 	Unvalued, Unpriced int
 	// Every opened account had reported by the day (CompleteAsOf): the figure is exact.
 	Complete bool
+	// Opened accounts whose newest report is older than the day.
+	Behind []int64
 }
 
 // InvestedOver works out the investments on each day of a series, oldest first, from every account's
@@ -122,6 +124,7 @@ func InvestedOver(days []time.Time, worths [][]Worth, flows []Flow) []Invested {
 		}
 		complete := CompleteAsOf(held)
 		point.Complete = !complete.IsZero() && !day.After(complete)
+		point.Behind = Behind(day, held)
 		series = append(series, point)
 	}
 	return series

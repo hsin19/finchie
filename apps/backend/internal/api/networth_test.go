@@ -75,12 +75,15 @@ func TestNetWorthOnADayIsEachAccountThenAtThatDaysPrices(t *testing.T) {
 	}
 	// The owner confirms the dollars have not moved: they stand through today, until the day to look again.
 	dollars := accountNamed(t, decode[[]Account](t, get(t, e, "/api/accounts")), "7777777***777")
+	if !slices.Equal(history[2].Behind, []int64{dollars.Id}) || len(history[0].Behind) != 0 || len(history[1].Behind) != 0 {
+		t.Fatalf("behind = %v, %v, %v; want only dollars on 9/30", history[0].Behind, history[1].Behind, history[2].Behind)
+	}
 	if got := patch(t, e, fmt.Sprintf("/api/accounts/%d", dollars.Id), `{"checkAgainOn": "2099-01-01"}`); got.Code != http.StatusNoContent {
 		t.Fatalf("confirm: %d %s", got.Code, got.Body)
 	}
 	history = decode[[]NetWorthPoint](t, get(t, e, "/api/net-worth/history?from=2026-07-15&to=2026-09-30"))
-	if !history[len(history)-1].Complete {
-		t.Fatalf("after confirming: %+v, want 9/30 exact", history[len(history)-1])
+	if !history[len(history)-1].Complete || len(history[len(history)-1].Behind) != 0 {
+		t.Fatalf("after confirming: %+v, want 9/30 exact with no behind", history[len(history)-1])
 	}
 	if n := decode[NetWorth](t, get(t, e, "/api/net-worth")); slices.Contains(n.Behind, dollars.Id) {
 		t.Fatalf("behind = %v: a confirmed account is current", n.Behind)

@@ -1463,6 +1463,8 @@ export interface components {
             unvalued: number;
             /** @description Every account had reported by the day: the figure is exact */
             complete: boolean;
+            /** @description Accounts whose newest report is older than the day */
+            behind: number[];
         };
         InvestmentPoint: {
             /** Format: date */
@@ -1481,6 +1483,8 @@ export interface components {
             unpriced: number;
             /** @description Every account had reported by the day. What went in may still hold estimates: what crossed before Finchie had a price for it is at the first one */
             complete: boolean;
+            /** @description Accounts whose newest report is older than the day */
+            behind: number[];
         };
         KindWorth: {
             kind: components["schemas"]["AccountKind"];
