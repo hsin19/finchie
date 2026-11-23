@@ -164,3 +164,26 @@ func TestAnExchangeIsAnInvestmentFromTheDayARateStoredAtMidnightFirstPricesIt(t 
 		t.Fatalf("points = %+v, want from 11/06 worth 320", points)
 	}
 }
+
+func TestAnInvestmentsPointPastAnAccountsNewestReportNamesItAsBehind(t *testing.T) {
+	e, pool := newAPI(t, 1<<20)
+	rate(t, pool, "2026-11-01", "USDT", "0.03125")
+	at := taipei.At(time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC), 10, 0)
+	snapshot := exchanges.Snapshot{Holdings: map[string]*big.Rat{"USDT": big.NewRat(10, 1)}}
+	if err := exchanges.Store(t.Context(), pool, "bitget", at, snapshot, exchanges.History{}); err != nil {
+		t.Fatal(err)
+	}
+	bitget := decode[[]Account](t, get(t, e, "/api/accounts"))[0]
+
+	points := decode[[]InvestmentPoint](t, get(t, e, "/api/investments/history?from=2026-11-06&to=2026-11-07&step=day"))
+	if len(points) != 2 {
+		t.Fatalf("points = %+v, want 11/06 and 11/07", points)
+	}
+	// Behind is [] when none is, never null: the web reads its length.
+	if !points[0].Complete || points[0].Behind == nil || len(points[0].Behind) != 0 {
+		t.Fatalf("11/06 = %+v, want exact with behind []", points[0])
+	}
+	if points[1].Complete || !slices.Equal(points[1].Behind, []int64{bitget.Id}) {
+		t.Fatalf("11/07 = %+v, want an estimate behind on bitget (%d)", points[1], bitget.Id)
+	}
+}

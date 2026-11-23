@@ -1,14 +1,20 @@
 <script lang="ts">
-import type { NetWorthPoint } from "#lib/api/client.js";
+import type {
+    Account,
+    NetWorthPoint,
+} from "#lib/api/client.js";
 import ViewSwitch from "#lib/components/ViewSwitch.svelte";
 import { formatAmount } from "#lib/money.js";
-import { trendColumns } from "#lib/networth.js";
+import {
+    behindNote,
+    trendColumns,
+} from "#lib/networth.js";
 
 /**
  * Net worth at each month end and today (ADR 0023), as columns around zero, or as a table. A point
  * before every account had reported is an estimate: drawn fainter, and said so.
  */
-let { points }: { points: NetWorthPoint[]; } = $props();
+let { points, accounts = [] }: { points: NetWorthPoint[]; accounts?: readonly Account[]; } = $props();
 
 let view = $state<"chart" | "table">("chart");
 let active = $state<number>();
@@ -61,14 +67,14 @@ function label(on: string, i: number): string {
                 {@const right = active < points.length / 2}
                 <div
                     role="tooltip"
-                    class="pointer-events-none absolute top-0 z-10 min-w-44 rounded-[6px] border border-line-strong bg-ground px-3 py-2 text-[12px] shadow-lg {right ? '' : '-translate-x-full'}"
+                    class="pointer-events-none absolute top-0 z-10 min-w-44 max-w-64 rounded-[6px] border border-line-strong bg-ground px-3 py-2 text-[12px] shadow-lg {right ? '' : '-translate-x-full'}"
                     style:left="calc(100% * {(active + (right ? 1 : 0)) / points.length} {right ? '+' : '-'} 4px)"
                 >
                     <div class="mb-1 flex justify-between gap-4"><span class="text-ink-bright">{point.on}</span><span class="text-ink-bright">{formatAmount(point.net)}</span></div>
                     <div class="flex justify-between gap-4 text-dim"><span>資產</span><span class="tabular-nums">{formatAmount(point.assets)}</span></div>
                     <div class="flex justify-between gap-4 text-dim"><span>負債</span><span class="tabular-nums">{formatAmount(point.liabilities)}</span></div>
                     {#if point.unvalued > 0}<div class="text-mute">{point.unvalued} 個帳戶沒有價格，不計</div>{/if}
-                    {#if !point.complete}<div class="mt-1 text-accent">估計：還有帳戶沒回報到這天</div>{/if}
+                    {#if !point.complete}<div class="mt-1 text-accent">{behindNote(point.behind, accounts)}</div>{/if}
                 </div>
             {/if}
         </div>

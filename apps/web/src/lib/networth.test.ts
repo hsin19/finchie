@@ -8,6 +8,7 @@ import {
     it,
 } from "vitest";
 import {
+    behindNote,
     netWorthChange,
     overdueBehind,
     trendColumns,
@@ -29,7 +30,7 @@ const reported = (id: number, asOf: string, overdue = false): Account => ({
     excused: false,
     freshFor: 50,
 });
-const point = (on: string, net: string, complete = true): NetWorthPoint => ({ on, assets: "0", liabilities: "0", net, unvalued: 0, complete });
+const point = (on: string, net: string, complete = true): NetWorthPoint => ({ on, assets: "0", liabilities: "0", net, unvalued: 0, complete, behind: [] });
 
 describe("overdueBehind", () => {
     it("names only the accounts behind the figure that are overdue", () => {
@@ -41,6 +42,33 @@ describe("overdueBehind", () => {
 
     it("names none that is not behind, however old", () => {
         expect(overdueBehind({ behind: [] }, [reported(1, "2026-09-12", true)], "2026-11-11")).toEqual([]);
+    });
+});
+
+describe("behindNote", () => {
+    const accounts: Account[] = [
+        { ...reported(1, "2026-10-31"), institution: "cathay", name: "薪轉" },
+        { ...reported(2, "2026-10-31"), name: "活存" },
+        { ...reported(3, "2026-10-31"), name: "外幣" },
+        { ...reported(4, "2026-10-31"), name: "定存" },
+    ];
+
+    it("names the accounts, in the order given, when there are at most three", () => {
+        expect(behindNote([1], accounts)).toBe("估計：國泰 薪轉 還沒回報到這天");
+        expect(behindNote([3, 1, 2], accounts)).toBe("估計：玉山 外幣、國泰 薪轉、玉山 活存 還沒回報到這天");
+    });
+
+    it("gives the count when there are more than three", () => {
+        expect(behindNote([1, 2, 3, 4], accounts)).toBe("估計：還有 4 個帳戶沒回報到這天");
+    });
+
+    it("gives the count when the page does not know one of them, rather than leave it out", () => {
+        expect(behindNote([1, 9], accounts)).toBe("估計：還有 2 個帳戶沒回報到這天");
+        expect(behindNote([9], accounts)).toBe("估計：還有 1 個帳戶沒回報到這天");
+    });
+
+    it("falls back to a generic note when none are given", () => {
+        expect(behindNote([], accounts)).toBe("估計：還有帳戶沒回報到這天");
     });
 });
 

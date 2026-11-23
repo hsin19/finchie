@@ -863,6 +863,9 @@ type HoldingsUpdate struct {
 
 // InvestmentPoint defines model for InvestmentPoint.
 type InvestmentPoint struct {
+	// Behind Accounts whose newest report is older than the day
+	Behind []int64 `json:"behind"`
+
 	// Complete Every account had reported by the day. What went in may still hold estimates: what crossed before Finchie had a price for it is at the first one
 	Complete bool `json:"complete"`
 
@@ -997,6 +1000,9 @@ type NetWorthPoint struct {
 	//
 	// Example: 1234.50
 	Assets Decimal `json:"assets"`
+
+	// Behind Accounts whose newest report is older than the day
+	Behind []int64 `json:"behind"`
 
 	// Complete Every account had reported by the day: the figure is exact
 	Complete bool `json:"complete"`

@@ -69,12 +69,19 @@ func Net(day time.Time, accounts []Worth) NetWorth {
 	}
 	n.Net = new(big.Rat).Add(n.Assets, n.Liabilities)
 	n.CompleteAsOf = CompleteAsOf(accounts)
+	n.Behind = Behind(day, accounts)
+	return n
+}
+
+// Behind lists the accounts whose newest report is older than day (among those that count for CompleteAsOf).
+func Behind(day time.Time, accounts []Worth) []int64 {
+	var behind []int64
 	for _, a := range accounts {
 		if counts(a) && a.Newest.Before(day) {
-			n.Behind = append(n.Behind, a.AccountID)
+			behind = append(behind, a.AccountID)
 		}
 	}
-	return n
+	return behind
 }
 
 // CompleteAsOf is the newest day on which every account had reported (ADR 0023): sources report on days

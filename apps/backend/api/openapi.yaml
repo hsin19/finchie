@@ -1665,7 +1665,7 @@ components:
 
     NetWorthPoint:
       type: object
-      required: ["on", assets, liabilities, net, unvalued, complete]
+      required: ["on", assets, liabilities, net, unvalued, complete, behind]
       properties:
         "on": { type: string, format: date }
         assets: { $ref: "#/components/schemas/Decimal" }
@@ -1673,10 +1673,14 @@ components:
         net: { $ref: "#/components/schemas/Decimal" }
         unvalued: { type: integer }
         complete: { type: boolean, description: "Every account had reported by the day: the figure is exact" }
+        behind:
+          type: array
+          description: Accounts whose newest report is older than the day
+          items: { type: integer, format: int64 }
 
     InvestmentPoint:
       type: object
-      required: ["on", worth, invested, gain, unvalued, unpriced, complete]
+      required: ["on", worth, invested, gain, unvalued, unpriced, complete, behind]
       properties:
         "on": { type: string, format: date }
         worth: { allOf: [{ $ref: "#/components/schemas/Decimal" }], description: "What the accounts with a worth on the day are worth" }
@@ -1686,6 +1690,10 @@ components:
         unvalued: { type: integer, description: "Accounts without a worth on the day, left out of worth and invested" }
         unpriced: { type: integer, description: "Coins or currencies that crossed in or out and have never had a price in NT$, left out of invested" }
         complete: { type: boolean, description: "Every account had reported by the day. What went in may still hold estimates: what crossed before Finchie had a price for it is at the first one" }
+        behind:
+          type: array
+          description: Accounts whose newest report is older than the day
+          items: { type: integer, format: int64 }
 
     KindWorth:
       type: object

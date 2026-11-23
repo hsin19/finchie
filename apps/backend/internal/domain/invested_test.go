@@ -144,4 +144,7 @@ func TestAnInvestmentsFigureIsExactUpToTheOldestOfItsAccountsNewestReports(t *te
 	if !series[0].Complete || series[1].Complete {
 		t.Fatalf("complete = %v, %v; want exact on 11/01 only", series[0].Complete, series[1].Complete)
 	}
+	if len(series[0].Behind) != 0 || fmt.Sprint(series[1].Behind) != "[1]" {
+		t.Fatalf("behind = %v, %v; want [], [1]", series[0].Behind, series[1].Behind)
+	}
 }

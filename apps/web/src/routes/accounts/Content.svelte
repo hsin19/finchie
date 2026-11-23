@@ -167,7 +167,7 @@ function href(account: Account) {
         {/each}
     </div>
     <!-- Sources report on days of their own (ADR 0023): the figure is always an estimate for some of them
-         (≈), and only one overdue is worth a word. -->
+         (≈), and only one overdue is worth a word here; the trends' points name the rest when the owner asks. -->
     {#if overdue.length > 0}
         <div class="text-[12px] text-mute">
             {overdue.length} 個帳戶太久沒更新，淨額用的是它們最後一次的餘額 ·
@@ -177,14 +177,14 @@ function href(account: Account) {
 </section>
 
 {#if data.history}
-    <NetWorthTrend points={data.history} />
+    <NetWorthTrend points={data.history} accounts={data.accounts} />
 {:else if data.historyError}
     <p class="m-0 text-[12px] text-mute">讀不到淨額走勢：{data.historyError}</p>
 {/if}
 
 <!-- Nothing to say for an owner without securities or exchange accounts. -->
 {#if data.investments && data.investments.length > 0}
-    <InvestmentTrend points={data.investments} />
+    <InvestmentTrend points={data.investments} accounts={data.accounts} />
 {:else if data.investmentsError}
     <p class="m-0 text-[12px] text-mute">讀不到投資走勢：{data.investmentsError}</p>
 {/if}

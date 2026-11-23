@@ -70,6 +70,7 @@ func (s *Server) GetNetWorthHistory(ctx context.Context, request GetNetWorthHist
 			On: openapi_types.Date{Time: day}, Assets: numeric.Cents(n.Assets), Liabilities: numeric.Cents(n.Liabilities),
 			Net: numeric.Cents(n.Net), Unvalued: n.Unvalued,
 			Complete: !n.CompleteAsOf.IsZero() && !day.After(n.CompleteAsOf),
+			Behind:   append([]int64{}, n.Behind...),
 		})
 	}
 	return points, nil

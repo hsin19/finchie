@@ -1,5 +1,8 @@
 <script lang="ts">
-import type { InvestmentPoint } from "#lib/api/client.js";
+import type {
+    Account,
+    InvestmentPoint,
+} from "#lib/api/client.js";
 import ViewSwitch from "#lib/components/ViewSwitch.svelte";
 import {
     investmentLines,
@@ -9,18 +12,21 @@ import {
     formatAmount,
     roundWhole,
 } from "#lib/money.js";
+import { behindNote } from "#lib/networth.js";
 import { signTone } from "#lib/tone.js";
 
 /**
  * What securities and exchange accounts are worth against what went into them, by day, as two lines or
  * as a table: all of them, or one of a kind on its page. What went into an exchange is every deposit and
  * withdrawal it reported; into a securities account, its worth on its first day here, then its trades'
- * money. A day before every account had reported is an estimate.
+ * money. A day before every account had reported is an estimate, and names those still to report.
  */
-let { points, kind }: {
+let { points, kind, accounts = [] }: {
     points: InvestmentPoint[];
     /** One account's, of this kind; all of them when absent. */
     kind?: "securities" | "exchange";
+    /** To name the accounts behind a point; not needed for one account's. */
+    accounts?: readonly Account[];
 } = $props();
 
 let view = $state<"chart" | "table">("chart");
@@ -85,7 +91,7 @@ const percent = (p: InvestmentPoint) => (p.returnPercent === undefined ? "—" :
                     {@const right = active < points.length / 2}
                     <div
                         role="tooltip"
-                        class="pointer-events-none absolute top-0 z-10 min-w-44 rounded-[6px] border border-line-strong bg-ground px-3 py-2 text-[12px] shadow-lg {right ? '' : '-translate-x-full'}"
+                        class="pointer-events-none absolute top-0 z-10 min-w-44 max-w-64 rounded-[6px] border border-line-strong bg-ground px-3 py-2 text-[12px] shadow-lg {right ? '' : '-translate-x-full'}"
                         style:left="calc({investmentX(active, points.length)}% {right ? '+' : '-'} 8px)"
                     >
                         <div class="mb-1 text-ink-bright">{point.on}</div>
@@ -95,7 +101,7 @@ const percent = (p: InvestmentPoint) => (p.returnPercent === undefined ? "—" :
                         <div class="flex justify-between gap-4 {signTone(point.gain)}"><span>報酬率</span><span class="tabular-nums">{percent(point)}</span></div>
                         {#if point.unvalued > 0}<div class="text-mute">{point.unvalued} 個帳戶沒有價格，兩邊都不計</div>{/if}
                         {#if point.unpriced > 0}<div class="text-mute">{point.unpriced} 筆轉入轉出沒有價格，不計</div>{/if}
-                        {#if !point.complete}<div class="mt-1 text-accent">估計：還有帳戶沒回報到這天</div>{/if}
+                        {#if !point.complete}<div class="mt-1 text-accent">{kind ? "估計：這個帳戶還沒回報到這天" : behindNote(point.behind, accounts)}</div>{/if}
                     </div>
                 {/if}
             </div>

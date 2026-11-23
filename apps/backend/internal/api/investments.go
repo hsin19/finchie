@@ -70,6 +70,7 @@ func (s *Server) GetInvestmentHistory(ctx context.Context, request GetInvestment
 		point := InvestmentPoint{
 			On: openapi_types.Date{Time: p.Day}, Worth: numeric.Cents(p.Worth), Invested: numeric.Cents(p.Invested),
 			Gain: numeric.Cents(p.Gain), Unvalued: p.Unvalued, Unpriced: p.Unpriced, Complete: p.Complete,
+			Behind: append([]int64{}, p.Behind...),
 		}
 		if p.Return != nil {
 			percent := numeric.Cents(new(big.Rat).Mul(p.Return, big.NewRat(100, 1)))
