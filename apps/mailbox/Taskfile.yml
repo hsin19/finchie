@@ -12,9 +12,10 @@ tasks:
       - pnpm run format
 
   lint:
-    desc: dprint and the TypeScript compiler
+    desc: dprint, ESLint, and the TypeScript compiler
     cmds:
       - pnpm run format:check
+      - pnpm run lint
       - pnpm run typecheck
 
   test:

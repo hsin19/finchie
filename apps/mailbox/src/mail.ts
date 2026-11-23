@@ -126,6 +126,7 @@ export function decodeHeader(value: string): string {
 /** The uploaded file's name: the e-mail's subject, made safe for a file name, ending in ".eml". */
 export function filename(subject: string | null, received: Date): string {
     const name = decodeHeader(subject ?? "")
+        // eslint-disable-next-line no-control-regex -- control characters are what this keeps out of file names
         .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
         .replace(/\s+/g, " ")
         .trim()

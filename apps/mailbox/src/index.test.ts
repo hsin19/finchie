@@ -45,7 +45,7 @@ afterEach(() => {
 
 describe("mailbox", () => {
     it("uploads mail forwarded by the owner, as an .eml with the service token", async () => {
-        const fetch = vi.fn(async (_url: URL, _init: RequestInit) => new Response("{}", { status: 201 }));
+        const fetch = vi.fn<(url: URL, init: RequestInit) => Promise<Response>>(async () => new Response("{}", { status: 201 }));
         vi.stubGlobal("fetch", fetch);
         const { msg, sent } = message("owner+caf_=finchie=example.com@gmail.com", { subject: "Example Bank statement" });
 
@@ -132,7 +132,7 @@ describe("mailbox", () => {
     });
 
     it("uploads mail whose subject does not decode", async () => {
-        const fetch = vi.fn(async (_url: URL, _init: RequestInit) => new Response("{}", { status: 201 }));
+        const fetch = vi.fn<(url: URL, init: RequestInit) => Promise<Response>>(async () => new Response("{}", { status: 201 }));
         vi.stubGlobal("fetch", fetch);
         const { msg, sent } = message("owner@gmail.com", { subject: "=?UTF-8?B?a?=" });
 
