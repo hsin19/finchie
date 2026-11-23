@@ -31,7 +31,7 @@ const layout = $derived(accountPage(account));
 <Gaps {account} explanation={layout.gaps} />
 
 {#if data.invested}
-    <InvestmentTrend points={data.invested} kind={account.kind === "exchange" ? "exchange" : "securities"} accounts={[account]} />
+    <InvestmentTrend points={data.invested} kind={account.kind === "exchange" ? "exchange" : "securities"} />
 {:else if data.investedError}
     <p class="m-0 text-[12px] text-mute">讀不到投資走勢：{data.investedError}</p>
 {/if}

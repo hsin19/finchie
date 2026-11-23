@@ -19,12 +19,13 @@ import { signTone } from "#lib/tone.js";
  * What securities and exchange accounts are worth against what went into them, by day, as two lines or
  * as a table: all of them, or one of a kind on its page. What went into an exchange is every deposit and
  * withdrawal it reported; into a securities account, its worth on its first day here, then its trades'
- * money. A day before every account had reported is an estimate.
+ * money. A day before every account had reported is an estimate, and names those still to report.
  */
 let { points, kind, accounts = [] }: {
     points: InvestmentPoint[];
     /** One account's, of this kind; all of them when absent. */
     kind?: "securities" | "exchange";
+    /** To name the accounts behind a point; not needed for one account's. */
     accounts?: readonly Account[];
 } = $props();
 
@@ -100,7 +101,7 @@ const percent = (p: InvestmentPoint) => (p.returnPercent === undefined ? "—" :
                         <div class="flex justify-between gap-4 {signTone(point.gain)}"><span>報酬率</span><span class="tabular-nums">{percent(point)}</span></div>
                         {#if point.unvalued > 0}<div class="text-mute">{point.unvalued} 個帳戶沒有價格，兩邊都不計</div>{/if}
                         {#if point.unpriced > 0}<div class="text-mute">{point.unpriced} 筆轉入轉出沒有價格，不計</div>{/if}
-                        {#if !point.complete}<div class="mt-1 text-accent">{behindNote(point.behind, accounts)}</div>{/if}
+                        {#if !point.complete}<div class="mt-1 text-accent">{kind ? "估計：這個帳戶還沒回報到這天" : behindNote(point.behind, accounts)}</div>{/if}
                     </div>
                 {/if}
             </div>

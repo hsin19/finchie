@@ -46,15 +46,25 @@ describe("overdueBehind", () => {
 });
 
 describe("behindNote", () => {
-    const accounts = [1, 2, 3, 4].map(id => reported(id, "2026-10-31"));
+    const accounts: Account[] = [
+        { ...reported(1, "2026-10-31"), institution: "cathay", name: "薪轉" },
+        { ...reported(2, "2026-10-31"), name: "活存" },
+        { ...reported(3, "2026-10-31"), name: "外幣" },
+        { ...reported(4, "2026-10-31"), name: "定存" },
+    ];
 
-    it("names the accounts when there are at most three", () => {
-        expect(behindNote([1], accounts)).toBe("估計：玉山 存款 還沒回報到這天");
-        expect(behindNote([1, 2, 3], accounts)).toBe("估計：玉山 存款、玉山 存款、玉山 存款 還沒回報到這天");
+    it("names the accounts, in the order given, when there are at most three", () => {
+        expect(behindNote([1], accounts)).toBe("估計：國泰 薪轉 還沒回報到這天");
+        expect(behindNote([3, 1, 2], accounts)).toBe("估計：玉山 外幣、國泰 薪轉、玉山 活存 還沒回報到這天");
     });
 
     it("gives the count when there are more than three", () => {
         expect(behindNote([1, 2, 3, 4], accounts)).toBe("估計：還有 4 個帳戶沒回報到這天");
+    });
+
+    it("gives the count when the page does not know one of them, rather than leave it out", () => {
+        expect(behindNote([1, 9], accounts)).toBe("估計：還有 2 個帳戶沒回報到這天");
+        expect(behindNote([9], accounts)).toBe("估計：還有 1 個帳戶沒回報到這天");
     });
 
     it("falls back to a generic note when none are given", () => {

@@ -167,7 +167,7 @@ function href(account: Account) {
         {/each}
     </div>
     <!-- Sources report on days of their own (ADR 0023): the figure is always an estimate for some of them
-         (≈), and only one overdue is worth a word. -->
+         (≈), and only one overdue is worth a word here; the trends' points name the rest when the owner asks. -->
     {#if overdue.length > 0}
         <div class="text-[12px] text-mute">
             {overdue.length} 個帳戶太久沒更新，淨額用的是它們最後一次的餘額 ·
