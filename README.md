@@ -1,5 +1,7 @@
 # Finchie
 
+[![codecov](https://codecov.io/gh/hsin19/finchie/branch/main/graph/badge.svg)](https://codecov.io/gh/hsin19/finchie)
+
 Finchie = Finance + Finch
 
 A self-hosted personal finance platform. It turns bank and credit card statements into a ledger and tracks investments, so you can see where your money goes and where you stand.

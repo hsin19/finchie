@@ -7,6 +7,7 @@ vars:
   # trees would count as the backend's, and their advisories would block PRs for code that never ships.
   SQLC: go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
   OAPI_CODEGEN: go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.2
+  GOTESTSUM: go run gotest.tools/gotestsum@v1.13.0
 
 tasks:
   generate:
@@ -31,12 +32,13 @@ tasks:
       - '{{.GOLANGCI_LINT}} fmt ./...'
 
   test:
-    desc: Unit and integration tests (integration tests need Docker and skip without it, except in CI)
+    desc: Unit and integration tests, with coverage in coverage.out and results in junit.xml (integration tests need Docker and skip without it, except in CI)
     env:
       # Colima and similar VMs expose a host-side socket path that does not exist inside the VM.
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
     cmds:
-      - go test ./... {{.CLI_ARGS}}
+      # -coverpkg: code counts as covered whichever package's tests ran it, not only its own package's.
+      - '{{.GOTESTSUM}} --junitfile junit.xml -- ./... -coverpkg=./... -coverprofile=coverage.out {{.CLI_ARGS}}'
 
   check:
     desc: Everything CI runs for the backend

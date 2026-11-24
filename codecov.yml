@@ -1,0 +1,50 @@
+# Each job of .github/workflows/check.yml uploads its app's coverage and test results under a flag
+# named after the app; the layout is in .github/workflows/README.md. Validate a change with
+# `curl --data-binary @codecov.yml https://codecov.io/validate`.
+
+coverage:
+  status:
+    # Neither blocks anything: auto-merge waits on check.yml's jobs, never on Codecov. The project
+    # status guards the trend, red on a drop of more than 1%; a patch's percentage swings on a handful
+    # of lines, so that one only reports.
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        informational: true
+
+flag_management:
+  individual_flags:
+    - name: backend
+      paths: [apps/backend/]
+    - name: parser
+      paths: [apps/parser/]
+    - name: cli
+      paths: [apps/cli/]
+    - name: web
+      paths: [apps/web/]
+    - name: mailbox
+      paths: [apps/mailbox/]
+
+# The Go profile names files by import path, and the Python reports relative to their app.
+fixes:
+  - "github.com/hsin19/finchie/::"
+  - "src/finchie_parser/::apps/parser/src/finchie_parser/"
+  - "src/finchie_cli/::apps/cli/src/finchie_cli/"
+
+ignore:
+  # Generated (AGENTS.md); the parser's and the web app's generated code is outside what their tests measure.
+  - apps/backend/internal/gen
+  - apps/backend/internal/db/dbq
+  - apps/backend/internal/api/openapi.gen.go
+  # Test helpers
+  - apps/backend/internal/testdb
+  - apps/backend/internal/parsertest
+
+comment:
+  layout: "condensed_header, flags, files"
+  # A PR that moves no covered line, such as a docs change, gets no comment.
+  require_changes: true

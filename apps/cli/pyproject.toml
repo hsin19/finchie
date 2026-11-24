@@ -11,6 +11,7 @@ dependencies = []
 dev = [
     "mypy==2.4.1",
     "pytest>=8.4.2",
+    "pytest-cov>=7.1.0",
     "ruff>=0.14.0",
     # Tests read the backend's openapi.yaml, to build every command of the real contract.
     "pyyaml>=6.0.3",
@@ -29,6 +30,11 @@ packages = ["src/finchie_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source_pkgs = ["finchie_cli"]
+# Paths relative to apps/cli/ instead of the runner's checkout, for Codecov to match to the repository.
+relative_files = true
 
 [tool.ruff]
 line-length = 120

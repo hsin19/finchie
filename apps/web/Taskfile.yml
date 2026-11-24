@@ -24,9 +24,9 @@ tasks:
       - pnpm run typecheck
 
   test:
-    desc: Unit tests
+    desc: Unit tests, with coverage in coverage/lcov.info and results in junit.xml
     cmds:
-      - pnpm test
+      - pnpm test --coverage
 
   build:
     desc: Build the static app into build/

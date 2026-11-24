@@ -1,4 +1,9 @@
+# Coverage and test reports the test tasks write
 .coverage
+coverage.out
+coverage.xml
+coverage/
+junit.xml
 .DS_Store
 
 # Real statements, local env files, anything personal (ADR 0006)

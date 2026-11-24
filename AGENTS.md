@@ -51,6 +51,7 @@ docker compose up -d    # local Postgres for `task backend:run`
 .github/scripts/smoke.sh backend <image>   # the release smoke check, against a local image
 ```
 
+- Each app's `test` task also writes a coverage report and `junit.xml` (both git-ignored), which CI uploads to Codecov per app (`codecov.yml`).
 - CI lives in `.github/workflows/` (layout in its README). `check.yml` is the only definition of the checks and calls Task targets; a new check goes into a Taskfile and into `check.yml`, nowhere else. Releases are `v*` tags.
 
 - Generated code is committed; never edit it by hand:

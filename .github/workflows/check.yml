@@ -8,6 +8,11 @@ on:
   push:
     branches: [main]
   workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        # Absent on a Dependabot PR, which reads the Dependabot secret store rather than the Actions one,
+        # and not passed by release.yml, whose commit main already uploaded. The uploads no-op then.
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -131,6 +136,29 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: task parser:test
 
+      # Gated like the tests, so a failing test still uploads what it measured: on main the coverage is
+      # the baseline every later PR is compared with, and a failure is what the test results are for.
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/parser/coverage.xml
+          flags: parser
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: apps/parser/junit.xml
+          flags: parser
+          disable_search: true
+          fail_ci_if_error: false
+
   cli:
     name: CLI
     runs-on: ubuntu-24.04
@@ -163,6 +191,27 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: task cli:test
 
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/cli/coverage.xml
+          flags: cli
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: apps/cli/junit.xml
+          flags: cli
+          disable_search: true
+          fail_ci_if_error: false
+
   backend:
     name: Backend
     runs-on: ubuntu-24.04
@@ -193,6 +242,27 @@ jobs:
       - name: Tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: task backend:test
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/backend/coverage.out
+          flags: backend
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: apps/backend/junit.xml
+          flags: backend
+          disable_search: true
+          fail_ci_if_error: false
 
   web:
     name: Web
@@ -246,6 +316,27 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: task web:test
 
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/web/coverage/lcov.info
+          flags: web
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: apps/web/junit.xml
+          flags: web
+          disable_search: true
+          fail_ci_if_error: false
+
       - name: Build
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: task web:build
@@ -291,6 +382,27 @@ jobs:
       - name: Tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: task mailbox:test
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/mailbox/coverage/lcov.info
+          flags: mailbox
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: apps/mailbox/junit.xml
+          flags: mailbox
+          disable_search: true
+          fail_ci_if_error: false
 
       # Bundles the Worker without deploying it: deploys are by hand (ADR 0010).
       - name: Build

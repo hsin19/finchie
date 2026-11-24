@@ -16,6 +16,8 @@ concurrency:
 jobs:
   check:
     uses: ./.github/workflows/check.yml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # Needs the dependency graph turned on (see README.md); until then every PR fails here.
   dependency-review:

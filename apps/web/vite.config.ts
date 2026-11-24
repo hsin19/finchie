@@ -1,7 +1,10 @@
 import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vitest/config";
+import {
+    configDefaults,
+    defineConfig,
+} from "vitest/config";
 import { homeScreenIcons } from "./icons.js";
 
 export default defineConfig({
@@ -31,5 +34,16 @@ export default defineConfig({
         expect: { requireAssertions: true },
         include: ["src/**/*.{test,spec}.ts"],
         environment: "node",
+        // Vitest's defaults (in Actions, with annotations on failed tests) and results for Codecov.
+        reporters: [...configDefaults.reporters, "junit"],
+        outputFile: { junit: "junit.xml" },
+        // Measured over every module, components included, so what no test reaches shows as uncovered.
+        coverage: {
+            provider: "v8",
+            include: ["src/**/*.{ts,svelte}"],
+            exclude: ["src/**/*.{test,spec}.ts", "src/**/*.d.ts"],
+            // Paths from the repository root: apps/mailbox has a src/ of its own.
+            reporter: ["text-summary", ["lcovonly", { projectRoot: "../.." }]],
+        },
     },
 });

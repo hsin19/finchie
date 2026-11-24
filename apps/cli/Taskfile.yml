@@ -20,9 +20,9 @@ tasks:
       - uv run ruff format .
 
   test:
-    desc: Unit tests, against a fake API and the backend's openapi.yaml
+    desc: Unit tests, against a fake API and the backend's openapi.yaml, with coverage in coverage.xml and results in junit.xml
     cmds:
-      - uv run pytest {{.CLI_ARGS}}
+      - uv run pytest --cov --cov-report=xml --junitxml=junit.xml {{.CLI_ARGS}}
 
   check:
     desc: Everything CI runs for the CLI

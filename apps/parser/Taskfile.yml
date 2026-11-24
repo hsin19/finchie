@@ -24,9 +24,9 @@ tasks:
       - uv run ruff format .
 
   test:
-    desc: Unit tests (synthetic fixtures only)
+    desc: Unit tests (synthetic fixtures only), with coverage in coverage.xml and results in junit.xml
     cmds:
-      - uv run pytest {{.CLI_ARGS}}
+      - uv run pytest --cov --cov-report=xml --junitxml=junit.xml {{.CLI_ARGS}}
 
   generate:
     desc: Regenerate the Gmail filter from the parsers' sender domains (commit the output, ADR 0014)

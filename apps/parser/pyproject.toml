@@ -32,6 +32,7 @@ dev = [
     # Builds the tests' encrypted PDFs; PDFium, which decrypts, cannot encrypt.
     "pikepdf>=10.17.0",
     "pytest>=8.4.2",
+    "pytest-cov>=7.1.0",
     "ruff>=0.14.0",
 ]
 
@@ -49,6 +50,11 @@ packages = ["src/finchie_parser", "src/finchie"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["real_environment: reads PARSER_* from the environment (tests/conftest.py)"]
+
+[tool.coverage.run]
+source_pkgs = ["finchie_parser"]
+# Paths relative to apps/parser/ instead of the runner's checkout, for Codecov to match to the repository.
+relative_files = true
 
 [tool.ruff]
 line-length = 120
