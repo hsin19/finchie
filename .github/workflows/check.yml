@@ -188,7 +188,8 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: task backend:lint
 
-      # Integration tests start Postgres with testcontainers; the runner has Docker.
+      # Integration tests start Postgres with testcontainers on the runner's Docker; with CI set, they
+      # fail instead of skipping when it is missing.
       - name: Tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: task backend:test

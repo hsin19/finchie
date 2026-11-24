@@ -1,10 +1,11 @@
 // Package testdb starts a throwaway Postgres for integration tests. Tests are skipped when Docker
-// is not available.
+// is not available, except in CI, where they fail.
 package testdb
 
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,7 +34,11 @@ var (
 // Pool returns a migrated database shared by the package's tests, emptied before each test.
 func Pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	// In CI a missing Docker is a broken runner, not a laptop without one: skipping there would leave
+	// a green run that tested nothing of the database, and Dependabot merges on green.
+	if os.Getenv("CI") == "" {
+		testcontainers.SkipIfProviderIsNotHealthy(t)
+	}
 	once.Do(func() { pool, initErr = start() })
 	if initErr != nil {
 		t.Fatalf("start postgres: %v", initErr)

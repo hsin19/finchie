@@ -17,7 +17,7 @@ release.yml  v* tag       → check.yml → build each image on x64 + arm64 runn
 | Generated code is committed | Regenerates proto, sqlc, and oapi-codegen output and the Gmail filter; fails if anything differs from the commit |
 | Parser | ruff, mypy (strict), then pytest on synthetic fixtures. Real statements are never in CI (ADR 0006) |
 | CLI | ruff, mypy (strict), then pytest: against a fake API; every operation of `apps/backend/api/openapi.yaml` has to make a command, and every command and option `.agents/skills/finchie/SKILL.md` names has to exist |
-| Backend | build, golangci-lint, then tests. Integration tests start Postgres with testcontainers on the runner's Docker |
+| Backend | build, golangci-lint, then tests. Integration tests start Postgres with testcontainers on the runner's Docker, and fail rather than skip without it |
 | Web | API types match `openapi.yaml`, dprint, ESLint, svelte-check, Vitest, then the production build |
 | Mailbox | dprint, ESLint, tsc, Vitest, then a bundle with `wrangler deploy --dry-run`. Deploys stay by hand (ADR 0010) |
 | Shell scripts | shellcheck on `.github/scripts/` and `apps/parser/scripts/` |

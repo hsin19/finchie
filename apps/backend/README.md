@@ -141,7 +141,7 @@ task backend:test       # integration tests start Postgres 18 with testcontainer
 task backend:run
 ```
 
-Integration tests need a Docker daemon and are skipped without one. Testcontainers uses `DOCKER_HOST` or the current Docker context; with Colima, `docker context use colima` (or `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`).
+Integration tests need a Docker daemon and are skipped without one, except in CI (`CI` set), where they fail: a runner without Docker must not pass as green. Testcontainers uses `DOCKER_HOST` or the current Docker context; with Colima, `docker context use colima` (or `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`).
 
 Generated code (`internal/gen/`, `internal/db/dbq/`, `internal/api/openapi.gen.go`) is committed; don't edit it. After changing `api/openapi.yaml`, also run `task web:generate` for the web app's types.
 

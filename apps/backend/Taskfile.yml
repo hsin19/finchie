@@ -31,7 +31,7 @@ tasks:
       - '{{.GOLANGCI_LINT}} fmt ./...'
 
   test:
-    desc: Unit and integration tests (integration tests need Docker and skip without it)
+    desc: Unit and integration tests (integration tests need Docker and skip without it, except in CI)
     env:
       # Colima and similar VMs expose a host-side socket path that does not exist inside the VM.
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock

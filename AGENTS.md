@@ -38,7 +38,7 @@ task parser:generate    # regenerate the Gmail filter from the parsers' claims (
 task backend:generate   # regenerate sqlc and oapi-codegen output (commit it)
 task parser:test
 task parser:lint
-task backend:test       # integration tests start Postgres with testcontainers; skipped without Docker
+task backend:test       # integration tests start Postgres with testcontainers; skipped without Docker, except in CI
 task backend:lint
 task web:generate       # regenerate the web app's API types after editing openapi.yaml (commit them)
 task cli:test           # the CLI against a fake API and every operation of openapi.yaml
