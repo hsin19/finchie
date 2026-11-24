@@ -2,6 +2,7 @@ version: '3'
 
 vars:
   IMAGE: ghcr.io/hsin19/finchie-parser
+  REAL_STATEMENTS_DIR: '{{.FINCHIE_REAL_STATEMENTS_DIR | default "../../.local/statements"}}'
 
 tasks:
   install:
@@ -35,9 +36,14 @@ tasks:
   test-real:
     desc: Parse every statement in .local/statements and assert every check balances (ADR 0006); reads ../../.local/parser.env
     env:
-      FINCHIE_REAL_STATEMENTS_DIR: '{{.FINCHIE_REAL_STATEMENTS_DIR | default "../../.local/statements"}}'
+      FINCHIE_REAL_STATEMENTS_DIR: '{{.REAL_STATEMENTS_DIR}}'
     cmds:
       - uv run pytest tests/test_real_statements.py -s {{.CLI_ARGS}}
+
+  sync-real:
+    desc: Download every statement the deployment parsed into .local/statements, for test-real (ADR 0006); uses the CLI's settings
+    cmds:
+      - scripts/sync-real-statements.sh '{{.REAL_STATEMENTS_DIR}}'
 
   check:
     desc: Everything CI runs for the parser

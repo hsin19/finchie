@@ -64,7 +64,7 @@ docker compose up -d    # local Postgres for `task backend:run`
   | `apps/backend/internal/mailfilter/gmail-filters.xml` | the parsers' claims (sender domains, subject terms) | `task parser:generate` |
 
 - `buf breaking` guards the proto contract against incompatible changes once it exists on `main`: CI compares a push to `main` with the commit before it and a PR with `main`; locally `task proto:breaking AGAINST=<ref>` (default `main`).
-- Real-statement regression: put statement e-mails (`.eml`, never bare PDFs: ADR 0014) in `.local/statements/`, the details the banks' password rules use (`PARSER_IDENTITY__*`) in `.local/parser.env`, and run `task parser:test-real`. It asserts that every statement reconciles. These files never leave `.local/` (ADR 0006).
+- Real-statement regression: put statement e-mails (`.eml`, never bare PDFs: ADR 0014) in `.local/statements/`, the details the banks' password rules use (`PARSER_IDENTITY__*`) in `.local/parser.env`, and run `task parser:test-real`. It asserts that every statement reconciles. `task parser:sync-real` fills the folder through the CLI (its settings, `apps/cli/README.md`) with every statement the deployment parsed, fetching only what is not there yet. These files never leave `.local/` (ADR 0006).
 - Integration tests and local Compose need a Docker daemon. On Colima, testcontainers needs `DOCKER_HOST` or `docker context use colima`; the backend Taskfile sets the socket override it also needs.
 - Changed behavior needs a test. When fixing a bug, first make sure the new test fails without the fix.
 

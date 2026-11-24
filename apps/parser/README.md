@@ -109,6 +109,7 @@ Environment variables, prefix `PARSER_`, nested keys split by `__`; nothing else
 
 ```sh
 task parser:test        # synthetic fixtures
+task parser:sync-real   # fetch every statement the deployment parsed into .local/statements, through the CLI
 task parser:test-real   # every .eml in .local/statements must balance every check, with one for every parser
 task parser:lint        # ruff, and mypy in strict mode
 task parser:run         # gRPC on :50051, with health checking and reflection

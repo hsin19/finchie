@@ -58,7 +58,7 @@ tasks:
   shellcheck:
     desc: Lint the repository's shell scripts
     cmds:
-      - shellcheck .github/scripts/*.sh
+      - shellcheck .github/scripts/*.sh apps/parser/scripts/*.sh
 
   check:
     desc: Everything CI runs, except the generated-code check (it needs a clean working tree)

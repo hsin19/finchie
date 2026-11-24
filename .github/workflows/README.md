@@ -20,7 +20,7 @@ release.yml  v* tag       → check.yml → build each image on x64 + arm64 runn
 | Backend | build, golangci-lint, then tests. Integration tests start Postgres with testcontainers on the runner's Docker |
 | Web | API types match `openapi.yaml`, dprint, ESLint, svelte-check, Vitest, then the production build |
 | Mailbox | dprint, ESLint, tsc, Vitest, then a bundle with `wrangler deploy --dry-run`. Deploys stay by hand (ADR 0010) |
-| Shell scripts | shellcheck on `.github/scripts/` |
+| Shell scripts | shellcheck on `.github/scripts/` and `apps/parser/scripts/` |
 
 Within a job, each check is its own step gated on `!cancelled()`, so one run shows every failure instead of stopping at the first.
 
