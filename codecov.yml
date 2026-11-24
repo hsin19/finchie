@@ -1,6 +1,6 @@
 # Each job of .github/workflows/check.yml uploads its app's coverage and test results under a flag
-# named after the app; the layout is in .github/workflows/README.md. Validate a change with
-# `curl --data-binary @codecov.yml https://codecov.io/validate`.
+# named after the app (layout in .github/workflows/README.md); the components below slice the merged
+# coverage by path. Validate a change with `curl --data-binary @codecov.yml https://codecov.io/validate`.
 
 coverage:
   status:
@@ -16,17 +16,29 @@ coverage:
         target: auto
         informational: true
 
-flag_management:
-  individual_flags:
-    - name: backend
+# Flags stay on the uploads: test results filter only by flag, and only a flag can carry an app's
+# coverage forward should check.yml ever skip unchanged apps. Components cut finer than an upload.
+component_management:
+  individual_components:
+    - component_id: backend
       paths: [apps/backend/]
-    - name: parser
+    - component_id: parser
       paths: [apps/parser/]
-    - name: cli
+    # The core of the parser, also counted in `parser`: every bank's statements are read here.
+    - component_id: parser-banks
+      name: parser (bank parsers)
+      paths: [apps/parser/src/finchie_parser/parsers/]
+    - component_id: cli
       paths: [apps/cli/]
-    - name: web
-      paths: [apps/web/]
-    - name: mailbox
+    # The web app in two: its logic is unit-tested, while no test renders a component yet. Together
+    # they would hide a drop in the one behind the other.
+    - component_id: web-logic
+      name: web (logic)
+      paths: ['^apps/web/.*\.ts$']
+    - component_id: web-ui
+      name: web (components)
+      paths: ['^apps/web/.*\.svelte$']
+    - component_id: mailbox
       paths: [apps/mailbox/]
 
 # The Go profile names files by import path, and the Python reports relative to their app.
@@ -45,6 +57,6 @@ ignore:
   - apps/backend/internal/parsertest
 
 comment:
-  layout: "condensed_header, flags, files"
+  layout: "condensed_header, components, files"
   # A PR that moves no covered line, such as a docs change, gets no comment.
   require_changes: true
