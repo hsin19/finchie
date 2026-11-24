@@ -2,34 +2,28 @@
 
 Finchie = Finance + Finch
 
-A self-hosted personal finance platform. It turns bank and credit card statements into a ledger and, later, tracks investments, so you can see where your money goes and where you stand.
-
-> **V2 is under construction on `main`.** V1 (a Python batch job plus a Go API on MongoDB) is frozen at tag [`v1.0.0`](https://github.com/hsin19/finchie/tree/v1.0.0) and no longer on `main`.
+A self-hosted personal finance platform. It turns bank and credit card statements into a ledger and tracks investments, so you can see where your money goes and where you stand.
 
 ## Components
 
 **Apps** (`apps/`, one folder each, with its own toolchain and README)
 
-| Path | What it is | Status |
-|---|---|---|
-| [`apps/backend`](apps/backend/) | Go. The only public service: API, document ingestion, background jobs, and the web app (embedded). Owns the database. | ✅ Upload, parse, and read statements |
-| [`apps/parser`](apps/parser/) | Python. Stateless parser behind gRPC: a raw statement goes in, structured data comes out. Internal only. | ✅ 8 institutions: card bills, deposit and securities statements |
-| [`apps/mailbox`](apps/mailbox/) | Cloudflare Email Worker. Takes statements Gmail forwards to an address on Email Routing and uploads them to the backend. Deployed by hand | ✅ Automatic ingestion |
-| [`apps/cli`](apps/cli/) | Python. The API as commands for AI agents and scripts, as the web app is for the owner: built at every run from the contract the backend serves, run with uvx, nothing installed | ✅ Reads the whole ledger through the agents' own service token |
-| [`apps/web`](apps/web/) | SvelteKit single-page app. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend) | ✅ Overview (what needs a look, bills, net worth, a year of income and spending), notifications, pushed to a phone, statements, transactions, accounts with the investments' return, upload; installs to a home screen |
+| Path | What it is |
+|---|---|
+| [`apps/backend`](apps/backend/) | Go. The only public service: API, document ingestion, background jobs, and the web app (embedded). Owns the database. |
+| [`apps/parser`](apps/parser/) | Python. Stateless parser behind gRPC: a raw statement goes in, structured data comes out. Internal only. |
+| [`apps/mailbox`](apps/mailbox/) | Cloudflare Email Worker. Takes statements Gmail forwards to an address on Email Routing and uploads them to the backend. Deployed by hand. |
+| [`apps/cli`](apps/cli/) | Python. The API as commands for AI agents and scripts, as the web app is for the owner: built at every run from the contract the backend serves, run with uvx, nothing installed. Reads the whole ledger through the agents' own service token. |
+| [`apps/web`](apps/web/) | SvelteKit single-page app: an overview (what needs a look, bills, net worth, a year of income and spending), notifications pushed to a phone, statements, transactions, accounts with the investments' return, and upload; installs to a home screen. Built into the backend binary today; an app of its own, so it could also be served on its own (say, by a proxy in front of the backend). |
 
 **Shared**
 
-| Path | What it is | Status |
-|---|---|---|
-| [`proto/`](proto/) | gRPC contracts, managed with buf. Generated code is committed inside each app. | ✅ |
-| [`.agents/skills/`](.agents/skills/) | Agent skills: [`finchie`](.agents/skills/finchie/SKILL.md) teaches an agent the CLI and the ledger's pitfalls. Agents in this repository find it (`.claude/skills` links here for Claude Code); elsewhere, install it with `npx skills add hsin19/finchie --skill finchie -g` | ✅ |
+| Path | What it is |
+|---|---|
+| [`proto/`](proto/) | gRPC contracts, managed with buf. Generated code is committed inside each app. |
+| [`.agents/skills/`](.agents/skills/) | Agent skills: [`finchie`](.agents/skills/finchie/SKILL.md) teaches an agent the CLI and the ledger's pitfalls. Agents in this repository find it (`.claude/skills` links here for Claude Code); elsewhere, install it with `npx skills add hsin19/finchie --skill finchie -g`. |
 
 Design decisions and their reasons are in [`docs/adr/`](docs/adr/): 0001 rewrite as V2, 0002 architecture, 0003 tech stack, 0004 money and dates, 0005 ingestion pipeline, 0006 test data, 0007 web app, 0008 authentication, 0009 transaction parents, 0010 mail ingestion, 0011 telemetry, 0012 reading documents, 0013 accounts, 0014 recognizing statements, 0015 exchange rates, 0016 transfer links, 0017 securities accounts, 0018 exchange accounts, 0019 points, 0020 units and prices, 0021 statements as account reports, 0022 liability accounts, 0023 net worth over time, 0024 browser telemetry.
-
-## Why V2
-
-V1 stalled on Gmail OAuth (7-day refresh tokens unless the app passes Google's verification), its parser returned wrong data without noticing, money was `float64`, and the deployment plan (Azure + GitHub Pages) no longer matched where things run. The scope also grew: Finchie now absorbs InTheGreenYet, an investment tracker on Notion that was too slow. Details in [ADR 0001](docs/adr/0001-rewrite-as-v2.md).
 
 ## Architecture
 
