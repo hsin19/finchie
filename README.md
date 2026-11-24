@@ -77,7 +77,7 @@ Local configuration and secrets go in `.local/` (gitignored):
 |---|---|
 | `.local/backend.env` | `BACKEND_DATABASE_URL=postgres://finchie:finchie@localhost:5432/finchie?sslmode=disable` |
 | `.local/parser.env` | `PARSER_IDENTITY__NATIONAL_ID=…` and `PARSER_IDENTITY__BIRTH_DATE=…`: the details the banks' PDF password rules use (ADR 0014) |
-| `.local/statements/` | Real statement e-mails (`.eml`) for `task parser:test-real` |
+| `.local/statements/` | Real statement e-mails (`.eml`) for `task parser:test-real`; `task parser:sync-real` fetches every one the deployment parsed |
 
 `docker compose --profile app up --build` runs Postgres, the parser, and the backend (web app included) as containers (needs BuildKit, i.e. `docker buildx`). See each service's README for every variable it reads.
 

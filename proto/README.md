@@ -4,7 +4,7 @@ gRPC contracts, managed with [buf](https://buf.build/) (`buf.yaml` and `buf.gen.
 
 | Package | Server | Client |
 |---|---|---|
-| `finchie.parser.v1` | `apps/parser` | `apps/backend` |
+| `finchie.parser.v2` | `apps/parser` | `apps/backend` |
 
 ## Workflow
 
@@ -18,4 +18,4 @@ Generated code is committed: Go in `apps/backend/internal/gen/`, Python in `apps
 ## Conventions
 
 - Amounts are `google.type.Decimal`, dates on statements are `google.type.Date` (ADR 0004).
-- A breaking change means a new package version (`v2`), not an edit to `v1`.
+- A breaking change means a new package version (`v3`), not an edit to `v2`.

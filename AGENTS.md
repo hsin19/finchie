@@ -4,7 +4,7 @@ Rules and conventions for coding agents working in this repository. The project 
 
 ## Project at a glance
 
-Self-hosted personal finance platform. V2 is being built on `main` (ADR 0001): a Go backend that owns the database and the API, a stateless Python parser behind gRPC (ADR 0002), and a SvelteKit web app embedded in the backend (ADR 0007).
+Self-hosted personal finance platform: a Go backend that owns the database and the API, a stateless Python parser behind gRPC (ADR 0002), and a SvelteKit web app embedded in the backend (ADR 0007).
 
 | Path | Contents |
 |---|---|
@@ -17,7 +17,7 @@ Self-hosted personal finance platform. V2 is being built on `main` (ADR 0001): a
 | `.agents/skills/finchie/` | The agent skill for the CLI (`.claude/skills` links to `.agents/skills`, for Claude Code). Keep it to what `--help` cannot say; `task cli:test` fails on a command or option it names that the contract lacks |
 | `docs/adr/` | Design decisions |
 
-V1 lives only at tag `v1.0.0`; look there for its code (for example the IMAP fetcher), not on `main`.
+V1, before the rewrite (ADR 0001), lives only at tag `v1.0.0`; look there for its code (for example the IMAP fetcher), not on `main`.
 
 ## Product principle: no work for the owner
 
@@ -99,6 +99,9 @@ None of these are under version control. Don't add them, and don't print their c
 | Path / variable | Contents |
 |---|---|
 | `.local/` | Real statements, local env files, anything personal |
+| `PARSER_IDENTITY__*` | The owner's details the banks' password rules use, such as the national ID (ADR 0014). Check whether one is set by name only |
 | `PARSER_PDF_PASSWORDS__<INSTITUTION>` | PDF passwords for the parser. Check whether one is set by name only |
+| `PARSER_TOKEN`, `BACKEND_PARSER_TOKEN` | The secret the backend sends the parser |
 | `BACKEND_DATABASE_URL` | Postgres connection string |
 | `BACKEND_MAX_*`, `BACKEND_BINANCE_*`, `BACKEND_BITGET_*` | Exchanges' read-only API keys (ADR 0018). Check whether one is set by name only |
+| `~/.config/finchie/config.toml`, `FINCHIE_CLIENT_SECRET` | The CLI's service token, which reads the whole ledger |
