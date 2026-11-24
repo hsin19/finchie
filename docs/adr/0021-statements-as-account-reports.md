@@ -14,6 +14,8 @@ Check                  name, unit, computed, stated, balanced
 CardBill               due_date, currency, total_due
 ```
 
+(`AccountReport` has since gained `lapse_rules[]`, each points program's lapse rule: ADR 0019.)
+
 - **One shape.** The backend already turned the three kinds into this shape before storing them; the contract now carries it, so there is one converter instead of three, and a new source (a loan statement, ADR 0022) is one more `AccountReport.kind`, not a new message.
 - **Amounts as printed, signs as the account sees them.** A balance is what the statement prints for the account in the unit. A line's amount is as before: a card bill's charges positive and credits negative, as printed; a deposit line's money in positive; a trade's shares bought positive and sold negative; points added positive. The parser reads them off the statement; what each sign means to the owner is the backend's (`owner_flow`, ADR 0013).
 - **What a statement says about a day is a balance.** A deposit statement's opening balance is a balance on the day before its period; a holding a balance on the holdings date; a points program's closing a balance on the closing date. The parser places each on its day; the backend no longer derives them.

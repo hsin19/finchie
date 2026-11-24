@@ -34,7 +34,7 @@ A unit has been text on every row that holds an amount (ADR 0013), and three tab
 - `source` says where a price came from, for showing it and for clearing the owner's; it never decides which price counts.
 - **A balance's worth** in NT$ is its amount at its unit's newest price. When that price's quote unit is not NT$, the quote unit's own newest price in NT$ converts it: one step, never a chain. A unit without a price, or priced in a unit that has none, has no worth.
 - **Exact**: a price is kept as its source gives it, both amounts (ADR 0004). Nothing is divided until a worth is worked out, which is then rounded to the cent. Fawaz prints how much of a unit one NT$ buys, whose inverse is rarely a finite decimal; exchanges price coins in USDT.
-- **One per unit, source, and day**: a later write the same day replaces the day's, so history stays a price a day for whoever needs it later, such as net worth over time. Clearing the owner's value of a unit removes the owner's prices of it.
+- **One per unit, source, and day**: a later write the same day replaces the day's, so history stays a price a day for whoever needs it later, such as net worth over time. Clearing the owner's value of a unit removes the owner's prices of it. (Since migration 00019 they are kept, marked withdrawn, and still count for the days before: ADR 0023.)
 
 ### Collisions
 

@@ -10,7 +10,7 @@ browser ── Cloudflare Access ── Tunnel ──▶ backend (Go) ── gRP
                                              └── Postgres (shared homelab instance, own database and role)
 ```
 
-- **backend** is the only public service. It serves the API and, later, the web app's static files; it ingests documents, runs background jobs, and owns the database and its schema.
+- **backend** is the only public service. It serves the API and, later, the web app's static files (since ADR 0007); it ingests documents, runs background jobs, and owns the database and its schema.
 - **parser** is internal (Compose network only) and stateless: a document goes in, structured data comes out. It has no database, no queue, and no storage.
 - **web** is a TypeScript app built to static files and served by the backend.
 
@@ -31,8 +31,8 @@ Parsing one statement takes under a second, or a few seconds with OCR, and volum
 There is one user and no independent scaling or team boundary to justify them. Each extra service costs a deployment, monitoring, and another contract. New ingestion paths are adapters that end in the backend's upload API:
 
 1. Manual upload (first).
-2. A local backfill tool that uploads old statements fetched over IMAP.
-3. Later: a Gmail filter forwards statements to a Cloudflare Email Worker, which uploads them. No Gmail credential lives on any server.
+2. A local backfill tool that uploads old statements fetched over IMAP. (Never built: a Takeout export of the Gmail filter's label backfills instead, ADR 0014.)
+3. Later: a Gmail filter forwards statements to a Cloudflare Email Worker, which uploads them. No Gmail credential lives on any server. (Built with ADR 0010.)
 
 Investment providers (exchange APIs) become backend jobs. They need the homelab's residential IP anyway, so they no longer go through a relay.
 

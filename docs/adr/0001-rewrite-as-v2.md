@@ -23,7 +23,7 @@ V1 was a Python batch job (`statement-fetcher`) that fetched Gmail, parsed state
 - The overall shape: Python for documents, Go for the API, TypeScript for the web app.
 - The parser's registry of per-bank processors that each answer "can I handle this?" and "extract it".
 - ROC (Minguo) year handling.
-- The IMAP approach, for a future local tool that backfills old statements by uploading them to V2 (V1's fetcher is at the tag).
+- The IMAP approach, for a future local tool that backfills old statements by uploading them to V2 (V1's fetcher is at the tag). (The tool was never built: a Takeout export of the Gmail filter's label backfills instead, ADR 0014.)
 - Tool choices: uv and ruff for Python, golangci-lint for Go, Task as the command runner.
 
 ## Consequences

@@ -32,14 +32,14 @@ Each parser declares the sender domains and subject of its e-mail; the subject a
 
 ### Passwords come from personal details, by each bank's rule
 
-Banks build statement passwords from details they already hold, and say how in the e-mail. The national ID with a capital letter is the rule E.SUN, Taishin, CTBC, Fubon, and Next Bank state for their deposit statements, Shin Kong Securities for its statements, and Cathay United for its card bill. The rule is public and lives in the parser's code. The details are secrets and live in the parser's environment only (ADR 0006).
+Banks build statement passwords from details they already hold, and say how in the e-mail. The national ID with a capital letter is the rule E.SUN, Taishin, CTBC, Fubon, and Next Bank state for their deposit statements, Shin Kong Securities for its statements, and Cathay United for its card bill. (HSBC states it for its card bill too, and Cathay United for its e-passbook.) The rule is public and lives in the parser's code. The details are secrets and live in the parser's environment only (ADR 0006).
 
 | Variable | Contents |
 |---|---|
 | `PARSER_IDENTITY__NATIONAL_ID` | National ID (身分證字號) |
 | `PARSER_PDF_PASSWORDS__<INSTITUTION>` | Only for a bank whose password the owner changed. Tried before the rule, which still opens the statements from before the change |
 
-A detail such as a birth date or a mobile number is added when a parser first needs it. A new bank whose rule uses details already set needs no configuration. Each rule cites where the bank states it; a rule the bank's e-mail does not state is marked as such.
+A detail such as a birth date or a mobile number is added when a parser first needs it. (The birth date came with Taishin's card bill: `PARSER_IDENTITY__BIRTH_DATE`, its month and day after the national ID's last two characters.) A new bank whose rule uses details already set needs no configuration. Each rule cites where the bank states it; a rule the bank's e-mail does not state is marked as such.
 
 ### The Gmail filter comes from the parsers
 
@@ -67,7 +67,7 @@ It is a filter of its own, next to whatever filters the owner keeps for themselv
 
 - `StatementParser` gains sender and subject patterns (subject terms, which Gmail can search for) and a password rule; `filename_pattern` stays, now only choosing among an e-mail's attachments. Unwrapping goes where e-mails are read (`documents.py`), used by both parsing and previews.
 - Previews open PDFs with the passwords of the parser that claims the e-mail. A PDF in an e-mail nothing claims is shown as received, marked locked.
-- Deployments set `PARSER_IDENTITY__NATIONAL_ID`. A `PARSER_PDF_PASSWORDS__<INSTITUTION>` that only held the national ID can go; one that holds a password the owner chose stays, now used for its bank only.
+- Deployments set `PARSER_IDENTITY__NATIONAL_ID` (and `PARSER_IDENTITY__BIRTH_DATE`, for Taishin's card bill). A `PARSER_PDF_PASSWORDS__<INSTITUTION>` that only held the national ID can go; one that holds a password the owner chose stays, now used for its bank only.
 - The real-statement test (ADR 0006) takes `.eml` files only. The bare PDFs kept for it need their e-mails, fetched once from Gmail like the deployment's.
 - The backend gains `BACKEND_MAILBOX_ADDRESS` and the filter download; the proto does not change.
 - When this lands: notes in ADRs 0006 and 0012 next to their sentences on passwords and bare PDFs and in ADR 0010 next to its filter, and updates to the root README (uploads, variables), `AGENTS.md` (real-statement test, generated code), the parser's README (variables), and the mailbox's README (filter setup).

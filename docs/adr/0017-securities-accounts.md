@@ -50,8 +50,8 @@ The settlement account is at Shin Kong Bank, whose statements Finchie does not r
 
 ## Consequences
 
-- `ParseDocumentResponse` gains `SecuritiesStatement securities_statement = 6` next to the card and deposit statements.
-- `statements.kind` gains `securities`, transactions gain the kinds `buy` and `sell`, and the backend gains the `trades` and `quotes` tables and the quotes job. It calls `openapi.twse.com.tw` and `www.tpex.org.tw`.
+- `ParseDocumentResponse` gains `SecuritiesStatement securities_statement = 6` next to the card and deposit statements. (Replaced by ADR 0021's `finchie.parser.v2`.)
+- `statements.kind` gains `securities`, transactions gain the kinds `buy` and `sell`, and the backend gains the `trades` and `quotes` tables and the quotes job. (`quotes` became prices of each security's unit and was dropped in migration 00011, ADR 0020.) It calls `openapi.twse.com.tw` and `www.tpex.org.tw`.
 - The Gmail filter is generated from the parsers' claims (ADR 0014), so once re-imported it forwards the monthly statements, and the daily reports stay out by their subject. Statements already in Gmail come in by applying the filter to matching conversations and exporting the label with Takeout.
 - The accounts page lists securities accounts with their holdings and worth. The transactions page shows trades in shares.
 - A corporate action shows as a gap until some source reports it.
