@@ -77,6 +77,7 @@ docker compose up -d    # local Postgres for `task backend:run`
 - The parser stays stateless: no database, no files written outside temp space, no network calls. Anything stateful belongs in the backend.
 - gRPC status codes carry the retry decision (ADR 0005). A parser that cannot handle a document returns `UNIMPLEMENTED`; a wrong password is `FAILED_PRECONDITION`.
 - Each bank parser reconciles its own statements. Never "fix" a mismatch by adjusting numbers; report it.
+- Parser edge cases are fixed when a real statement shows them, not in advance. Format guesses from a review or from reading the code (wrapped lines, row types not seen yet, category fallbacks) wait until a real statement fails to reconcile or to parse; then fix it with that statement as the example: fix the parser, add a synthetic fixture test, run `task parser:test-real` to see the other statements still pass, and re-parse the statement (`r` on its page). Raise a case up front only when it would change data without failing reconciliation.
 - Python: type hints everywhere, checked by mypy (strict); ruff for lint and format, pytest. Test names describe behavior (`test_taishin_splits_wrapped_merchant_lines`).
 - Go: `gofmt`, golangci-lint, errors wrapped with `%w`, `context.Context` first. SQL lives in `.sql` files for sqlc, not in Go strings.
 - Schema changes are new goose migrations; never edit an applied one.
