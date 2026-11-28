@@ -53,8 +53,27 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// MigrateTo brings Finchie's schema up to a version, for a test of what a migration does to the rows an
-// older schema held. Migrate is the only way the backend migrates.
+// SchemaVersion returns the highest goose migration version applied to pool.
+func SchemaVersion(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	files, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		return 0, fmt.Errorf("migrations: %w", err)
+	}
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer func() { _ = sqlDB.Close() }() // only wraps the pool, which the caller owns
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, files)
+	if err != nil {
+		return 0, fmt.Errorf("migrations: %w", err)
+	}
+	current, _, err := provider.GetVersions(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("schema version: %w", err)
+	}
+	return current, nil
+}
+
+// MigrateTo brings Finchie's schema up to a version, for restoring an older snapshot or testing what
+// a migration does to the rows an older schema held.
 func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 	files, err := fs.Sub(migrations, "migrations")
 	if err != nil {
@@ -75,6 +94,9 @@ func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 	}
 	if current > newest {
 		return fmt.Errorf("%w: the database is at version %d, this backend knows up to %d", ErrSchemaNewer, current, newest)
+	}
+	if version != goose.MaxVersion && version > newest {
+		return fmt.Errorf("%w: target version %d is newer than this backend's %d", ErrSchemaNewer, version, newest)
 	}
 	if _, err := provider.UpTo(ctx, version); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)

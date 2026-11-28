@@ -19,6 +19,7 @@ Dependencies point inward, toward `domain`; nothing in it knows the database, HT
 | `internal/telemetry` | Traces, metrics, and logs over OTLP (ADR 0011) |
 | `internal/parsertest` | Builders of parser responses for tests in any package |
 | `internal/numeric`, `internal/taipei` | Exact decimals to and from NUMERIC (ADR 0004); Taipei's dates |
+| `internal/backup` | Snapshot export and restore with deduplicated document originals (ADR 0025), backed by `/backend backup` and `/backend restore` |
 | `internal/db` | Migrations, and sqlc's queries in `dbq`, whose kind columns carry the domain's types |
 
 ## API
@@ -150,3 +151,7 @@ The web app is embedded from `internal/web/dist/` (gitignored apart from `.gitke
 ## Image
 
 `Dockerfile`: builds `apps/web/` in a Node stage, embeds it, then a static binary on distroless, uid 1654. The build context is the repository root (`docker build -f apps/backend/Dockerfile .`, or `task backend:image`); `Dockerfile.dockerignore` limits it to `apps/web/` and `apps/backend/`. The container healthcheck runs `/backend healthcheck`.
+
+## Backup and restore
+
+`/backend backup --out <snapshot-dir> --blobs <blobs-dir>` and `/backend restore --in <snapshot-dir> --blobs <blobs-dir>` (ADR 0025) read `BACKEND_DATABASE_URL` (or `--database-url`). Backup exports every application table into `<snapshot-dir>` with `documents.content` extracted once per SHA-256 into `<blobs-dir>`, and writes `<snapshot-dir>/blobs.sha256` so a deployment can sync originals separately from daily snapshots. Blobs and dumps are synced before `manifest.json` is written, and a blob whose size no longer matches the database is extracted again. Restore verifies every blob before touching the database, refuses a non-empty database, migrates to the snapshot's schema version, and restores all tables, originals, sequences, and foreign keys in one transaction. Run it before the backend first starts on the database. If it fails after migrating, the `backup_restore_pending` table it leaves lets `restore` run again on the same database, and makes `backup` refuse it.

@@ -4,7 +4,7 @@
 
 ### Originals are the source of truth
 
-Every uploaded file is stored as-is in Postgres (`documents`, `BYTEA`) with its SHA-256, which is unique. Uploading the same bytes again returns the existing document. Everything derived from a document (statements, transactions) can be deleted and rebuilt by parsing it again. A statement is a few hundred KB to about 1.5 MB and arrives about once a month per bank, so the database stays small, and one `pg_dump` backs up everything.
+Every uploaded file is stored as-is in Postgres (`documents`, `BYTEA`) with its SHA-256, which is unique. Uploading the same bytes again returns the existing document. Everything derived from a document (statements, transactions) can be deleted and rebuilt by parsing it again. A statement is a few hundred KB to about 1.5 MB and arrives about once a month per bank, so the database stays small, and one `pg_dump` backs up everything (for offsite backups without repeating unchanged originals every day, see ADR 0025).
 
 ### Flow
 

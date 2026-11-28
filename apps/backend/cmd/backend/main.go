@@ -45,16 +45,31 @@ var version = "dev"
 const jobStopTimeout = 30 * time.Second
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
-		addr := os.Getenv("BACKEND_HTTP_ADDR")
-		if addr == "" {
-			addr = ":8080"
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "healthcheck":
+			addr := os.Getenv("BACKEND_HTTP_ADDR")
+			if addr == "" {
+				addr = ":8080"
+			}
+			if err := healthcheck(addr); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		case "backup":
+			if err := runBackup(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		case "restore":
+			if err := runRestore(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		}
-		if err := healthcheck(addr); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		return
 	}
 	if err := run(); err != nil {
 		slog.Error("backend stopped", "error", err)
